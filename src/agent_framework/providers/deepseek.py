@@ -18,7 +18,7 @@ from agent_framework.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
-# 思考等级到 thinking_budget 的映射
+# 思考等级到 budget_tokens 的映射
 _THINKING_BUDGET_MAP = {
     "low": 1024,
     "medium": 4096,
@@ -102,13 +102,15 @@ class DeepSeekLLM(BaseLLM):
             request_params["tool_choice"] = validated["tool_choice"]
 
         # extra_body: 思考模式
+        # DeepSeek 使用 extra_body.thinking = {"type": "enabled", "budget_tokens": N}
         extra_body = {}
         if validated.get("enable_thinking"):
-            extra_body["thinking"] = True
             thinking_level = validated.get("thinking_level", "medium")
-            extra_body["thinking_budget"] = _THINKING_BUDGET_MAP.get(
-                thinking_level, 4096
-            )
+            budget = _THINKING_BUDGET_MAP.get(thinking_level, 4096)
+            extra_body["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budget,
+            }
         if extra_body:
             request_params["extra_body"] = extra_body
 
