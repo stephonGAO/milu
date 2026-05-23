@@ -11,7 +11,17 @@ from agent_framework.exceptions import (
 )
 from agent_framework.models.message import Message, MessageRole
 from agent_framework.models.response import StreamChunk, TokenUsage
+from agent_framework.models.events import (
+    AgentEvent,
+    TextDelta,
+    ReasoningDelta,
+    ToolCallStart,
+    ToolResult,
+    AgentDone,
+    AgentError,
+)
 from agent_framework.providers import ModelRegistry
+from agent_framework.agent import Agent, AgentConfig
 
 __all__ = [
     # Exceptions
@@ -27,6 +37,17 @@ __all__ = [
     "MessageRole",
     "StreamChunk",
     "TokenUsage",
+    # Agent Events
+    "AgentEvent",
+    "TextDelta",
+    "ReasoningDelta",
+    "ToolCallStart",
+    "ToolResult",
+    "AgentDone",
+    "AgentError",
+    # Agent
+    "Agent",
+    "AgentConfig",
     # Providers
     "ModelRegistry",
 ]
