@@ -46,8 +46,13 @@ class ModelRegistry:
         return list(cls._providers.keys())
 
 
-# 导入所有厂商模块以触发自动注册（后续Task中创建的厂商模块将在此处导入）
-# from agent_framework.providers import qwen, kimi, glm, deepseek, minimax, doubao
+# 导入所有厂商模块以触发自动注册
+from agent_framework.providers import qwen
+from agent_framework.providers import kimi
+from agent_framework.providers import glm
+from agent_framework.providers import deepseek
+from agent_framework.providers import minimax
+from agent_framework.providers import doubao
 
 __all__ = [
     "ModelRegistry",
