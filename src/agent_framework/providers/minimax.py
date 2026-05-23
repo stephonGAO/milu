@@ -73,7 +73,6 @@ class MiniMaxLLM(BaseLLM):
         MiniMax 遵循标准 OpenAI 格式，无特殊参数映射。
         不支持 web_search 和 thinking 相关参数。
         """
-        validated = self._validate_params(kwargs)
         client = self._get_client()
 
         request_params = {
@@ -83,11 +82,18 @@ class MiniMaxLLM(BaseLLM):
             "stream_options": {"include_usage": True},
         }
 
-        # 基础参数
+        #=================参数解释====================#
+        # 注释：
+        # 所有从父类获得的参数加上运行时用户实际传过来的参数kwargs大集合。
+        validated = self._validate_params(kwargs)
+        # 注释：
+        # 保留基础参数，过滤多余公共参数
+        # 从父类已经继承了非常多的公共的参数包括默认值，但是未必是本模型能用的，所以要在这里过滤掉不能用的
         for key in ("temperature", "top_p", "max_tokens", "stop",
                      "frequency_penalty", "presence_penalty"):
             if key in validated:
                 request_params[key] = validated[key]
+        #============================================#
 
         # 函数调用
         if "tools" in validated:

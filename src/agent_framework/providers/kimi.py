@@ -72,7 +72,7 @@ class KimiLLM(BaseLLM):
             enable_thinking (bool) → extra_body.reasoning_effort = thinking_level 值
             thinking_level (str) → extra_body.reasoning_effort（low/medium/high，默认medium）
         """
-        validated = self._validate_params(kwargs)
+        
         client = self._get_client()
 
         request_params = {
@@ -82,11 +82,18 @@ class KimiLLM(BaseLLM):
             "stream_options": {"include_usage": True},
         }
 
-        # 基础参数
+        #=================参数解释====================#
+        # 注释：
+        # 所有从父类获得的参数加上运行时用户实际传过来的参数kwargs大集合。
+        validated = self._validate_params(kwargs)
+        # 注释：
+        # 保留基础参数，过滤多余公共参数
+        # 从父类已经继承了非常多的公共的参数包括默认值，但是未必是本模型能用的，所以要在这里过滤掉不能用的
         for key in ("temperature", "top_p", "max_tokens", "stop",
                      "frequency_penalty", "presence_penalty"):
             if key in validated:
                 request_params[key] = validated[key]
+        #============================================#
 
         # 函数调用
         if "tools" in validated:
@@ -104,10 +111,13 @@ class KimiLLM(BaseLLM):
                 "function": {"name": "$web_search"},
             })
             request_params["tools"] = tools
-        if validated.get("enable_thinking"):
+        if "enable_thinking" in validated and validated["enable_thinking"]:
             # Kimi使用 reasoning_effort 映射 thinking_level
             thinking_level = validated.get("thinking_level", "medium")
             extra_body["reasoning_effort"] = thinking_level
+        elif "enable_thinking" in validated and not validated["enable_thinking"]:
+            # 显式关闭思考
+            extra_body["reasoning_effort"] = "none"
         if extra_body:
             request_params["extra_body"] = extra_body
 

@@ -130,6 +130,8 @@ class BaseLLM(ABC):
             )
         return self._client
 
+    # 注释：
+    # 这里是构造时候可能会用到的默认参数，实际用到多少是在实现的时候的chat运行的时候
     def get_available_params(self) -> dict[str, dict]:
         """
         返回当前模型可用的参数及其元信息。
@@ -159,11 +161,24 @@ class BaseLLM(ABC):
         available_names = self._get_available_param_names()
         return {name: info for name, info in all_params.items() if name in available_names}
 
+    
+    # 注释：
+    # 用户在构建实例（因为要兼容多平台所以多这一步，正常原生api只在运行时传入参数）的时候，
+    # 或者chat运行的时候，对传入的参数做校验，
+    # 因为是多供应商平台，所以如果是真实存在的参数，就验证通过放在validated中生效，
+    # 如果不是这个供应商实际可用的参数就丢弃不生效。
+    # chat运行时序晚于构建llm实例，所有运行时参数可以覆盖构造时参数。
+    # 所有大模型在chat实现中必须有这一步。
     def _validate_params(self, params: dict) -> dict:
-        """校验并过滤参数：移除不支持的参数并记录警告。"""
-        available = self._get_available_param_names()
+        """校验并过滤参数：合并构造时默认值，移除不支持的参数并记录警告。
+
+        优先级：chat() 调用时传入的参数 > 构造时传入的参数（_extra_kwargs）
+        """
+        # 构造时的 kwargs 作为默认值，调用chat时附带的 params 可覆盖
+        merged = {**self._extra_kwargs, **params}#chat运行 - 覆盖 ->构造
+        available = self._get_available_param_names()#获取真实可用的参数
         validated = {}
-        for key, value in params.items():
+        for key, value in merged.items():
             if key in available:
                 validated[key] = value
             else:

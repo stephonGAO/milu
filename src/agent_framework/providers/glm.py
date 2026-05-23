@@ -72,7 +72,7 @@ class GLMLLM(BaseLLM):
             enable_thinking (bool) → extra_body.enable_thinking=True
             thinking_level → GLM不支持等级设置，静默忽略
         """
-        validated = self._validate_params(kwargs)
+        
         client = self._get_client()
 
         request_params = {
@@ -82,11 +82,18 @@ class GLMLLM(BaseLLM):
             "stream_options": {"include_usage": True},
         }
 
-        # 基础参数
+        #=================参数解释====================#
+        # 注释：
+        # 所有从父类获得的参数加上运行时用户实际传过来的参数kwargs大集合。
+        validated = self._validate_params(kwargs)
+        # 注释：
+        # 保留基础参数，过滤多余公共参数
+        # 从父类已经继承了非常多的公共的参数包括默认值，但是未必是本模型能用的，所以要在这里过滤掉不能用的
         for key in ("temperature", "top_p", "max_tokens", "stop",
                      "frequency_penalty", "presence_penalty"):
             if key in validated:
                 request_params[key] = validated[key]
+        #============================================#
 
         # 函数调用
         if "tools" in validated:
@@ -101,9 +108,9 @@ class GLMLLM(BaseLLM):
             tools_list = request_params.get("tools", [])
             tools_list.append({"type": "web_search"})
             request_params["tools"] = tools_list
-        if validated.get("enable_thinking"):
+        if "enable_thinking" in validated:
             # GLM不支持thinking_level等级设置，仅支持开启/关闭
-            extra_body["enable_thinking"] = True
+            extra_body["enable_thinking"] = bool(validated["enable_thinking"])
         if extra_body:
             request_params["extra_body"] = extra_body
 

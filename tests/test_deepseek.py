@@ -167,5 +167,5 @@ class TestDeepSeekChat:
 
             call_kwargs = mock_client.chat.completions.create.call_args.kwargs
             assert "extra_body" in call_kwargs
-            assert call_kwargs["extra_body"]["thinking"] is True
-            assert call_kwargs["extra_body"]["thinking_budget"] == expected_budget
+            assert call_kwargs["extra_body"]["thinking"]["type"] == "enabled"
+            assert call_kwargs["extra_body"]["thinking"]["budget_tokens"] == expected_budget
