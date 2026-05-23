@@ -13,7 +13,7 @@ class TestGLMCapabilities:
     """验证 GLMLLM 的能力标志是否与规格一致"""
 
     def test_capabilities(self):
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.providers.glm import GLMLLM
 
         llm = GLMLLM(api_key="test", model="glm-4")
         caps = llm.capabilities
@@ -44,7 +44,7 @@ class TestGLMAvailableParams:
     """验证 GLMLLM 支持的参数名集合"""
 
     def test_has_web_search(self):
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.providers.glm import GLMLLM
 
         llm = GLMLLM(api_key="test", model="glm-4")
         params = llm._get_available_param_names()
@@ -53,7 +53,7 @@ class TestGLMAvailableParams:
         assert "web_search_strategy" in params
 
     def test_has_thinking(self):
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.providers.glm import GLMLLM
 
         llm = GLMLLM(api_key="test", model="glm-4")
         params = llm._get_available_param_names()
@@ -62,7 +62,7 @@ class TestGLMAvailableParams:
         assert "thinking_level" in params
 
     def test_has_basic_params(self):
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.providers.glm import GLMLLM
 
         llm = GLMLLM(api_key="test", model="glm-4")
         params = llm._get_available_param_names()
@@ -75,7 +75,7 @@ class TestGLMAvailableParams:
         assert "presence_penalty" in params
 
     def test_has_tools(self):
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.providers.glm import GLMLLM
 
         llm = GLMLLM(api_key="test", model="glm-4")
         params = llm._get_available_param_names()
@@ -90,8 +90,8 @@ class TestGLMChat:
     @pytest.mark.asyncio
     async def test_basic_chat(self):
         """基础聊天：验证流式输出和streaming参数"""
-        from agent_framework.models.message import Message, MessageRole
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.base.message import Message, MessageRole
+        from agent_framework.llm.providers.glm import GLMLLM
 
         chunks = [
             MockChunk(choices=[MockChoice(delta=MockDelta(content="你", role="assistant"))]),
@@ -130,8 +130,8 @@ class TestGLMChat:
     @pytest.mark.asyncio
     async def test_thinking_ignores_level(self):
         """思考模式：extra_body有enable_thinking=True，但NO thinking_level映射"""
-        from agent_framework.models.message import Message, MessageRole
-        from agent_framework.providers.glm import GLMLLM
+        from agent_framework.llm.base.message import Message, MessageRole
+        from agent_framework.llm.providers.glm import GLMLLM
 
         async def mock_stream():
             yield MockChunk(choices=[MockChoice(delta=MockDelta(content="思考中"))])

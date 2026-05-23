@@ -4,7 +4,7 @@ import os
 import pytest
 
 from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.providers import ModelRegistry
+from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools import tool
 
 

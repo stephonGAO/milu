@@ -10,7 +10,7 @@ from agent_framework import (
     ToolCallStart, ToolResult,
     AgentDone, AgentError,
 )
-from agent_framework.providers import ModelRegistry
+from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools import tool
 
 # 加载 .env 中的 API Key

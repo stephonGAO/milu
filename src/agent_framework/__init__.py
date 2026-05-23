@@ -1,7 +1,7 @@
 """AI Agent Framework - 统一AI模型抽象层，兼容6家国内大模型厂商API"""
 
-from agent_framework.exceptions import (
-    AgentFrameworkError,
+from agent_framework.exceptions import AgentFrameworkError
+from agent_framework.llm.base.exceptions import (
     AuthenticationError,
     FeatureNotSupportedError,
     ModelConfigError,
@@ -9,9 +9,17 @@ from agent_framework.exceptions import (
     RateLimitError,
     StreamError,
 )
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.models.events import (
+from agent_framework.agent.exceptions import (
+    AgentLoopError,
+    AgentTimeout,
+    MaxTurnsExceeded,
+    TokenLimitExceeded,
+    ToolCallLimitExceeded,
+    ToolExecutionError,
+)
+from agent_framework.llm.base.message import Message, MessageRole
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.agent.events import (
     AgentEvent,
     TextDelta,
     ReasoningDelta,
@@ -20,18 +28,26 @@ from agent_framework.models.events import (
     AgentDone,
     AgentError,
 )
-from agent_framework.providers import ModelRegistry
+from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig
 
 __all__ = [
-    # Exceptions
+    # Root Exception
     "AgentFrameworkError",
+    # LLM Exceptions
     "AuthenticationError",
     "FeatureNotSupportedError",
     "ModelConfigError",
     "ModelNotAvailableError",
     "RateLimitError",
     "StreamError",
+    # Agent Exceptions
+    "AgentLoopError",
+    "AgentTimeout",
+    "MaxTurnsExceeded",
+    "TokenLimitExceeded",
+    "ToolCallLimitExceeded",
+    "ToolExecutionError",
     # Models
     "Message",
     "MessageRole",

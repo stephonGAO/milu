@@ -1,6 +1,6 @@
 """测试 ConversationHistory"""
 import pytest
-from agent_framework.models.message import Message, MessageRole
+from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.agent.history import ConversationHistory
 
 

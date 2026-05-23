@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_framework.models.response import TokenUsage
+from agent_framework.llm.base.response import TokenUsage
 
 
 @dataclass(frozen=True)

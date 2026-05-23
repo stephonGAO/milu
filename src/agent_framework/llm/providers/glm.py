@@ -1,10 +1,10 @@
 """
-DoubaoLLM - 豆包/火山引擎模型实现。
+GLMLLM - 智谱AI GLM模型实现。
 
 支持能力：流式输出、函数调用、JSON模式、联网搜索、
-文本嵌入、视觉理解、图片生成
+思考模式、文本嵌入、图片/视频理解
 
-API文档: https://ark.cn-beijing.volces.com/api/v3
+API文档: https://open.bigmodel.cn/dev/api
 """
 
 from __future__ import annotations
@@ -12,29 +12,29 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.base.exceptions import StreamError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
 
-class DoubaoLLM(BaseLLM):
-    """豆包/火山引擎 Doubao 模型实现"""
+class GLMLLM(BaseLLM):
+    """智谱AI GLM模型实现"""
 
     _capabilities = ModelCapabilities(
         supports_streaming=True,
         supports_function_calling=True,
         supports_json_mode=True,
         supports_web_search=True,
-        supports_thinking=False,
+        supports_thinking=True,
         supports_embedding=True,
         supports_vision=True,
         supports_audio_understand=False,
-        supports_video=False,
+        supports_video=True,
         supports_document=False,
-        supports_image_generation=True,
+        supports_image_generation=False,
         supports_audio_generation=False,
         max_context_window=131072,
         supported_output_formats=("text", "json"),
@@ -44,17 +44,17 @@ class DoubaoLLM(BaseLLM):
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
         "web_search", "web_search_strategy",
+        "enable_thinking", "thinking_level",
         "tools", "tool_choice",
-        "image_size", "image_quality", "num_images",
     }
 
     @property
     def provider_name(self) -> str:
-        return "doubao"
+        return "glm"
 
     @property
     def base_url(self) -> str:
-        return "https://ark.cn-beijing.volces.com/api/v3"
+        return "https://open.bigmodel.cn/api/paas/v4"
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -67,9 +67,12 @@ class DoubaoLLM(BaseLLM):
         """
         流式聊天接口。
 
-        Doubao 特有参数映射:
+        GLM特有参数映射:
             web_search (bool) → tools列表追加 {"type": "web_search"}
+            enable_thinking (bool) → extra_body.enable_thinking=True
+            thinking_level → GLM不支持等级设置，静默忽略
         """
+        
         client = self._get_client()
 
         request_params = {
@@ -98,26 +101,35 @@ class DoubaoLLM(BaseLLM):
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
-        # extra_body: 联网搜索（通过 tools 列表注入 web_search 类型）
+        # extra_body: 联网搜索和思考模式
+        extra_body = {}
         if validated.get("web_search"):
+            # GLM通过tools列表中的web_search类型启用联网搜索
             tools_list = request_params.get("tools", [])
             tools_list.append({"type": "web_search"})
             request_params["tools"] = tools_list
+        if "enable_thinking" in validated:
+            # GLM不支持thinking_level等级设置，仅支持开启/关闭
+            extra_body["enable_thinking"] = bool(validated["enable_thinking"])
+        if extra_body:
+            request_params["extra_body"] = extra_body
 
         try:
             response = await client.chat.completions.create(**request_params)
             async for chunk in response:
                 yield self._parse_chunk(chunk)
         except Exception as e:
-            raise StreamError(f"Doubao 流式调用异常: {e}") from e
+            raise StreamError(f"GLM 流式调用异常: {e}") from e
 
     def _parse_chunk(self, chunk) -> StreamChunk:
-        """解析 OpenAI SDK 的流式 chunk 为统一的 StreamChunk"""
+        """解析OpenAI SDK的流式chunk为统一的StreamChunk"""
         result = StreamChunk()
         if chunk.choices:
             delta = chunk.choices[0].delta
             result.content = delta.content
             result.finish_reason = chunk.choices[0].finish_reason
+            if hasattr(delta, "reasoning_content"):
+                result.reasoning_content = delta.reasoning_content
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 result.tool_calls = delta.tool_calls
         if chunk.usage:
@@ -130,5 +142,5 @@ class DoubaoLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
-ModelRegistry.register("doubao", DoubaoLLM)
+from agent_framework.llm.providers import ModelRegistry
+ModelRegistry.register("glm", GLMLLM)

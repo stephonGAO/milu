@@ -1,10 +1,10 @@
 """
-KimiLLM - 月之暗面Moonshot Kimi模型实现。
+DoubaoLLM - 豆包/火山引擎模型实现。
 
 支持能力：流式输出、函数调用、JSON模式、联网搜索、
-思考模式、图片/文档理解
+文本嵌入、视觉理解、图片生成
 
-API文档: https://platform.moonshot.cn/docs
+API文档: https://ark.cn-beijing.volces.com/api/v3
 """
 
 from __future__ import annotations
@@ -12,31 +12,31 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.base.exceptions import StreamError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
 
-class KimiLLM(BaseLLM):
-    """月之暗面Moonshot Kimi模型实现"""
+class DoubaoLLM(BaseLLM):
+    """豆包/火山引擎 Doubao 模型实现"""
 
     _capabilities = ModelCapabilities(
         supports_streaming=True,
         supports_function_calling=True,
         supports_json_mode=True,
         supports_web_search=True,
-        supports_thinking=True,
-        supports_embedding=False,
+        supports_thinking=False,
+        supports_embedding=True,
         supports_vision=True,
         supports_audio_understand=False,
         supports_video=False,
-        supports_document=True,
-        supports_image_generation=False,
+        supports_document=False,
+        supports_image_generation=True,
         supports_audio_generation=False,
-        max_context_window=262144,
+        max_context_window=131072,
         supported_output_formats=("text", "json"),
     )
 
@@ -44,17 +44,17 @@ class KimiLLM(BaseLLM):
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
         "web_search", "web_search_strategy",
-        "enable_thinking", "thinking_level",
         "tools", "tool_choice",
+        "image_size", "image_quality", "num_images",
     }
 
     @property
     def provider_name(self) -> str:
-        return "kimi"
+        return "doubao"
 
     @property
     def base_url(self) -> str:
-        return "https://api.moonshot.cn/v1"
+        return "https://ark.cn-beijing.volces.com/api/v3"
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -67,12 +67,9 @@ class KimiLLM(BaseLLM):
         """
         流式聊天接口。
 
-        Kimi特有参数映射:
-            web_search (bool) → tools 列表中添加内置工具 {"type": "builtin_function", "function": {"name": "$web_search"}}
-            enable_thinking (bool) → extra_body.reasoning_effort = thinking_level 值
-            thinking_level (str) → extra_body.reasoning_effort（low/medium/high，默认medium）
+        Doubao 特有参数映射:
+            web_search (bool) → tools列表追加 {"type": "web_search"}
         """
-        
         client = self._get_client()
 
         request_params = {
@@ -101,42 +98,26 @@ class KimiLLM(BaseLLM):
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
-        # extra_body: 联网搜索和思考模式
-        extra_body = {}
+        # extra_body: 联网搜索（通过 tools 列表注入 web_search 类型）
         if validated.get("web_search"):
-            # Kimi通过添加内置工具实现联网搜索
-            tools = request_params.get("tools", [])
-            tools.append({
-                "type": "builtin_function",
-                "function": {"name": "$web_search"},
-            })
-            request_params["tools"] = tools
-        if "enable_thinking" in validated and validated["enable_thinking"]:
-            # Kimi使用 reasoning_effort 映射 thinking_level
-            thinking_level = validated.get("thinking_level", "medium")
-            extra_body["reasoning_effort"] = thinking_level
-        elif "enable_thinking" in validated and not validated["enable_thinking"]:
-            # 显式关闭思考
-            extra_body["reasoning_effort"] = "none"
-        if extra_body:
-            request_params["extra_body"] = extra_body
+            tools_list = request_params.get("tools", [])
+            tools_list.append({"type": "web_search"})
+            request_params["tools"] = tools_list
 
         try:
             response = await client.chat.completions.create(**request_params)
             async for chunk in response:
                 yield self._parse_chunk(chunk)
         except Exception as e:
-            raise StreamError(f"Kimi 流式调用异常: {e}") from e
+            raise StreamError(f"Doubao 流式调用异常: {e}") from e
 
     def _parse_chunk(self, chunk) -> StreamChunk:
-        """解析OpenAI SDK的流式chunk为统一的StreamChunk"""
+        """解析 OpenAI SDK 的流式 chunk 为统一的 StreamChunk"""
         result = StreamChunk()
         if chunk.choices:
             delta = chunk.choices[0].delta
             result.content = delta.content
             result.finish_reason = chunk.choices[0].finish_reason
-            if hasattr(delta, "reasoning_content"):
-                result.reasoning_content = delta.reasoning_content
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 result.tool_calls = delta.tool_calls
         if chunk.usage:
@@ -149,5 +130,5 @@ class KimiLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
-ModelRegistry.register("kimi", KimiLLM)
+from agent_framework.llm.providers import ModelRegistry
+ModelRegistry.register("doubao", DoubaoLLM)

@@ -1,11 +1,10 @@
 """
-MiniMaxLLM - MiniMax（MiniMax AI）模型实现。
+KimiLLM - 月之暗面Moonshot Kimi模型实现。
 
-支持能力：流式输出、函数调用、JSON模式、文本嵌入、
-图片理解、音频理解、图片生成、音频生成
-不支持：联网搜索、思考模式
+支持能力：流式输出、函数调用、JSON模式、联网搜索、
+思考模式、图片/文档理解
 
-API文档: https://platform.minimaxi.com/
+API文档: https://platform.moonshot.cn/docs
 """
 
 from __future__ import annotations
@@ -13,51 +12,49 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.base.exceptions import StreamError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
 
-class MiniMaxLLM(BaseLLM):
-    """MiniMax模型实现"""
+class KimiLLM(BaseLLM):
+    """月之暗面Moonshot Kimi模型实现"""
 
     _capabilities = ModelCapabilities(
         supports_streaming=True,
         supports_function_calling=True,
         supports_json_mode=True,
-        supports_web_search=False,
-        supports_thinking=False,
-        supports_embedding=True,
+        supports_web_search=True,
+        supports_thinking=True,
+        supports_embedding=False,
         supports_vision=True,
-        supports_audio_understand=True,
+        supports_audio_understand=False,
         supports_video=False,
-        supports_document=False,
-        supports_image_generation=True,
-        supports_audio_generation=True,
-        max_context_window=1000000,
+        supports_document=True,
+        supports_image_generation=False,
+        supports_audio_generation=False,
+        max_context_window=262144,
         supported_output_formats=("text", "json"),
     )
 
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
+        "web_search", "web_search_strategy",
+        "enable_thinking", "thinking_level",
         "tools", "tool_choice",
-        # 图片生成参数
-        "image_size", "image_quality", "num_images",
-        # 音频生成参数
-        "voice", "audio_format", "speed",
     }
 
     @property
     def provider_name(self) -> str:
-        return "minimax"
+        return "kimi"
 
     @property
     def base_url(self) -> str:
-        return "https://api.minimax.chat/v1"
+        return "https://api.moonshot.cn/v1"
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -70,9 +67,12 @@ class MiniMaxLLM(BaseLLM):
         """
         流式聊天接口。
 
-        MiniMax 遵循标准 OpenAI 格式，无特殊参数映射。
-        不支持 web_search 和 thinking 相关参数。
+        Kimi特有参数映射:
+            web_search (bool) → tools 列表中添加内置工具 {"type": "builtin_function", "function": {"name": "$web_search"}}
+            enable_thinking (bool) → extra_body.reasoning_effort = thinking_level 值
+            thinking_level (str) → extra_body.reasoning_effort（low/medium/high，默认medium）
         """
+        
         client = self._get_client()
 
         request_params = {
@@ -97,16 +97,36 @@ class MiniMaxLLM(BaseLLM):
 
         # 函数调用
         if "tools" in validated:
-            request_params["tools"] = validated["tools"]
+            request_params["tools"] = list(validated["tools"])
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
+
+        # extra_body: 联网搜索和思考模式
+        extra_body = {}
+        if validated.get("web_search"):
+            # Kimi通过添加内置工具实现联网搜索
+            tools = request_params.get("tools", [])
+            tools.append({
+                "type": "builtin_function",
+                "function": {"name": "$web_search"},
+            })
+            request_params["tools"] = tools
+        if "enable_thinking" in validated and validated["enable_thinking"]:
+            # Kimi使用 reasoning_effort 映射 thinking_level
+            thinking_level = validated.get("thinking_level", "medium")
+            extra_body["reasoning_effort"] = thinking_level
+        elif "enable_thinking" in validated and not validated["enable_thinking"]:
+            # 显式关闭思考
+            extra_body["reasoning_effort"] = "none"
+        if extra_body:
+            request_params["extra_body"] = extra_body
 
         try:
             response = await client.chat.completions.create(**request_params)
             async for chunk in response:
                 yield self._parse_chunk(chunk)
         except Exception as e:
-            raise StreamError(f"MiniMax 流式调用异常: {e}") from e
+            raise StreamError(f"Kimi 流式调用异常: {e}") from e
 
     def _parse_chunk(self, chunk) -> StreamChunk:
         """解析OpenAI SDK的流式chunk为统一的StreamChunk"""
@@ -129,5 +149,5 @@ class MiniMaxLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
-ModelRegistry.register("minimax", MiniMaxLLM)
+from agent_framework.llm.providers import ModelRegistry
+ModelRegistry.register("kimi", KimiLLM)

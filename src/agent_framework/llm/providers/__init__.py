@@ -2,19 +2,19 @@
 模型厂商包 - 包含所有厂商实现和注册表。
 
 使用方式:
-    from agent_framework.providers import ModelRegistry
+    from agent_framework.llm.providers import ModelRegistry
 
     # 工厂方式创建
     model = ModelRegistry.create("qwen", model="qwen-max")
 
     # 或直接导入
-    from agent_framework.providers.qwen import QwenLLM
+    from agent_framework.llm.providers.qwen import QwenLLM
     model = QwenLLM(model="qwen-max")
 """
 
 from __future__ import annotations
 
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 
 class ModelRegistry:
@@ -47,12 +47,12 @@ class ModelRegistry:
 
 
 # 导入所有厂商模块以触发自动注册
-from agent_framework.providers import qwen
-from agent_framework.providers import kimi
-from agent_framework.providers import glm
-from agent_framework.providers import deepseek
-from agent_framework.providers import minimax
-from agent_framework.providers import doubao
+from agent_framework.llm.providers import qwen
+from agent_framework.llm.providers import kimi
+from agent_framework.llm.providers import glm
+from agent_framework.llm.providers import deepseek
+from agent_framework.llm.providers import minimax
+from agent_framework.llm.providers import doubao
 
 __all__ = [
     "ModelRegistry",

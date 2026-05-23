@@ -1,9 +1,11 @@
 """
-DeepSeekLLM - 深度求索（DeepSeek）模型实现。
+MiniMaxLLM - MiniMax（MiniMax AI）模型实现。
 
-支持能力：流式输出、函数调用、JSON模式、思考模式
+支持能力：流式输出、函数调用、JSON模式、文本嵌入、
+图片理解、音频理解、图片生成、音频生成
+不支持：联网搜索、思考模式
 
-API文档: https://api-docs.deepseek.com/
+API文档: https://platform.minimaxi.com/
 """
 
 from __future__ import annotations
@@ -11,55 +13,51 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.base.exceptions import StreamError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
-# 思考等级到 budget_tokens 的映射
-_THINKING_BUDGET_MAP = {
-    "low": 1024,
-    "medium": 4096,
-    "high": 8192,
-}
 
-
-class DeepSeekLLM(BaseLLM):
-    """深度求索模型实现"""
+class MiniMaxLLM(BaseLLM):
+    """MiniMax模型实现"""
 
     _capabilities = ModelCapabilities(
         supports_streaming=True,
         supports_function_calling=True,
         supports_json_mode=True,
         supports_web_search=False,
-        supports_thinking=True,
-        supports_embedding=False,
-        supports_vision=False,
-        supports_audio_understand=False,
+        supports_thinking=False,
+        supports_embedding=True,
+        supports_vision=True,
+        supports_audio_understand=True,
         supports_video=False,
         supports_document=False,
-        supports_image_generation=False,
-        supports_audio_generation=False,
-        max_context_window=131072,
+        supports_image_generation=True,
+        supports_audio_generation=True,
+        max_context_window=1000000,
         supported_output_formats=("text", "json"),
     )
 
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
-        "enable_thinking", "thinking_level",
         "tools", "tool_choice",
+        # 图片生成参数
+        "image_size", "image_quality", "num_images",
+        # 音频生成参数
+        "voice", "audio_format", "speed",
     }
 
     @property
     def provider_name(self) -> str:
-        return "deepseek"
+        return "minimax"
 
     @property
     def base_url(self) -> str:
-        return "https://api.deepseek.com/v1"
+        return "https://api.minimax.chat/v1"
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -72,12 +70,8 @@ class DeepSeekLLM(BaseLLM):
         """
         流式聊天接口。
 
-        DeepSeek特有参数映射:
-            enable_thinking (bool) → extra_body.thinking
-            thinking_level (str) → extra_body.thinking_budget:
-                low → 1024
-                medium → 4096 (默认)
-                high → 8192
+        MiniMax 遵循标准 OpenAI 格式，无特殊参数映射。
+        不支持 web_search 和 thinking 相关参数。
         """
         client = self._get_client()
 
@@ -107,28 +101,12 @@ class DeepSeekLLM(BaseLLM):
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
-        # extra_body: 思考模式
-        # DeepSeek 使用 extra_body.thinking = {"type": "enabled", "budget_tokens": N}
-        extra_body = {}
-        if "enable_thinking" in validated and validated["enable_thinking"]:
-            thinking_level = validated.get("thinking_level", "medium")
-            budget = _THINKING_BUDGET_MAP.get(thinking_level, 4096)
-            extra_body["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": budget,
-            }
-        elif "enable_thinking" in validated and not validated["enable_thinking"]:
-            # 显式关闭思考
-            extra_body["thinking"] = {"type": "disabled"}
-        if extra_body:
-            request_params["extra_body"] = extra_body
-
         try:
             response = await client.chat.completions.create(**request_params)
             async for chunk in response:
                 yield self._parse_chunk(chunk)
         except Exception as e:
-            raise StreamError(f"DeepSeek 流式调用异常: {e}") from e
+            raise StreamError(f"MiniMax 流式调用异常: {e}") from e
 
     def _parse_chunk(self, chunk) -> StreamChunk:
         """解析OpenAI SDK的流式chunk为统一的StreamChunk"""
@@ -137,7 +115,6 @@ class DeepSeekLLM(BaseLLM):
             delta = chunk.choices[0].delta
             result.content = delta.content
             result.finish_reason = chunk.choices[0].finish_reason
-            # DeepSeek reasoner 模型的推理内容
             if hasattr(delta, "reasoning_content"):
                 result.reasoning_content = delta.reasoning_content
             if hasattr(delta, "tool_calls") and delta.tool_calls:
@@ -152,5 +129,5 @@ class DeepSeekLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
-ModelRegistry.register("deepseek", DeepSeekLLM)
+from agent_framework.llm.providers import ModelRegistry
+ModelRegistry.register("minimax", MiniMaxLLM)

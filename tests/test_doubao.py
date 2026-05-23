@@ -13,7 +13,7 @@ class TestDoubaoCapabilities:
     """验证 DoubaoLLM 的能力标志是否与规格一致"""
 
     def test_capabilities(self):
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         caps = llm.capabilities
@@ -44,7 +44,7 @@ class TestDoubaoAvailableParams:
     """验证 DoubaoLLM 支持的参数名集合"""
 
     def test_has_web_search(self):
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         params = llm._get_available_param_names()
@@ -53,7 +53,7 @@ class TestDoubaoAvailableParams:
         assert "web_search_strategy" in params
 
     def test_has_image_params(self):
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         params = llm._get_available_param_names()
@@ -64,7 +64,7 @@ class TestDoubaoAvailableParams:
 
     def test_no_thinking_params(self):
         """豆包不支持思考模式，参数集合中不应包含 thinking 相关参数"""
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         params = llm._get_available_param_names()
@@ -73,7 +73,7 @@ class TestDoubaoAvailableParams:
         assert "thinking_level" not in params
 
     def test_has_basic_params(self):
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         params = llm._get_available_param_names()
@@ -86,7 +86,7 @@ class TestDoubaoAvailableParams:
         assert "presence_penalty" in params
 
     def test_has_tools(self):
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         llm = DoubaoLLM(api_key="test", model="doubao-pro")
         params = llm._get_available_param_names()
@@ -101,8 +101,8 @@ class TestDoubaoChat:
     @pytest.mark.asyncio
     async def test_basic_chat(self):
         """基础聊天：验证流式输出和 streaming 参数"""
-        from agent_framework.models.message import Message, MessageRole
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.base.message import Message, MessageRole
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         chunks = [
             MockChunk(choices=[MockChoice(delta=MockDelta(content="你", role="assistant"))]),
@@ -141,8 +141,8 @@ class TestDoubaoChat:
     @pytest.mark.asyncio
     async def test_web_search_injects_tool(self):
         """联网搜索：web_search=True 应在 tools 列表中追加 {"type": "web_search"}"""
-        from agent_framework.models.message import Message, MessageRole
-        from agent_framework.providers.doubao import DoubaoLLM
+        from agent_framework.llm.base.message import Message, MessageRole
+        from agent_framework.llm.providers.doubao import DoubaoLLM
 
         async def mock_stream():
             yield MockChunk(choices=[MockChoice(delta=MockDelta(content="搜索结果"))])

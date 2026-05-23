@@ -1,10 +1,10 @@
 """
-GLMLLM - 智谱AI GLM模型实现。
+QwenLLM - 通义千问（阿里云 DashScope）模型实现。
 
 支持能力：流式输出、函数调用、JSON模式、联网搜索、
-思考模式、文本嵌入、图片/视频理解
+思考模式、文本嵌入、图片/音频/视频/文档理解、图片生成
 
-API文档: https://open.bigmodel.cn/dev/api
+API文档: https://help.aliyun.com/zh/model-studio/
 """
 
 from __future__ import annotations
@@ -12,16 +12,16 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from agent_framework.llm.base.exceptions import StreamError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
 
-class GLMLLM(BaseLLM):
-    """智谱AI GLM模型实现"""
+class QwenLLM(BaseLLM):
+    """通义千问模型实现"""
 
     _capabilities = ModelCapabilities(
         supports_streaming=True,
@@ -31,10 +31,10 @@ class GLMLLM(BaseLLM):
         supports_thinking=True,
         supports_embedding=True,
         supports_vision=True,
-        supports_audio_understand=False,
+        supports_audio_understand=True,
         supports_video=True,
-        supports_document=False,
-        supports_image_generation=False,
+        supports_document=True,
+        supports_image_generation=True,
         supports_audio_generation=False,
         max_context_window=131072,
         supported_output_formats=("text", "json"),
@@ -50,11 +50,11 @@ class GLMLLM(BaseLLM):
 
     @property
     def provider_name(self) -> str:
-        return "glm"
+        return "qwen"
 
     @property
     def base_url(self) -> str:
-        return "https://open.bigmodel.cn/api/paas/v4"
+        return "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
     @property
     def capabilities(self) -> ModelCapabilities:
@@ -67,12 +67,12 @@ class GLMLLM(BaseLLM):
         """
         流式聊天接口。
 
-        GLM特有参数映射:
-            web_search (bool) → tools列表追加 {"type": "web_search"}
-            enable_thinking (bool) → extra_body.enable_thinking=True
-            thinking_level → GLM不支持等级设置，静默忽略
+        Qwen特有参数映射:
+            web_search (bool) → extra_body.enable_search
+            enable_thinking (bool) → extra_body.enable_thinking
+            thinking_level (str) → Qwen不支持，静默忽略
         """
-        
+        validated = self._validate_params(kwargs)
         client = self._get_client()
 
         request_params = {
@@ -85,7 +85,7 @@ class GLMLLM(BaseLLM):
         #=================参数解释====================#
         # 注释：
         # 所有从父类获得的参数加上运行时用户实际传过来的参数kwargs大集合。
-        validated = self._validate_params(kwargs)
+        validated = self._validate_params(kwargs) 
         # 注释：
         # 保留基础参数，过滤多余公共参数
         # 从父类已经继承了非常多的公共的参数包括默认值，但是未必是本模型能用的，所以要在这里过滤掉不能用的
@@ -97,19 +97,15 @@ class GLMLLM(BaseLLM):
 
         # 函数调用
         if "tools" in validated:
-            request_params["tools"] = list(validated["tools"])
+            request_params["tools"] = validated["tools"]
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
         # extra_body: 联网搜索和思考模式
         extra_body = {}
         if validated.get("web_search"):
-            # GLM通过tools列表中的web_search类型启用联网搜索
-            tools_list = request_params.get("tools", [])
-            tools_list.append({"type": "web_search"})
-            request_params["tools"] = tools_list
+            extra_body["enable_search"] = True
         if "enable_thinking" in validated:
-            # GLM不支持thinking_level等级设置，仅支持开启/关闭
             extra_body["enable_thinking"] = bool(validated["enable_thinking"])
         if extra_body:
             request_params["extra_body"] = extra_body
@@ -119,7 +115,7 @@ class GLMLLM(BaseLLM):
             async for chunk in response:
                 yield self._parse_chunk(chunk)
         except Exception as e:
-            raise StreamError(f"GLM 流式调用异常: {e}") from e
+            raise StreamError(f"Qwen 流式调用异常: {e}") from e
 
     def _parse_chunk(self, chunk) -> StreamChunk:
         """解析OpenAI SDK的流式chunk为统一的StreamChunk"""
@@ -142,5 +138,5 @@ class GLMLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
-ModelRegistry.register("glm", GLMLLM)
+from agent_framework.llm.providers import ModelRegistry
+ModelRegistry.register("qwen", QwenLLM)

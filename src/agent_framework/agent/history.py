@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from agent_framework.models.message import Message, MessageRole
+from agent_framework.llm.base.message import Message, MessageRole
 
 
 def _estimate_tokens(text: str) -> int:

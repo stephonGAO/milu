@@ -2,9 +2,9 @@
 import pytest
 from unittest.mock import AsyncMock
 from agent_framework.agent import Agent, AgentConfig
-from agent_framework.models.events import TextDelta, ToolCallStart, ToolResult, AgentDone, AgentError
-from agent_framework.models.message import MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
+from agent_framework.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone, AgentError
+from agent_framework.llm.base.message import MessageRole
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.tools import tool
 
 

@@ -26,11 +26,11 @@ IMAGE_PATH = r"C:\Users\Administrator\Desktop\8111.jpg_wh860.jpg"
 DOC_PATH = r"C:\Users\Administrator\Desktop\1776910210186-[舆情数据导出]智元合作伙伴大会监测-2026-04-23_10_05.xlsx"
 OUTPUT_DIR = r"C:\Users\Administrator\Desktop"
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk
-from agent_framework.providers.qwen import QwenLLM
-from agent_framework.providers.minimax import MiniMaxLLM
-from agent_framework.providers.deepseek import DeepSeekLLM
+from agent_framework.llm.base.message import Message, MessageRole
+from agent_framework.llm.base.response import StreamChunk
+from agent_framework.llm.providers.qwen import QwenLLM
+from agent_framework.llm.providers.minimax import MiniMaxLLM
+from agent_framework.llm.providers.deepseek import DeepSeekLLM
 
 
 # ==================== 辅助函数 ====================

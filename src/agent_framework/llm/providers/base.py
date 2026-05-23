@@ -10,9 +10,9 @@ from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
-from agent_framework.exceptions import AuthenticationError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk
+from agent_framework.llm.base.exceptions import AuthenticationError
+from agent_framework.llm.base.message import Message
+from agent_framework.llm.base.response import StreamChunk
 
 logger = logging.getLogger(__name__)
 

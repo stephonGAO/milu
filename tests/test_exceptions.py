@@ -1,7 +1,7 @@
 """测试 Agent 相关异常类"""
 import pytest
-from agent_framework.exceptions import (
-    AgentFrameworkError,
+from agent_framework.exceptions import AgentFrameworkError
+from agent_framework.agent.exceptions import (
     AgentLoopError,
     MaxTurnsExceeded,
     AgentTimeout,

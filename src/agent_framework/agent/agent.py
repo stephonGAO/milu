@@ -7,9 +7,9 @@ import time
 from typing import AsyncIterator
 
 from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.executor import ToolExecutor, ToolExecutionResult
+from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
 from agent_framework.agent.history import ConversationHistory
-from agent_framework.models.events import (
+from agent_framework.agent.events import (
     AgentDone,
     AgentError,
     AgentEvent,
@@ -18,9 +18,9 @@ from agent_framework.models.events import (
     ToolCallStart,
     ToolResult,
 )
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM
+from agent_framework.llm.base.message import Message, MessageRole
+from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from agent_framework.llm.providers.base import BaseLLM
 from agent_framework.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
