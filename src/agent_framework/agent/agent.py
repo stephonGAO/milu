@@ -4,8 +4,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 from agent_framework.agent.config import AgentConfig
@@ -131,9 +129,9 @@ class Agent:
         return self._history
 
     @property
-    def tools(self) -> list[str]:
-        """已注册的工具名称列表。"""
-        return self._registry.list_tools()
+    def tools(self) -> ToolRegistry:
+        """工具注册表。"""
+        return self._registry
 
     # -- 公开方法 ------------------------------------------------------------
 
