@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "统一AI模型抽象层，兼容多家厂商API"
 requires-python = ">=3.10"
 dependencies = [
-    "openai>=1.30.0",
+    "openai>=1.66.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "jsonschema>=4.20.0",

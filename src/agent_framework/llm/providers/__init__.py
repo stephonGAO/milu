@@ -53,6 +53,9 @@ from agent_framework.llm.providers import glm
 from agent_framework.llm.providers import deepseek
 from agent_framework.llm.providers import minimax
 from agent_framework.llm.providers import doubao
+from agent_framework.llm.providers import chatgpt
+from agent_framework.llm.providers import gemini
+from agent_framework.llm.providers import claude
 
 __all__ = [
     "ModelRegistry",
