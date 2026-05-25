@@ -83,7 +83,7 @@ async def confirm_dangerous(tool_name: str, args_str: str) -> bool:
 
 def build_agent() -> Agent:
     """构建带全部内置工具的 Agent"""
-    llm = ModelRegistry.create("qwen", model="qwen3.7-max")
+    llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=True)
 
     so_tool = create_structured_output_tool()
     all_tools = [*BUILTIN_TOOLS, so_tool]
