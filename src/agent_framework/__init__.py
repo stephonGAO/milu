@@ -29,7 +29,7 @@ from agent_framework.agent.events import (
     AgentError,
 )
 from agent_framework.llm.providers import ModelRegistry
-from agent_framework.agent import Agent, AgentConfig
+from agent_framework.agent import Agent, AgentConfig, ConversationHistory
 
 __all__ = [
     # Root Exception
@@ -64,6 +64,7 @@ __all__ = [
     # Agent
     "Agent",
     "AgentConfig",
+    "ConversationHistory",
     # Providers
     "ModelRegistry",
 ]
