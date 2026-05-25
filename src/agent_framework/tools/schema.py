@@ -66,7 +66,7 @@ def generate_schema_from_function(func) -> dict:
     required = []
 
     for param_name, param in sig.parameters.items():
-        if param_name in ("self", "cls"):
+        if param_name in ("self", "cls") or param_name.startswith("_"):
             continue
 
         py_type = type_hints.get(param_name, str)
