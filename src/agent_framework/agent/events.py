@@ -43,6 +43,15 @@ class ToolResult(AgentEvent):
 
 
 @dataclass(frozen=True)
+class ToolConfirmRequired(AgentEvent):
+    """危险工具执行前请求用户确认"""
+    tool_name: str
+    tool_call_id: str
+    arguments: str  # JSON 字符串
+    approved: bool  # True=用户同意执行, False=用户拒绝
+
+
+@dataclass(frozen=True)
 class AgentDone(AgentEvent):
     """Agent 循环正常结束"""
     final_text: str

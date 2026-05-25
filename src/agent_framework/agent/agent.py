@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import AsyncIterator
+from typing import AsyncIterator, Awaitable, Callable
 
 from agent_framework.agent.config import AgentConfig
 from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
@@ -16,6 +16,7 @@ from agent_framework.agent.events import (
     ReasoningDelta,
     TextDelta,
     ToolCallStart,
+    ToolConfirmRequired,
     ToolResult,
 )
 from agent_framework.llm.base.message import Message, MessageRole
@@ -107,6 +108,7 @@ class Agent:
         tools: list | None = None,
         history: ConversationHistory | None = None,
         config: AgentConfig | None = None,
+        on_confirm: Callable[[str, str], Awaitable[bool]] | None = None,
     ):
         self._llm = llm
         self._config = config or AgentConfig()
@@ -117,6 +119,7 @@ class Agent:
         if tools:
             self._registry.register_many(tools)
         self._executor = ToolExecutor(self._registry, self._config)
+        self._on_confirm = on_confirm
 
         # 设置 system prompt
         self._history.set_system(Message(role=MessageRole.SYSTEM, content=system_prompt))
@@ -276,6 +279,34 @@ class Agent:
                     tool_call_id=tool_call_id,
                     arguments=tool_args,
                 )
+
+                # 危险工具确认检查
+                wrapper = self._registry.get_tool(tool_name)
+                if (self._config.confirm_dangerous
+                        and wrapper and wrapper.dangerous
+                        and self._on_confirm):
+                    approved = await self._on_confirm(tool_name, tool_args)
+                    yield ToolConfirmRequired(
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        arguments=tool_args,
+                        approved=approved,
+                    )
+                    if not approved:
+                        reject_msg = f"用户拒绝了危险工具 {tool_name} 的执行"
+                        yield ToolResult(
+                            tool_name=tool_name,
+                            tool_call_id=tool_call_id,
+                            output=reject_msg,
+                            is_error=True,
+                        )
+                        self._history.add(Message(
+                            role=MessageRole.TOOL,
+                            content=reject_msg,
+                            tool_call_id=tool_call_id,
+                            name=tool_name,
+                        ))
+                        continue
 
                 # 通过 executor 执行
                 exec_result: ToolExecutionResult = await self._executor.execute(call)
