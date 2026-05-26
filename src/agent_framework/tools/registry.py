@@ -1,9 +1,15 @@
 """工具注册表 - 管理 @tool 装饰过的函数"""
 from __future__ import annotations
 
+import logging
+
 from agent_framework.tools.decorator import ToolWrapper
 
+logger = logging.getLogger(__name__)
 
+# 注释：
+# 这里相当于把所有装饰后的方法集中保存在这里。
+# 并且增加get_schemas和其他统一管理功能。
 class ToolRegistry:
     """工具注册表 - 管理 @tool 装饰过的函数"""
 
@@ -22,6 +28,12 @@ class ToolRegistry:
         """批量注册"""
         for func in funcs:
             self.register(func)
+
+    def register_wrapper(self, wrapper: ToolWrapper) -> None:
+        """直接注册 ToolWrapper 实例（无需 @tool 装饰器，用于 MCP 等外部工具）"""
+        if wrapper.name in self._tools:
+            logger.warning("工具 %s 已存在，将被覆盖", wrapper.name)
+        self._tools[wrapper.name] = wrapper
 
     def get_schemas(self) -> list[dict]:
         """

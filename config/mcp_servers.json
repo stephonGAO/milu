@@ -1,0 +1,8 @@
+{
+  "fetch": {
+    "type": "stdio",
+    "command": "mcp-fetch-server",
+    "args": [],
+    "timeout": 60
+  }
+}

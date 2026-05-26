@@ -109,6 +109,7 @@ class Agent:
         history: ConversationHistory | None = None,
         config: AgentConfig | None = None,
         on_confirm: Callable[[str, str], Awaitable[bool]] | None = None,
+        mcp_config_path: str | None = None,
     ):
         self._llm = llm
         self._config = config or AgentConfig()
@@ -120,6 +121,10 @@ class Agent:
             self._registry.register_many(tools)
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
+
+        # MCP 配置文件路径
+        self._mcp_config_path = mcp_config_path
+        self._mcp_manager = None
 
         # 设置 system prompt
         self._history.set_system(Message(role=MessageRole.SYSTEM, content=system_prompt))
@@ -141,6 +146,52 @@ class Agent:
     async def reset(self) -> None:
         """清空对话历史（保留 system 消息）。"""
         self._history.clear()
+
+    # -- MCP 生命周期 --------------------------------------------------------
+
+    async def connect_mcp(self) -> None:
+        """连接所有 MCP 服务器，发现并注册工具。
+
+        配置路径解析优先级：
+        1. mcp_config_path 参数（构造函数传入）
+        2. 环境变量 MCP_CONFIG_PATH（.env 或系统环境变量）
+        3. 自动搜索 config/mcp_servers.json → ~/.agent_framework/mcp_servers.json
+        """
+        from agent_framework.tools.mcp.config import MCPServerConfig
+        from agent_framework.tools.mcp.manager import MCPManager
+        from dotenv import load_dotenv
+        import os
+
+        # 确定配置文件路径
+        path = self._mcp_config_path
+        if not path:
+            load_dotenv()
+            path = os.environ.get("MCP_CONFIG_PATH")
+
+        configs = MCPServerConfig.load_file(path)  # path=None 时自动搜索
+
+        if not configs:
+            return
+
+        self._mcp_manager = MCPManager(configs)
+        wrappers = await self._mcp_manager.connect_all()
+        for w in wrappers:
+            self._registry.register_wrapper(w)
+        logger.info("MCP 工具已注册: %d 个", len(wrappers))
+
+    async def disconnect_mcp(self) -> None:
+        """断开所有 MCP 服务器连接。"""
+        if self._mcp_manager:
+            await self._mcp_manager.disconnect_all()
+            self._mcp_manager = None
+
+    async def __aenter__(self):
+        await self.connect_mcp()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.disconnect_mcp()
+        return False
 
     async def run(
         self,

@@ -8,7 +8,10 @@ from typing import Callable
 
 from agent_framework.tools.schema import generate_schema_from_function
 
-
+# 注释：
+# 这个类是定义装饰。就是把一个方法加上额外的信息（装饰的信息）。
+# 这里相当于定义要装饰的内容与结构，和装饰方法。装饰的时候把额外的结构加上。
+# 相当于原方法里增加了一个_tool_wrapper变量，内部是包装后的整体。包装包里也有原方法，有所有信息。
 @dataclass
 class ToolWrapper:
     """包装一个 @tool 函数，持有其元数据和 schema"""
@@ -33,6 +36,7 @@ def tool(name: str, description: str, dangerous: bool = False):
             is_async=is_async,
             dangerous=dangerous,
         )
+        # 相当于原方法里增加了一个_tool_wrapper变量，内部是包装后的整体。包装包里也有原方法，有所有信息。
         func._tool_wrapper = wrapper
         return func
     return decorator

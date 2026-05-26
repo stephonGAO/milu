@@ -16,6 +16,8 @@ from agent_framework.agent.exceptions import (
     TokenLimitExceeded,
     ToolCallLimitExceeded,
     ToolExecutionError,
+    MCPError,
+    MCPConnectionError,
 )
 from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
@@ -31,6 +33,7 @@ from agent_framework.agent.events import (
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig, ConversationHistory
+from agent_framework.tools.mcp.config import MCPServerConfig
 
 __all__ = [
     # Root Exception
@@ -49,6 +52,8 @@ __all__ = [
     "TokenLimitExceeded",
     "ToolCallLimitExceeded",
     "ToolExecutionError",
+    "MCPError",
+    "MCPConnectionError",
     # Models
     "Message",
     "MessageRole",
@@ -69,4 +74,6 @@ __all__ = [
     "ConversationHistory",
     # Providers
     "ModelRegistry",
+    # MCP
+    "MCPServerConfig",
 ]

@@ -3,8 +3,9 @@ from agent_framework.tools.decorator import tool, ToolWrapper
 from agent_framework.tools.registry import ToolRegistry
 from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
 from agent_framework.tools.builtin import BUILTIN_TOOLS
+from agent_framework.tools.mcp.config import MCPServerConfig
 
 __all__ = [
     "tool", "ToolWrapper", "ToolRegistry", "ToolExecutor", "ToolExecutionResult",
-    "BUILTIN_TOOLS",
+    "BUILTIN_TOOLS", "MCPServerConfig",
 ]

@@ -31,3 +31,13 @@ class ToolCallLimitExceeded(AgentLoopError):
 class ToolExecutionError(AgentLoopError):
     """工具执行异常"""
     pass
+
+
+class MCPError(AgentLoopError):
+    """MCP 相关异常基类"""
+    pass
+
+
+class MCPConnectionError(MCPError):
+    """MCP 服务器连接失败"""
+    pass

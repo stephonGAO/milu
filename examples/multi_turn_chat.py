@@ -208,13 +208,27 @@ def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER + "\n")
 
     elif cmd == "/tools":
+        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]}
+        all_tool_names = agent.tools.list_tools()
+
         print(f"\n{DIVIDER}")
-        print(c("bold", "  可用工具"))
+        print(c("bold", "  内置工具"))
         print(DIVIDER)
         for tool_func in [*BUILTIN_TOOLS, create_structured_output_tool()]:
             w = tool_func._tool_wrapper
             danger = c("red", " [D]") if w.dangerous else ""
             print(f"  {c('yellow', w.name):<30} {w.description[:40]}{danger}")
+
+        mcp_names = [n for n in all_tool_names if n not in builtin_names]
+        if mcp_names:
+            print(DIVIDER)
+            print(c("bold", "  MCP 工具"))
+            print(DIVIDER)
+            for name in mcp_names:
+                wrapper = agent.tools.get_tool(name)
+                desc = wrapper.description[:40] if wrapper else ""
+                print(f"  {c('magenta', name):<30} {desc}")
+
         print(DIVIDER + "\n")
 
     elif cmd == "/help":
@@ -237,34 +251,46 @@ async def main():
     print_header()
     agent = build_agent()
 
+    # 连接 MCP 服务器（如果存在 config/mcp_servers.json）
+    await agent.connect_mcp()
+    mcp_tools = [t for t in agent.tools.list_tools() if t not in {
+        w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]
+    }]
+    if mcp_tools:
+        print(c("cyan", f"  MCP 工具已加载: {', '.join(mcp_tools)}\n"))
+
     turn_count = 0
 
-    while True:
-        # ── 读取用户输入 ──
-        try:
-            user_input = input(c("green", "\nYou> ")).strip()
-        except (EOFError, KeyboardInterrupt):
-            print(c("dim", "\n再见!"))
-            break
-
-        if not user_input:
-            continue
-
-        # ── / 命令 ──
-        if user_input.startswith("/"):
-            if not handle_command(agent, user_input):
+    try:
+        while True:
+            # ── 读取用户输入 ──
+            try:
+                user_input = input(c("green", "\nYou> ")).strip()
+            except (EOFError, KeyboardInterrupt):
+                print(c("dim", "\n再见!"))
                 break
-            continue
 
-        # ── 发送给 Agent ──
-        turn_count += 1
-        print(c("blue", f"\n  [Turn {turn_count}]"))
-        print(DIVIDER)
+            if not user_input:
+                continue
 
-        try:
-            await handle_turn(agent, user_input)
-        except Exception as e:
-            print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
+            # ── / 命令 ──
+            if user_input.startswith("/"):
+                if not handle_command(agent, user_input):
+                    break
+                continue
+
+            # ── 发送给 Agent ──
+            turn_count += 1
+            print(c("blue", f"\n  [Turn {turn_count}]"))
+            print(DIVIDER)
+
+            try:
+                await handle_turn(agent, user_input)
+            except Exception as e:
+                print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
+    finally:
+        # 断开 MCP 连接
+        await agent.disconnect_mcp()
 
 
 if __name__ == "__main__":
