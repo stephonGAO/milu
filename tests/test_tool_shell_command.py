@@ -2,7 +2,7 @@
 import sys
 
 import pytest
-from agent_framework.tools.builtin.shell_command import shell_command
+from agent_framework.tools.builtin.shell_command import shell_command, _is_dangerous_command
 
 
 class TestShellCommand:
@@ -72,3 +72,57 @@ class TestShellCommand:
         assert wrapper.name == "shell_command"
         assert wrapper.is_async is True
         assert wrapper.dangerous is True  # 关键：标记为危险
+
+
+class TestDangerousCommandBlocklist:
+    """危险命令黑名单检测"""
+
+    @pytest.mark.parametrize("cmd", [
+        "rm -rf /",
+        "rm -rf / ",
+        "rm -rf /tmp",
+        "rm -fr /",
+        "rm -fr /var/log",
+        "sudo apt install foo",
+        "sudo ls",
+        "shutdown now",
+        "shutdown -h now",
+        "reboot",
+        "reboot -f",
+        "mkfs.ext4 /dev/sda1",
+        "dd if=/dev/zero of=/dev/sda bs=1M",
+        "> /dev/sda",
+        "> /dev/nvme0n1",
+    ])
+    def test_dangerous_commands_detected(self, cmd):
+        """危险命令应被检测"""
+        assert _is_dangerous_command(cmd) is not None, f"应检测到危险命令: {cmd}"
+
+    @pytest.mark.parametrize("cmd", [
+        "echo hello",
+        "ls -la",
+        "rm -rf ./build",
+        "rm -rf build/",
+        "cat /etc/hosts",
+        "find . -name '*.py'",
+        "git status",
+        "python script.py",
+        "npm install",
+        "rm file.txt",
+    ])
+    def test_safe_commands_pass(self, cmd):
+        """安全命令不应被拦截"""
+        assert _is_dangerous_command(cmd) is None, f"不应拦截安全命令: {cmd}"
+
+    @pytest.mark.asyncio
+    async def test_dangerous_command_blocked(self):
+        """危险命令执行应被拦截"""
+        result = await shell_command(command="sudo echo test")
+        assert "拦截" in result
+        assert "危险" in result
+
+    @pytest.mark.asyncio
+    async def test_safe_command_runs(self):
+        """安全命令正常执行"""
+        result = await shell_command(command="echo safe_test_123")
+        assert "safe_test_123" in result
