@@ -17,7 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from agent_framework import (
-    Agent, AgentConfig, ConversationHistory,
+    Agent, AgentConfig, ConversationHistory, ConfirmResponse,
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolConfirmRequired, ToolResult,
     AgentDone, AgentError,
@@ -68,16 +68,25 @@ def print_header():
 
 # ── 危险工具确认回调 ────────────────────────────────────
 
-async def confirm_dangerous(tool_name: str, args_str: str) -> bool:
-    """危险工具执行前请求用户确认"""
+async def confirm_dangerous(tool_name: str, args_str: str) -> ConfirmResponse:
+    """危险工具执行前请求用户确认，支持自定义消息"""
     short_args = args_str[:100] + "..." if len(args_str) > 100 else args_str
     print(f"\n  {c('red', '[DANGEROUS]')} {c('bold', tool_name)}({c('dim', short_args)})")
+    print(f"  {c('dim', '输入 y 同意 / n 拒绝 / 或直接输入指示发给 Agent')}")
     try:
-        resp = input(f"  {c('yellow', '确认执行? [y/N]')} ").strip()
+        resp = input(f"  {c('yellow', '> ')}").strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        return False
-    return resp.lower() in ("y", "yes")
+        return ConfirmResponse(approved=False)
+
+    if not resp:
+        return ConfirmResponse(approved=False)
+    if resp.lower() in ("y", "yes"):
+        return ConfirmResponse(approved=True)
+    if resp.lower() in ("n", "no"):
+        return ConfirmResponse(approved=False, message="用户选择拒绝执行")
+    # 自定义消息
+    return ConfirmResponse(approved=False, message=resp)
 
 
 # ── Agent 构建 ──────────────────────────────────────────
@@ -155,7 +164,10 @@ async def handle_turn(agent: Agent, user_input: str):
             if event.approved:
                 print(f"  {c('green', '[APPROVED]')} 用户同意执行", flush=True)
             else:
-                print(f"  {c('red', '[REJECTED]')} 用户拒绝执行", flush=True)
+                if event.message:
+                    print(f"  {c('red', '[REJECTED]')} 用户指示: {c('cyan', event.message)}", flush=True)
+                else:
+                    print(f"  {c('red', '[REJECTED]')} 用户拒绝执行", flush=True)
 
         # ── 工具结果 ──
         elif isinstance(event, ToolResult):

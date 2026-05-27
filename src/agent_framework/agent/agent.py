@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Awaitable, Callable, Union
 
 from agent_framework.agent.config import AgentConfig
 from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
@@ -13,6 +13,7 @@ from agent_framework.agent.events import (
     AgentDone,
     AgentError,
     AgentEvent,
+    ConfirmResponse,
     ReasoningDelta,
     TextDelta,
     ToolCallStart,
@@ -108,7 +109,7 @@ class Agent:
         tools: list | None = None,
         history: ConversationHistory | None = None,
         config: AgentConfig | None = None,
-        on_confirm: Callable[[str, str], Awaitable[bool]] | None = None,
+        on_confirm: Callable[[str, str], Awaitable[Union[bool, ConfirmResponse]]] | None = None,
         mcp_config_path: str | None = None,
     ):
         self._llm = llm
@@ -350,15 +351,30 @@ class Agent:
                 if (self._config.confirm_dangerous
                         and wrapper and wrapper.dangerous
                         and self._on_confirm):
-                    approved = await self._on_confirm(tool_name, tool_args)
+                    raw_result = await self._on_confirm(tool_name, tool_args)
+
+                    # 兼容 bool 和 ConfirmResponse 两种返回
+                    if isinstance(raw_result, ConfirmResponse):
+                        approved = raw_result.approved
+                        user_message = raw_result.message
+                    else:
+                        approved = bool(raw_result)
+                        user_message = ""
+
                     yield ToolConfirmRequired(
                         tool_name=tool_name,
                         tool_call_id=tool_call_id,
                         arguments=tool_args,
                         approved=approved,
+                        message=user_message,
                     )
                     if not approved:
-                        reject_msg = f"用户拒绝了危险工具 {tool_name} 的执行"
+                        if user_message:
+                            reject_msg = (
+                                f"用户拒绝了工具 {tool_name} 的执行，并给出指示：{user_message}"
+                            )
+                        else:
+                            reject_msg = f"用户拒绝了危险工具 {tool_name} 的执行"
                         yield ToolResult(
                             tool_name=tool_name,
                             tool_call_id=tool_call_id,

@@ -299,3 +299,175 @@ async def test_confirm_rejected_history_updated(dangerous_tool):
     tool_messages = [m for m in messages if m.role.value == "tool"]
     assert len(tool_messages) >= 1
     assert "拒绝" in tool_messages[-1].content
+
+
+# ── ConfirmResponse 自定义消息测试 ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_confirm_response_approved(dangerous_tool):
+    """返回 ConfirmResponse(approved=True) 时工具正常执行"""
+    from agent_framework.agent.events import ConfirmResponse
+
+    async def on_confirm(tool_name, args_str):
+        return ConfirmResponse(approved=True)
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    events = []
+    async for event in agent.run("执行"):
+        events.append(event)
+
+    confirm_events = [e for e in events if isinstance(e, ToolConfirmRequired)]
+    assert confirm_events[0].approved is True
+
+    results = [e for e in events if isinstance(e, ToolResult)]
+    assert results[0].is_error is False
+
+
+@pytest.mark.asyncio
+async def test_confirm_response_rejected_with_message(dangerous_tool):
+    """返回 ConfirmResponse(approved=False, message="...") 时自定义消息发回 LLM"""
+    from agent_framework.agent.events import ConfirmResponse
+
+    custom_msg = "不要用 rm，改用 mv 到回收站"
+
+    async def on_confirm(tool_name, args_str):
+        return ConfirmResponse(approved=False, message=custom_msg)
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm -rf /"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    events = []
+    async for event in agent.run("执行"):
+        events.append(event)
+
+    # ToolConfirmRequired 应包含自定义消息
+    confirm_events = [e for e in events if isinstance(e, ToolConfirmRequired)]
+    assert len(confirm_events) == 1
+    assert confirm_events[0].approved is False
+    assert confirm_events[0].message == custom_msg
+
+    # ToolResult 应包含自定义消息
+    results = [e for e in events if isinstance(e, ToolResult)]
+    assert len(results) == 1
+    assert results[0].is_error is True
+    assert custom_msg in results[0].output
+    assert "指示" in results[0].output
+
+
+@pytest.mark.asyncio
+async def test_confirm_response_custom_message_in_history(dangerous_tool):
+    """自定义消息应写入对话历史，供 LLM 下一轮看到"""
+    from agent_framework.agent.events import ConfirmResponse
+
+    custom_msg = "请先备份再删除"
+
+    async def on_confirm(tool_name, args_str):
+        return ConfirmResponse(approved=False, message=custom_msg)
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    async for event in agent.run("执行"):
+        pass
+
+    messages = agent.history.all_messages
+    tool_messages = [m for m in messages if m.role.value == "tool"]
+    assert len(tool_messages) >= 1
+    assert custom_msg in tool_messages[-1].content
+    assert "指示" in tool_messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_confirm_response_rejected_no_message(dangerous_tool):
+    """ConfirmResponse(approved=False) 无消息时使用默认拒绝文案"""
+    from agent_framework.agent.events import ConfirmResponse
+
+    async def on_confirm(tool_name, args_str):
+        return ConfirmResponse(approved=False)
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    events = []
+    async for event in agent.run("执行"):
+        events.append(event)
+
+    results = [e for e in events if isinstance(e, ToolResult)]
+    assert results[0].is_error is True
+    assert "拒绝" in results[0].output
+
+
+@pytest.mark.asyncio
+async def test_backward_compat_bool_true(dangerous_tool):
+    """向后兼容：回调返回 True 仍然正常工作"""
+    async def on_confirm(tool_name, args_str):
+        return True  # 旧式 bool 返回
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    events = []
+    async for event in agent.run("执行"):
+        events.append(event)
+
+    confirm_events = [e for e in events if isinstance(e, ToolConfirmRequired)]
+    assert confirm_events[0].approved is True
+    assert confirm_events[0].message == ""  # bool 返回时 message 为空
+
+
+@pytest.mark.asyncio
+async def test_backward_compat_bool_false(dangerous_tool):
+    """向后兼容：回调返回 False 仍然使用默认拒绝文案"""
+    async def on_confirm(tool_name, args_str):
+        return False  # 旧式 bool 返回
+
+    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dangerous_tool],
+        config=AgentConfig(confirm_dangerous=True),
+        on_confirm=on_confirm,
+    )
+
+    events = []
+    async for event in agent.run("执行"):
+        events.append(event)
+
+    results = [e for e in events if isinstance(e, ToolResult)]
+    assert results[0].is_error is True
+    assert "拒绝" in results[0].output
+

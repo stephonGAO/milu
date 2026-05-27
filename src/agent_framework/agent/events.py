@@ -42,6 +42,19 @@ class ToolResult(AgentEvent):
     is_error: bool
 
 
+@dataclass
+class ConfirmResponse:
+    """危险工具确认回调的返回值。
+
+    Attributes:
+        approved: True=同意执行, False=拒绝
+        message: 自定义消息（拒绝时发回给 LLM 作为指导，
+                 如 "不要用 rm，改用 mv 到回收站"）
+    """
+    approved: bool
+    message: str = ""
+
+
 @dataclass(frozen=True)
 class ToolConfirmRequired(AgentEvent):
     """危险工具执行前请求用户确认"""
@@ -49,6 +62,7 @@ class ToolConfirmRequired(AgentEvent):
     tool_call_id: str
     arguments: str  # JSON 字符串
     approved: bool  # True=用户同意执行, False=用户拒绝
+    message: str = ""  # 用户自定义消息（拒绝时可发给 LLM）
 
 
 @dataclass(frozen=True)
