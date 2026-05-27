@@ -48,6 +48,13 @@ class ToolExecutor:
                 is_error=True
             )
 
+        # 1.5 检查工具是否在休眠池（尚未激活）
+        if self._registry.is_dormant(func_name):
+            return ToolExecutionResult(
+                output=f"工具 {func_name} 尚未激活。请先调用 activate_tools 激活它。",
+                is_error=True,
+            )
+
         # 2. 解析参数 JSON
         try:
             arguments = json.loads(arguments_str)

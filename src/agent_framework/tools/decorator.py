@@ -21,6 +21,8 @@ class ToolWrapper:
     func: Callable
     is_async: bool
     dangerous: bool
+    category: str = ""    # 工具分类（MCP 服务器名等，用于 Tool Catalog 分组显示）
+    meta: bool = False    # 是否为元工具（元工具不可被停用）
 
 
 def tool(name: str, description: str, dangerous: bool = False):

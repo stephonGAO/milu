@@ -4,5 +4,17 @@
     "command": "mcp-fetch-server",
     "args": [],
     "timeout": 60
+  },
+  "mysql-mcp": {
+      "command": "C:/Python313/python.exe",
+      "args": [
+        "D:/My_MCP/MysqlMCP/main.py"
+      ]
+  },
+  "mcp-ssh": {
+      "type": "stdio",
+      "command": "D:/My_MCP/mcp-ssh.bat",
+      "args": [],
+      "env": {}
   }
 }

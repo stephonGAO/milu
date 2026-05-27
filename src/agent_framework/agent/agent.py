@@ -119,6 +119,12 @@ class Agent:
         self._registry = ToolRegistry()
         if tools:
             self._registry.register_many(tools)
+
+        # 注册元工具（始终活跃，用于发现和激活休眠工具）
+        from agent_framework.tools.catalog import create_catalog_tools
+        self._catalog_tools = create_catalog_tools(self._registry)
+        self._registry.register_many(self._catalog_tools)
+
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
 
@@ -176,8 +182,16 @@ class Agent:
         self._mcp_manager = MCPManager(configs)
         wrappers = await self._mcp_manager.connect_all()
         for w in wrappers:
-            self._registry.register_wrapper(w)
-        logger.info("MCP 工具已注册: %d 个", len(wrappers))
+            if self._config.mcp_tools_active_by_default:
+                self._registry.register_wrapper(w)  # 向后兼容模式
+            else:
+                # 注册到休眠池（register_dormant 自动从工具名提取 category）
+                self._registry.register_dormant(w)
+        logger.info(
+            "MCP 工具已注册: %d 个（%s）",
+            len(wrappers),
+            "活跃" if self._config.mcp_tools_active_by_default else "休眠",
+        )
 
     async def disconnect_mcp(self) -> None:
         """断开所有 MCP 服务器连接。"""

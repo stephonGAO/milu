@@ -53,7 +53,7 @@ class TestAgentMCPIntegration:
 
     @pytest.mark.asyncio
     async def test_connect_mcp_registers_tools(self, tmp_path):
-        """connect_mcp 应连接服务器并注册工具"""
+        """connect_mcp 应连接服务器并注册工具（默认进入休眠池）"""
         config_path = _write_mcp_config(tmp_path, {
             "srv": {"type": "stdio", "command": "echo"},
         })
@@ -76,8 +76,8 @@ class TestAgentMCPIntegration:
             )
             await agent.connect_mcp()
 
-            # 工具应已注册
-            assert "srv__hello" in agent.tools.list_tools()
+            # MCP 工具默认进入休眠池
+            assert "srv__hello" in agent.tools.list_dormant_names()
 
             await agent.disconnect_mcp()
 
@@ -103,7 +103,8 @@ class TestAgentMCPIntegration:
                 system_prompt="test",
                 mcp_config_path=config_path,
             ) as agent:
-                assert "srv__hello" in agent.tools.list_tools()
+                # MCP 工具默认休眠，可通过 list_dormant_names 查看
+                assert "srv__hello" in agent.tools.list_dormant_names()
 
             # 退出后应已断开
             conn.disconnect.assert_called_once()
@@ -146,7 +147,7 @@ class TestAgentMCPIntegration:
             llm = _make_mock_llm()
             agent = Agent(llm=llm, system_prompt="test")
             await agent.connect_mcp()
-            assert "env_srv__hello" in agent.tools.list_tools()
+            assert "env_srv__hello" in agent.tools.list_dormant_names()
             await agent.disconnect_mcp()
 
     @pytest.mark.asyncio
@@ -183,8 +184,8 @@ class TestAgentMCPIntegration:
             )
             await agent.connect_mcp()
             # 应使用参数指定的配置
-            assert "param_srv__hello" in agent.tools.list_tools()
-            assert "env_srv__hello" not in agent.tools.list_tools()
+            assert "param_srv__hello" in agent.tools.list_dormant_names()
+            assert "env_srv__hello" not in agent.tools.list_dormant_names()
             await agent.disconnect_mcp()
 
     @pytest.mark.asyncio
@@ -216,6 +217,89 @@ class TestAgentMCPIntegration:
                 tools=[native_tool],
                 mcp_config_path=config_path,
             ) as agent:
-                all_tools = agent.tools.list_tools()
-                assert "native_tool" in all_tools
-                assert "srv__mcp_tool" in all_tools
+                # 本地工具在活跃池
+                all_active = agent.tools.list_tools()
+                assert "native_tool" in all_active
+                # MCP 工具在休眠池
+                all_dormant = agent.tools.list_dormant_names()
+                assert "srv__mcp_tool" in all_dormant
+
+    @pytest.mark.asyncio
+    async def test_mcp_tools_active_by_default(self, tmp_path):
+        """mcp_tools_active_by_default=True 时 MCP 工具直接进入活跃池"""
+        config_path = _write_mcp_config(tmp_path, {
+            "srv": {"type": "stdio", "command": "echo"},
+        })
+        tool = _make_mock_tool("srv__hello")
+
+        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+            conn = AsyncMock()
+            conn.name = "srv"
+            conn.connect = AsyncMock()
+            conn.discover_tools = AsyncMock(return_value=[tool])
+            conn.disconnect = AsyncMock()
+            MockConn.return_value = conn
+
+            llm = _make_mock_llm()
+            agent = Agent(
+                llm=llm,
+                system_prompt="test",
+                mcp_config_path=config_path,
+                config=AgentConfig(mcp_tools_active_by_default=True),
+            )
+            await agent.connect_mcp()
+
+            # 直接进入活跃池
+            assert "srv__hello" in agent.tools.list_tools()
+            assert "srv__hello" not in agent.tools.list_dormant_names()
+
+            await agent.disconnect_mcp()
+
+    @pytest.mark.asyncio
+    async def test_dormant_activate_flow(self, tmp_path):
+        """MCP 工具休眠 → 元工具发现 → 激活 → 可调用"""
+        config_path = _write_mcp_config(tmp_path, {
+            "srv": {"type": "stdio", "command": "echo"},
+        })
+        mcp_tool = _make_mock_tool("srv__query")
+
+        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+            conn = AsyncMock()
+            conn.name = "srv"
+            conn.connect = AsyncMock()
+            conn.discover_tools = AsyncMock(return_value=[mcp_tool])
+            conn.disconnect = AsyncMock()
+            MockConn.return_value = conn
+
+            llm = _make_mock_llm()
+            async with Agent(
+                llm=llm,
+                system_prompt="test",
+                mcp_config_path=config_path,
+            ) as agent:
+                # 1. MCP 工具在休眠池
+                assert "srv__query" in agent.tools.list_dormant_names()
+                assert "srv__query" not in agent.tools.list_tools()
+
+                # 2. 元工具在活跃池
+                assert "list_catalog" in agent.tools.list_tools()
+                assert "search_tools" in agent.tools.list_tools()
+                assert "activate_tools" in agent.tools.list_tools()
+
+                # 3. 通过元工具搜索
+                search = agent.tools.get_tool("search_tools")
+                result = await search.func(query="query")
+                assert "srv__query" in result
+
+                # 4. 通过元工具激活
+                activate = agent.tools.get_tool("activate_tools")
+                result = await activate.func(tool_names=["srv__query"])
+                assert "已激活" in result
+
+                # 5. 工具现在在活跃池
+                assert "srv__query" in agent.tools.list_tools()
+                assert "srv__query" not in agent.tools.list_dormant_names()
+
+                # 6. schemas 包含已激活工具
+                schema_names = [s["function"]["name"] for s in agent.tools.get_schemas()]
+                assert "srv__query" in schema_names

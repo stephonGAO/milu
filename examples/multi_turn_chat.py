@@ -56,11 +56,12 @@ def print_header():
     print(BANNER)
     print(f"""
   内置工具: {', '.join(t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool()])}
+  元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
 
   命令:
     /history   — 查看对话历史
     /reset     — 重置对话（清空上下文）
-    /tools     — 查看可用工具
+    /tools     — 查看可用工具（含休眠工具）
     /quit      — 退出
 """)
 
@@ -101,7 +102,10 @@ def build_agent() -> Agent:
             "  1. 主动使用工具完成任务，不要只描述怎么做——直接做\n"
             "  2. 保持上下文连贯，记住之前对话中的信息\n"
             "  3. 回答简洁准确，必要时给出代码或数据佐证\n"
-            "  4. 操作文件时先用 index 了解结构，再精确操作"
+            "  4. 操作文件时先用 index 了解结构，再精确操作\n"
+            "  5. 你拥有元工具 list_catalog / search_tools / activate_tools，"
+            "可以动态发现和激活 MCP 外部工具（如 fetch、数据库、Figma 等）。"
+            "当需要外部能力时，先用 search_tools 搜索，再用 activate_tools 激活后调用"
         ),
         tools=all_tools,
         history=history,
@@ -208,26 +212,55 @@ def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER + "\n")
 
     elif cmd == "/tools":
-        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]}
-        all_tool_names = agent.tools.list_tools()
+        active_tools = agent.tools.list_tools()
+        dormant_tools = agent.tools.list_dormant_tools()
 
         print(f"\n{DIVIDER}")
-        print(c("bold", "  内置工具"))
+        print(c("bold", "  活跃工具") + c("dim", f" ({len(active_tools)} 个)"))
         print(DIVIDER)
+
+        # 内置工具
+        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]}
         for tool_func in [*BUILTIN_TOOLS, create_structured_output_tool()]:
             w = tool_func._tool_wrapper
-            danger = c("red", " [D]") if w.dangerous else ""
-            print(f"  {c('yellow', w.name):<30} {w.description[:40]}{danger}")
+            if w.name in active_tools:
+                danger = c("red", " [D]") if w.dangerous else ""
+                print(f"  {c('yellow', w.name):<30} {w.description[:40]}{danger}")
 
-        mcp_names = [n for n in all_tool_names if n not in builtin_names]
-        if mcp_names:
-            print(DIVIDER)
-            print(c("bold", "  MCP 工具"))
-            print(DIVIDER)
-            for name in mcp_names:
+        # 元工具
+        meta_names = {"list_catalog", "search_tools", "activate_tools"}
+        for name in meta_names:
+            if name in active_tools:
                 wrapper = agent.tools.get_tool(name)
                 desc = wrapper.description[:40] if wrapper else ""
-                print(f"  {c('magenta', name):<30} {desc}")
+                print(f"  {c('cyan', name):<30} {desc}")
+
+        # 已激活的 MCP 工具
+        activated_mcp = [n for n in active_tools if n not in builtin_names and n not in meta_names]
+        if activated_mcp:
+            print(DIVIDER)
+            print(c("bold", "  已激活 MCP 工具"))
+            print(DIVIDER)
+            for name in activated_mcp:
+                wrapper = agent.tools.get_tool(name)
+                desc = wrapper.description[:40] if wrapper else ""
+                print(f"  {c('green', name):<30} {desc}")
+
+        # 休眠工具（按 category 分组）
+        if dormant_tools:
+            grouped = {}
+            for t in dormant_tools:
+                cat = t["category"] or "未分类"
+                grouped.setdefault(cat, []).append(t)
+
+            print(DIVIDER)
+            print(c("bold", "  休眠工具（可通过 search_tools / activate_tools 激活）")
+                  + c("dim", f" ({len(dormant_tools)} 个)"))
+            print(DIVIDER)
+            for cat, items in grouped.items():
+                print(f"  {c('magenta', f'【{cat}】')}")
+                for item in items:
+                    print(f"    {c('dim', item['name']):<32} {item['description'][:38]}")
 
         print(DIVIDER + "\n")
 
@@ -253,11 +286,15 @@ async def main():
 
     # 连接 MCP 服务器（如果存在 config/mcp_servers.json）
     await agent.connect_mcp()
-    mcp_tools = [t for t in agent.tools.list_tools() if t not in {
-        w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]
-    }]
-    if mcp_tools:
-        print(c("cyan", f"  MCP 工具已加载: {', '.join(mcp_tools)}\n"))
+    dormant = agent.tools.list_dormant_tools()
+    if dormant:
+        categories = {}
+        for t in dormant:
+            cat = t["category"] or "MCP"
+            categories.setdefault(cat, []).append(t["name"])
+        summary = ", ".join(f"{cat}({len(names)}个)" for cat, names in categories.items())
+        print(c("cyan", f"  MCP 工具已加载（休眠态）: {summary}"))
+        print(c("dim", "  输入 /tools 查看详情，或通过 search_tools / activate_tools 按需激活\n"))
 
     turn_count = 0
 
