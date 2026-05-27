@@ -6,12 +6,13 @@ from agent_framework.agent.config import AgentConfig
 def test_default_config():
     """应有合理的默认值"""
     config = AgentConfig()
-    assert config.max_turns == 10
+    assert config.max_turns == 100
     assert config.timeout == 120.0
-    assert config.total_timeout == 300.0
+    assert config.total_timeout == 3600.0
     assert config.max_total_tokens is None
-    assert config.tool_call_limit == 20
+    assert config.tool_call_limit == 100
     assert config.confirm_dangerous is True
+    assert config.mcp_tools_active_by_default is False
 
 
 def test_custom_config():

@@ -24,6 +24,7 @@ from agent_framework import (
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool, create_todo_write_tool
+from agent_framework.tools.builtin.todo_write import TodoManager
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -31,6 +32,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 DIVIDER  = "-" * 50
 BANNER   = "=" * 60
+PLAN_FILE = Path.cwd() / ".plan.json"
 
 COLORS = {
     "reset":    "\033[0m",
@@ -54,14 +56,19 @@ def print_header():
     print(f"\n{BANNER}")
     print(c("bold", c("cyan", "  多轮对话 Agent — 交互式聊天")))
     print(BANNER)
+    # 构造完整的内置工具名列表（create_todo_write_tool 返回元组）
+    _todo_tools = create_todo_write_tool()
+    _all_names = [t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool(), *_todo_tools]]
     print(f"""
-  内置工具: {', '.join(t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()])}
+  内置工具: {', '.join(_all_names)}
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
+  计划文件: {PLAN_FILE}
 
   命令:
     /history   — 查看对话历史
     /reset     — 重置对话（清空上下文）
     /tools     — 查看可用工具（含休眠工具）
+    /plan      — 查看当前会话计划
     /quit      — 退出
 """)
 
@@ -96,8 +103,8 @@ def build_agent() -> Agent:
     llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=True)
 
     so_tool = create_structured_output_tool()
-    todo_tool = create_todo_write_tool()
-    all_tools = [*BUILTIN_TOOLS, so_tool, todo_tool]
+    todo_write, todo_read = create_todo_write_tool(plan_file=PLAN_FILE)
+    all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read]
 
     history = ConversationHistory(
         strategy="sliding_window",
@@ -115,7 +122,11 @@ def build_agent() -> Agent:
             "  4. 操作文件时先用 index 了解结构，再精确操作\n"
             "  5. 你拥有元工具 list_catalog / search_tools / activate_tools，"
             "可以动态发现和激活 MCP 外部工具（如 fetch、数据库、Figma 等）。"
-            "当需要外部能力时，先用 search_tools 搜索，再用 activate_tools 激活后调用"
+            "当需要外部能力时，先用 search_tools 搜索，再用 activate_tools 激活后调用\n"
+            "  6. 对于多步骤任务，主动使用 todo_write 制定并跟踪计划。"
+            "计划会自动保存到本地文件，如果看到提醒消息中的当前计划，"
+            "请根据进度继续工作或更新计划状态。"
+            "不确定当前计划时，调用 todo_read 查看"
         ),
         tools=all_tools,
         history=history,
@@ -210,7 +221,10 @@ def handle_command(agent: Agent, cmd: str) -> bool:
 
     elif cmd == "/reset":
         agent.history.clear()
-        print(c("yellow", "\n  对话已重置，上下文已清空。\n"))
+        # 同时清空计划文件
+        if PLAN_FILE.exists():
+            PLAN_FILE.unlink()
+        print(c("yellow", "\n  对话已重置，上下文和计划已清空。\n"))
 
     elif cmd == "/history":
         messages = agent.history.all_messages
@@ -234,8 +248,9 @@ def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER)
 
         # 内置工具
-        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()]}
-        for tool_func in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()]:
+        _builtin_factory_tools = [*BUILTIN_TOOLS, create_structured_output_tool(), *create_todo_write_tool()]
+        builtin_names = {w._tool_wrapper.name for w in _builtin_factory_tools}
+        for tool_func in _builtin_factory_tools:
             w = tool_func._tool_wrapper
             if w.name in active_tools:
                 danger = c("red", " [D]") if w.dangerous else ""
@@ -283,9 +298,47 @@ def handle_command(agent: Agent, cmd: str) -> bool:
   /history   — 查看对话历史
   /reset     — 重置对话（清空上下文）
   /tools     — 查看可用工具
+  /plan      — 查看当前会话计划
   /help      — 显示帮助
   /quit      — 退出
 """)
+
+    elif cmd == "/plan":
+        if PLAN_FILE.exists():
+            import json
+            try:
+                data = json.loads(PLAN_FILE.read_text(encoding="utf-8"))
+                items = data.get("items", [])
+            except Exception as e:
+                print(f"\n  {c('red', '计划文件读取失败')}: {e}\n")
+                return True
+
+            if not items:
+                print(f"\n  {c('dim', '暂无会话计划。')}\n")
+                return True
+
+            print(f"\n{DIVIDER}")
+            print(c("bold", "  当前会话计划") + c("dim", f" ({len(items)} 个条目)"))
+            print(DIVIDER)
+            markers = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
+            colors = {"pending": "yellow", "in_progress": "green", "completed": "dim"}
+            completed = 0
+            for item in items:
+                status = item.get("status", "pending")
+                marker = markers.get(status, "[ ]")
+                color = colors.get(status, "yellow")
+                line = f"  {marker} {item['content']}"
+                if status == "in_progress" and item.get("activeForm"):
+                    line += f"  ({c('cyan', item['activeForm'])})"
+                if status == "completed":
+                    completed += 1
+                print(f"  {c(color, line)}")
+            print(f"\n  {c('dim', f'({completed}/{len(items)} 已完成)')}")
+            print(f"  {c('dim', f'文件: {PLAN_FILE}')}")
+            print(DIVIDER + "\n")
+        else:
+            print(f"\n  {c('dim', '暂无会话计划（计划文件不存在）。')}\n")
+
     else:
         print(c("red", f"\n  未知命令: {cmd}  (输入 /help 查看帮助)\n"))
 
@@ -309,6 +362,25 @@ async def main():
         summary = ", ".join(f"{cat}({len(names)}个)" for cat, names in categories.items())
         print(c("cyan", f"  MCP 工具已加载（休眠态）: {summary}"))
         print(c("dim", "  输入 /tools 查看详情，或通过 search_tools / activate_tools 按需激活\n"))
+
+    # 显示恢复的计划状态
+    if PLAN_FILE.exists():
+        import json
+        try:
+            data = json.loads(PLAN_FILE.read_text(encoding="utf-8"))
+            items = data.get("items", [])
+            if items:
+                completed = sum(1 for i in items if i.get("status") == "completed")
+                in_progress = next(
+                    (i["content"] for i in items if i.get("status") == "in_progress"), None
+                )
+                status_line = f"  计划已恢复: {completed}/{len(items)} 已完成"
+                if in_progress:
+                    status_line += f" | 当前: {c('green', in_progress)}"
+                print(c("yellow", status_line))
+                print(c("dim", f"  输入 /plan 查看详情\n"))
+        except Exception:
+            pass
 
     turn_count = 0
 

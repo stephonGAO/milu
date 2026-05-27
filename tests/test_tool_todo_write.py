@@ -1,4 +1,8 @@
-"""测试内置工具 todo_write - 会话计划管理"""
+"""测试内置工具 todo_write - 会话计划管理（含文件持久化）"""
+import json
+import tempfile
+from pathlib import Path
+
 import pytest
 from agent_framework.tools.builtin.todo_write import (
     TodoManager,
@@ -144,14 +148,22 @@ class TestTodoManagerReminder:
         assert mgr.maybe_reminder() is None
 
     def test_reminder_after_threshold(self):
-        """超过阈值后触发提醒"""
+        """超过阈值后触发提醒（包含完整计划）"""
         mgr = TodoManager()
-        mgr.update([{"content": "任务", "status": "pending"}])
+        mgr.update([
+            {"content": "任务 A", "status": "completed"},
+            {"content": "任务 B", "status": "in_progress"},
+        ])
         for _ in range(_PLAN_REMINDER_INTERVAL):
             mgr.note_round()
         reminder = mgr.maybe_reminder()
         assert reminder is not None
         assert "刷新" in reminder
+        # 关键：提醒中包含完整计划内容
+        assert "任务 A" in reminder
+        assert "任务 B" in reminder
+        assert "[x]" in reminder
+        assert "[>]" in reminder
 
     def test_no_reminder_before_threshold(self):
         """未达阈值无提醒"""
@@ -180,6 +192,115 @@ class TestTodoManagerReminder:
         assert mgr.maybe_reminder() is None
 
 
+# ── 文件持久化测试 ──────────────────────────────────────────
+
+
+class TestTodoManagerPersistence:
+    """TodoManager 文件持久化"""
+
+    def test_save_to_file(self, tmp_path):
+        """update 后自动保存到文件"""
+        plan_file = tmp_path / ".plan.json"
+        mgr = TodoManager(plan_file=plan_file)
+        mgr.update([
+            {"content": "分析需求", "status": "completed"},
+            {"content": "实现功能", "status": "in_progress", "activeForm": "编码中"},
+        ])
+        assert plan_file.exists()
+        data = json.loads(plan_file.read_text(encoding="utf-8"))
+        assert len(data["items"]) == 2
+        assert data["items"][0]["content"] == "分析需求"
+        assert data["items"][0]["status"] == "completed"
+        assert data["items"][1]["activeForm"] == "编码中"
+
+    def test_load_from_file(self, tmp_path):
+        """启动时从文件自动加载"""
+        plan_file = tmp_path / ".plan.json"
+        # 先写入文件
+        data = {
+            "items": [
+                {"content": "任务 A", "status": "completed", "activeForm": ""},
+                {"content": "任务 B", "status": "in_progress", "activeForm": "进行中"},
+            ]
+        }
+        plan_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        # 新实例应自动加载
+        mgr = TodoManager(plan_file=plan_file)
+        assert len(mgr.state.items) == 2
+        assert mgr.state.items[0].content == "任务 A"
+        assert mgr.state.items[1].status == "in_progress"
+
+    def test_load_nonexistent_file(self, tmp_path):
+        """文件不存在时正常启动"""
+        plan_file = tmp_path / "nonexistent.json"
+        mgr = TodoManager(plan_file=plan_file)
+        assert len(mgr.state.items) == 0
+
+    def test_roundtrip(self, tmp_path):
+        """保存后加载，内容一致"""
+        plan_file = tmp_path / ".plan.json"
+        mgr1 = TodoManager(plan_file=plan_file)
+        mgr1.update([
+            {"content": "设计 API", "status": "completed", "activeForm": ""},
+            {"content": "实现核心", "status": "in_progress", "activeForm": "编码中"},
+            {"content": "编写测试", "status": "pending", "activeForm": ""},
+        ])
+
+        # 新实例从文件加载
+        mgr2 = TodoManager(plan_file=plan_file)
+        assert len(mgr2.state.items) == 3
+        for i in range(3):
+            assert mgr2.state.items[i].content == mgr1.state.items[i].content
+            assert mgr2.state.items[i].status == mgr1.state.items[i].status
+            assert mgr2.state.items[i].active_form == mgr1.state.items[i].active_form
+
+    def test_overwrite_file_on_update(self, tmp_path):
+        """每次 update 都覆盖文件"""
+        plan_file = tmp_path / ".plan.json"
+        mgr = TodoManager(plan_file=plan_file)
+        mgr.update([{"content": "初始任务", "status": "pending"}])
+        mgr.update([{"content": "新任务", "status": "completed"}])
+
+        data = json.loads(plan_file.read_text(encoding="utf-8"))
+        assert len(data["items"]) == 1
+        assert data["items"][0]["content"] == "新任务"
+
+    def test_clear_removes_file(self, tmp_path):
+        """clear() 删除计划文件"""
+        plan_file = tmp_path / ".plan.json"
+        mgr = TodoManager(plan_file=plan_file)
+        mgr.update([{"content": "任务", "status": "pending"}])
+        assert plan_file.exists()
+        mgr.clear()
+        assert not plan_file.exists()
+
+    def test_no_file_mode(self):
+        """plan_file=None 时不保存文件"""
+        mgr = TodoManager()  # 不传 plan_file
+        mgr.update([{"content": "任务", "status": "pending"}])
+        assert mgr.plan_file is None
+
+    def test_to_dict(self):
+        """to_dict 序列化"""
+        mgr = TodoManager()
+        mgr.update([
+            {"content": "A", "status": "completed"},
+            {"content": "B", "status": "in_progress", "activeForm": "做 B"},
+        ])
+        d = mgr.to_dict()
+        assert len(d["items"]) == 2
+        assert d["items"][1]["activeForm"] == "做 B"
+
+    def test_corrupted_file_handled(self, tmp_path):
+        """损坏的计划文件不崩溃"""
+        plan_file = tmp_path / ".plan.json"
+        plan_file.write_text("this is not json!", encoding="utf-8")
+        # 不应抛出异常
+        mgr = TodoManager(plan_file=plan_file)
+        assert len(mgr.state.items) == 0
+
+
 # ── create_todo_write_tool 集成测试 ─────────────────────────
 
 
@@ -187,22 +308,39 @@ class TestTodoWriteTool:
     """create_todo_write_tool 工厂与包装函数"""
 
     @pytest.mark.asyncio
-    async def test_tool_metadata(self):
-        """工具元数据"""
-        tool = create_todo_write_tool()
-        wrapper = tool._tool_wrapper
+    async def test_returns_tuple(self):
+        """工厂返回 (todo_write, todo_read) 元组"""
+        result = create_todo_write_tool()
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        todo_write, todo_read = result
+        assert todo_write._tool_wrapper.name == "todo_write"
+        assert todo_read._tool_wrapper.name == "todo_read"
+
+    @pytest.mark.asyncio
+    async def test_write_tool_metadata(self):
+        """todo_write 工具元数据"""
+        todo_write, _ = create_todo_write_tool()
+        wrapper = todo_write._tool_wrapper
         assert wrapper.name == "todo_write"
         assert wrapper.is_async is True
         assert wrapper.dangerous is False
 
     @pytest.mark.asyncio
-    async def test_tool_invocation(self):
-        """工具正常调用"""
-        mgr = TodoManager()
-        tool = create_todo_write_tool(mgr)
-        wrapper = tool._tool_wrapper
+    async def test_read_tool_metadata(self):
+        """todo_read 工具元数据"""
+        _, todo_read = create_todo_write_tool()
+        wrapper = todo_read._tool_wrapper
+        assert wrapper.name == "todo_read"
+        assert wrapper.is_async is True
 
-        result = await wrapper.func(items=[
+    @pytest.mark.asyncio
+    async def test_write_invocation(self):
+        """todo_write 正常调用"""
+        mgr = TodoManager()
+        todo_write, _ = create_todo_write_tool(manager=mgr)
+
+        result = await todo_write._tool_wrapper.func(items=[
             {"content": "分析需求", "status": "completed"},
             {"content": "编写代码", "status": "in_progress"},
         ])
@@ -210,43 +348,91 @@ class TestTodoWriteTool:
         assert len(mgr.state.items) == 2
 
     @pytest.mark.asyncio
-    async def test_tool_error_propagates(self):
-        """工具错误通过字符串返回（由 executor 处理）"""
-        tool = create_todo_write_tool()
-        wrapper = tool._tool_wrapper
-
-        # 无效状态应由 executor 捕获并转为 is_error=True
-        # 这里直接测试函数，应抛出 ValueError
-        with pytest.raises(ValueError):
-            await wrapper.func(items=[{"content": "任务", "status": "bad_status"}])
+    async def test_read_invocation(self):
+        """todo_read 查看当前计划"""
+        mgr = TodoManager()
+        mgr.update([
+            {"content": "任务 A", "status": "completed"},
+            {"content": "任务 B", "status": "pending"},
+        ])
+        _, todo_read = create_todo_write_tool(manager=mgr)
+        result = await todo_read._tool_wrapper.func()
+        assert "[x] 任务 A" in result
+        assert "[ ] 任务 B" in result
+        assert "1/2" in result
 
     @pytest.mark.asyncio
-    async def test_wrapped_func_resets_counter(self):
-        """包装函数应在调用后重置 rounds_since_update"""
+    async def test_read_empty_plan(self):
+        """todo_read 空计划"""
         mgr = TodoManager()
-        tool = create_todo_write_tool(mgr)
-        wrapper = tool._tool_wrapper
+        _, todo_read = create_todo_write_tool(manager=mgr)
+        result = await todo_read._tool_wrapper.func()
+        assert "暂无" in result
 
-        # 先手动设置轮次
+    @pytest.mark.asyncio
+    async def test_write_persists_to_file(self, tmp_path):
+        """todo_write 调用后文件被保存"""
+        plan_file = tmp_path / ".plan.json"
+        todo_write, _ = create_todo_write_tool(plan_file=plan_file)
+
+        await todo_write._tool_wrapper.func(items=[
+            {"content": "持久化测试", "status": "pending"},
+        ])
+        assert plan_file.exists()
+        data = json.loads(plan_file.read_text(encoding="utf-8"))
+        assert data["items"][0]["content"] == "持久化测试"
+
+    @pytest.mark.asyncio
+    async def test_read_after_file_load(self, tmp_path):
+        """从文件加载后 todo_read 可见"""
+        plan_file = tmp_path / ".plan.json"
+        # 预先写入计划文件
+        data = {
+            "items": [
+                {"content": "恢复的任务", "status": "in_progress", "activeForm": ""},
+            ]
+        }
+        plan_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+        # 新工厂应自动加载
+        _, todo_read = create_todo_write_tool(plan_file=plan_file)
+        result = await todo_read._tool_wrapper.func()
+        assert "恢复的任务" in result
+        assert "[>]" in result
+
+    @pytest.mark.asyncio
+    async def test_read_resets_reminder_counter(self):
+        """todo_read 调用后重置提醒计数器"""
+        mgr = TodoManager()
+        mgr.update([{"content": "任务", "status": "pending"}])
         mgr.state.rounds_since_update = 10
-        # 调用工具
-        await wrapper.func(items=[{"content": "任务", "status": "pending"}])
-        # 应被重置
+
+        _, todo_read = create_todo_write_tool(manager=mgr)
+        await todo_read._tool_wrapper.func()
         assert mgr.state.rounds_since_update == 0
+
+    @pytest.mark.asyncio
+    async def test_write_error_propagates(self):
+        """todo_write 错误应抛出（由 executor 处理）"""
+        todo_write, _ = create_todo_write_tool()
+        with pytest.raises(ValueError):
+            await todo_write._tool_wrapper.func(items=[
+                {"content": "任务", "status": "bad_status"}
+            ])
 
     @pytest.mark.asyncio
     async def test_shared_manager(self):
         """多个工具共享同一个 Manager 状态"""
         mgr = TodoManager()
-        tool_a = create_todo_write_tool(mgr)
-        tool_b = create_todo_write_tool(mgr)
+        write_a, read_a = create_todo_write_tool(manager=mgr)
+        write_b, read_b = create_todo_write_tool(manager=mgr)
 
-        await tool_a._tool_wrapper.func(items=[
+        await write_a._tool_wrapper.func(items=[
             {"content": "共享任务", "status": "pending"},
         ])
-        # tool_b 应该能看到 tool_a 写入的状态
-        assert len(mgr.state.items) == 1
-        assert mgr.state.items[0].content == "共享任务"
+        # read_b 应该能看到 write_a 写入的状态
+        result = await read_b._tool_wrapper.func()
+        assert "共享任务" in result
 
 
 # ── Agent 集成测试 ──────────────────────────────────────────
@@ -256,15 +442,15 @@ class TestTodoWriteAgentIntegration:
     """todo_write 与 Agent 的集成"""
 
     @pytest.mark.asyncio
-    async def test_agent_with_todo_tool(self):
-        """Agent 注册并使用 todo_write 工具"""
-        import json
+    async def test_agent_with_todo_tools(self):
+        """Agent 注册并使用 todo_write + todo_read"""
+        import json as _json
         from unittest.mock import AsyncMock
         from agent_framework.agent import Agent, AgentConfig
         from agent_framework.agent.events import ToolResult, AgentDone
         from agent_framework.llm.base.response import StreamChunk
 
-        todo_tool = create_todo_write_tool()
+        todo_write, todo_read = create_todo_write_tool()
         call_count = 0
 
         async def mock_chat(*a, **kw):
@@ -278,7 +464,7 @@ class TestTodoWriteAgentIntegration:
                         'index': 0, 'id': 'call_1',
                         'function': type('obj', (), {
                             'name': 'todo_write',
-                            'arguments': json.dumps({
+                            'arguments': _json.dumps({
                                 "items": [
                                     {"content": "分析需求", "status": "completed"},
                                     {"content": "编码实现", "status": "in_progress"},
@@ -298,7 +484,7 @@ class TestTodoWriteAgentIntegration:
         agent = Agent(
             llm=llm,
             system_prompt="你是助手",
-            tools=[todo_tool],
+            tools=[todo_write, todo_read],
             config=AgentConfig(max_turns=5),
         )
 
@@ -311,3 +497,67 @@ class TestTodoWriteAgentIntegration:
         assert len(tool_results) == 1
         assert not tool_results[0].is_error
         assert "1/2" in tool_results[0].output
+
+    @pytest.mark.asyncio
+    async def test_agent_reads_plan_after_truncation(self, tmp_path):
+        """模拟上下文截断后，Agent 通过 todo_read 恢复计划"""
+        import json as _json
+        from unittest.mock import AsyncMock
+        from agent_framework.agent import Agent, AgentConfig
+        from agent_framework.agent.events import ToolResult
+        from agent_framework.llm.base.response import StreamChunk
+
+        plan_file = tmp_path / ".plan.json"
+        # 预先保存一个计划（模拟之前的会话）
+        plan_data = {
+            "items": [
+                {"content": "已完成的步骤", "status": "completed", "activeForm": ""},
+                {"content": "当前步骤", "status": "in_progress", "activeForm": "处理中"},
+                {"content": "待办步骤", "status": "pending", "activeForm": ""},
+            ]
+        }
+        plan_file.write_text(_json.dumps(plan_data, ensure_ascii=False), encoding="utf-8")
+
+        todo_write, todo_read = create_todo_write_tool(plan_file=plan_file)
+        call_count = 0
+
+        async def mock_chat(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+
+            if call_count == 1:
+                # LLM 调用 todo_read 查看当前计划
+                yield StreamChunk(tool_calls=[
+                    type('obj', (), {
+                        'index': 0, 'id': 'call_1',
+                        'function': type('obj', (), {
+                            'name': 'todo_read',
+                            'arguments': "{}",
+                        })()
+                    })()
+                ])
+                yield StreamChunk(finish_reason="tool_calls")
+            else:
+                yield StreamChunk(content="好的，我继续当前步骤", finish_reason="stop")
+
+        llm = AsyncMock()
+        llm.chat = mock_chat
+
+        agent = Agent(
+            llm=llm,
+            system_prompt="你是助手",
+            tools=[todo_write, todo_read],
+            config=AgentConfig(max_turns=5),
+        )
+
+        events = []
+        async for event in agent.run("我之前的计划是什么"):
+            events.append(event)
+
+        tool_results = [e for e in events if isinstance(e, ToolResult)]
+        assert len(tool_results) == 1
+        assert not tool_results[0].is_error
+        # 关键：即使上下文被截断，计划内容通过文件恢复
+        assert "已完成的步骤" in tool_results[0].output
+        assert "当前步骤" in tool_results[0].output
+        assert "处理中" in tool_results[0].output
