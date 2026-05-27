@@ -119,7 +119,8 @@ def build_agent() -> Agent:
         ),
         tools=all_tools,
         history=history,
-        config=AgentConfig(max_turns=8, timeout=60, total_timeout=300, confirm_dangerous=True),
+        # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300, confirm_dangerous=True),
+        config=AgentConfig(),
         on_confirm=confirm_dangerous,
     )
 
