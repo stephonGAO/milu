@@ -28,9 +28,14 @@ from agent_framework.tools.builtin.structured_output import (
     structured_output,
     create_structured_output_tool,
 )
+from agent_framework.tools.builtin.todo_write import (
+    TodoManager,
+    create_todo_write_tool,
+)
 
 # 所有内置工具列表，可直接传给 Agent(tools=BUILTIN_TOOLS)
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
+# 注意：todo_write 需要通过 create_todo_write_tool() 创建后单独添加
 BUILTIN_TOOLS = [
     datetime_tool,
     http_request,
@@ -50,5 +55,7 @@ __all__ = [
     "shell_command",
     "structured_output",
     "create_structured_output_tool",
+    "TodoManager",
+    "create_todo_write_tool",
     "BUILTIN_TOOLS",
 ]

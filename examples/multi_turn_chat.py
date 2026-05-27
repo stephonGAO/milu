@@ -23,7 +23,7 @@ from agent_framework import (
     AgentDone, AgentError,
 )
 from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool
+from agent_framework.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool, create_todo_write_tool
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -55,7 +55,7 @@ def print_header():
     print(c("bold", c("cyan", "  多轮对话 Agent — 交互式聊天")))
     print(BANNER)
     print(f"""
-  内置工具: {', '.join(t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool()])}
+  内置工具: {', '.join(t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()])}
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
 
   命令:
@@ -96,7 +96,8 @@ def build_agent() -> Agent:
     llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=True)
 
     so_tool = create_structured_output_tool()
-    all_tools = [*BUILTIN_TOOLS, so_tool]
+    todo_tool = create_todo_write_tool()
+    all_tools = [*BUILTIN_TOOLS, so_tool, todo_tool]
 
     history = ConversationHistory(
         strategy="sliding_window",
@@ -232,8 +233,8 @@ def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER)
 
         # 内置工具
-        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool()]}
-        for tool_func in [*BUILTIN_TOOLS, create_structured_output_tool()]:
+        builtin_names = {w._tool_wrapper.name for w in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()]}
+        for tool_func in [*BUILTIN_TOOLS, create_structured_output_tool(), create_todo_write_tool()]:
             w = tool_func._tool_wrapper
             if w.name in active_tools:
                 danger = c("red", " [D]") if w.dangerous else ""
