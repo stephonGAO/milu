@@ -29,6 +29,9 @@ from agent_framework.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+# 计划工具名称集合 — 不可与其他工具同批并发执行
+_PLAN_TOOLS = {"todo_write", "todo_read"}
+
 
 # ---------------------------------------------------------------------------
 # 合并工具调用片段
@@ -142,6 +145,10 @@ class Agent:
         # 设置 system prompt
         self._history.set_system(Message(role=MessageRole.SYSTEM, content=system_prompt))
 
+        # 流程约束状态标记
+        self._work_started = False   # 非计划工具是否已执行
+        self._plan_created = False   # todo_write 是否已被成功调用
+
     # -- 属性 ----------------------------------------------------------------
 
     @property
@@ -159,6 +166,8 @@ class Agent:
     async def reset(self) -> None:
         """清空对话历史（保留 system 消息）。"""
         self._history.clear()
+        self._work_started = False
+        self._plan_created = False
 
     # -- MCP 生命周期 --------------------------------------------------------
 
@@ -236,6 +245,9 @@ class Agent:
         total_tool_calls = 0
         start_time = time.monotonic()
         final_text = ""
+
+        self._work_started = False
+        self._plan_created = False
 
         while True:
             turn_count += 1
@@ -339,6 +351,64 @@ class Agent:
                 )
                 return
             total_tool_calls += batch_size
+
+            # ── 10a.5 计划工具冲突检查（在危险工具确认之前）──
+            # 如果计划工具与其他工具混在同一批，立即拒绝，不进入确认流程
+            batch_names = {
+                c.get("function", {}).get("name", "")
+                for c in resolved_calls
+            }
+            has_plan = bool(batch_names & _PLAN_TOOLS)
+            has_non_plan = bool(batch_names - _PLAN_TOOLS)
+
+            if has_plan and has_non_plan:
+                plan_names = ", ".join(batch_names & _PLAN_TOOLS)
+                other_names = ", ".join(batch_names - _PLAN_TOOLS)
+                error_msg = (
+                    f"错误：计划工具（{plan_names}）不能与其他工具（{other_names}）"
+                    f"在同一批调用中同时执行。"
+                    f"请先单独调用计划工具完成计划更新，"
+                    f"然后在下一轮对话中再调用其他工具。"
+                )
+                for call in resolved_calls:
+                    tc_id = call.get("id", "")
+                    tn = call.get("function", {}).get("name", "")
+                    ta = call.get("function", {}).get("arguments", "{}")
+                    yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
+                    yield ToolResult(
+                        tool_name=tn, tool_call_id=tc_id,
+                        output=error_msg, is_error=True,
+                    )
+                    self._history.add(Message(
+                        role=MessageRole.TOOL, content=error_msg,
+                        tool_call_id=tc_id, name=tn,
+                    ))
+                continue  # 跳过确认循环和 asyncio.gather，直接进入下一轮
+
+            # ── 10a.6 跨轮次执行顺序守卫 ──
+            # 如果已经执行过非计划工具，禁止再创建计划
+            if self._work_started and not self._plan_created:
+                late_plan = batch_names & _PLAN_TOOLS
+                if late_plan:
+                    plan_names = ", ".join(late_plan)
+                    error_msg = (
+                        f"流程约束：已经开始执行任务后不能再创建计划（{plan_names}）。"
+                        f"请直接继续完成工作，无需补做计划。"
+                    )
+                    for call in resolved_calls:
+                        tc_id = call.get("id", "")
+                        tn = call.get("function", {}).get("name", "")
+                        ta = call.get("function", {}).get("arguments", "{}")
+                        yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
+                        yield ToolResult(
+                            tool_name=tn, tool_call_id=tc_id,
+                            output=error_msg, is_error=True,
+                        )
+                        self._history.add(Message(
+                            role=MessageRole.TOOL, content=error_msg,
+                            tool_call_id=tc_id, name=tn,
+                        ))
+                    continue
 
             # ── 10b. 顺序发出 ToolCallStart + 危险工具确认 ──
             confirmed = []
@@ -454,6 +524,12 @@ class Agent:
                         output=exec_result.output,
                         is_error=exec_result.is_error,
                     )
+
+                    # 标记流程约束状态
+                    if tool_name == "todo_write" and not exec_result.is_error:
+                        self._plan_created = True
+                    if tool_name not in _PLAN_TOOLS:
+                        self._work_started = True
 
                     # 将工具结果加入历史
                     self._history.add(Message(

@@ -29,7 +29,6 @@ from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
     create_todo_write_tool,
-    web_search,
     http_request,
     file,
     python_repl,
@@ -130,8 +129,10 @@ def build_agent() -> Agent:
                     "你是一个专业的调研助手。你的任务是搜索和整理信息，"
                     "提供准确、全面的调研结果。请引用信息来源。"
                 ),
-                tools=[web_search, http_request],
-                config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
+                # 不传 DuckDuckGo web_search 工具（国内不可用），
+                # 依靠共享 LLM 的 Qwen 内置搜索（web_search=True）
+                tools=[http_request],
+                config=AgentConfig(),
             ),
             SubAgentConfig(
                 name="coder",
@@ -145,7 +146,7 @@ def build_agent() -> Agent:
                     "操作文件时先用 index 了解结构，再精确操作。"
                 ),
                 tools=[file, python_repl],
-                config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
+                config=AgentConfig(),
             ),
         ],
     )
@@ -169,10 +170,14 @@ def build_agent() -> Agent:
             "  5. 你拥有元工具 list_catalog / search_tools / activate_tools，"
             "可以动态发现和激活 MCP 外部工具（如 fetch、数据库、Figma 等）。"
             "当需要外部能力时，先用 search_tools 搜索，再用 activate_tools 激活后调用\n"
-            "  6. 对于多步骤任务，主动使用 todo_write 制定并跟踪计划。"
-            "计划会自动保存到本地文件，如果看到提醒消息中的当前计划，"
-            "请根据进度继续工作或更新计划状态。"
-            "不确定当前计划时，调用 todo_read 查看\n"
+            "  6. 对于复杂多步骤任务，主动使用 todo_write 制定并跟踪计划。"
+            "注意：绝对不要在创建计划的同一轮调用中同时启动子代理或其他工具。"
+            "如需更新计划并执行任务，必须分两轮调用：第一轮只调用 todo_write，"
+            "第二轮再调用其他工具\n"
+            "注意：只可在任务的开头使用 todo_write 制定计划"
+            "一旦进入本次执行阶段就不要再创建计划，只专注完成任务！"
+            "不确定当前计划时，调用 todo_read 查看。"
+            "todo_write 和 todo_read 必须单独调用。"
             "  7. 你拥有两个专业子代理：researcher（调研助手）和 coder（编程助手）。"
             "当任务需要专项能力时，委派给对应子代理。给子代理清晰的任务描述，"
             "综合其结果给出最终回复。简单任务可直接处理，不必委派"
@@ -193,6 +198,9 @@ async def handle_turn(agent: Agent, user_input: str):
     """处理一轮用户输入，流式渲染 Agent 事件"""
     thinking_visible = False
     assistant_text = ""
+    announced_subagents: set[str] = set()  # 已显示开始标签的子代理
+    # 子代理输出状态：跟踪是否需要在下一行打印标签前缀
+    sa_needs_tag: dict[str, bool] = {}   # True = 下次文本输出前需打印标签
 
     async for event in agent.run(user_input):
 
@@ -233,24 +241,59 @@ async def handle_turn(agent: Agent, user_input: str):
 
         # ── 子代理内部事件 ──
         elif isinstance(event, SubAgentEvent):
-            if isinstance(event.event, ToolCallStart):
+            name = event.subagent_name
+            tag = c("magenta", f"[{name}]")
+
+            # 首次出现该子代理事件时，打印开始标签
+            if name not in announced_subagents:
+                announced_subagents.add(name)
+                sa_needs_tag[name] = True  # 首个文本前需要标签
                 print(
-                    f"    {c('cyan', '->')} {event.event.tool_name}"
+                    f"\n  {c('magenta', '╭─')} {tag} {c('magenta', '开始执行')} {c('magenta', '─' * 30)}",
+                    flush=True,
+                )
+
+            if isinstance(event.event, TextDelta):
+                if sa_needs_tag.get(name, True):
+                    print(f"    {tag} ", end="", flush=True)
+                    sa_needs_tag[name] = False
+                print(event.event.text, end="", flush=True)
+                # 文本以换行结尾时，下次输出需要重新打印标签
+                if event.event.text.endswith("\n"):
+                    sa_needs_tag[name] = True
+            elif isinstance(event.event, ReasoningDelta):
+                if sa_needs_tag.get(name, True):
+                    print(f"    {tag} ", end="", flush=True)
+                    sa_needs_tag[name] = False
+                print(c("dim", event.event.text), end="", flush=True)
+                if event.event.text.endswith("\n"):
+                    sa_needs_tag[name] = True
+            elif isinstance(event.event, ToolCallStart):
+                # 工具调用始终另起一行
+                print(
+                    f"\n    {tag} {c('cyan', '->')} {event.event.tool_name}"
                     f"{c('dim', '(' + str(event.event.arguments)[:60] + ')')}",
                     flush=True,
                 )
+                sa_needs_tag[name] = True  # 工具调用后需要新行+标签
             elif isinstance(event.event, ToolResult):
-                tag = c("green", "OK") if not event.event.is_error else c("red", "ERR")
+                result_tag = c("green", "OK") if not event.event.is_error else c("red", "ERR")
                 output = event.event.output[:120] + "..." if len(event.event.output) > 120 else event.event.output
-                print(f"    {tag} {c('dim', output)}", flush=True)
+                print(f"\n    {tag} {result_tag} {c('dim', output)}", flush=True)
+                sa_needs_tag[name] = True  # 工具结果后需要新行+标签
 
         # ── 子代理完成 ──
         elif isinstance(event, SubAgentDone):
+            name = event.subagent_name
+            tag = c("magenta", f"[{name}]")
             status = c("red", " [ERROR]") if event.is_error else ""
+            # 如果子代理文本未以换行结束，先补一个换行
+            if not sa_needs_tag.get(name, True):
+                print()
             print(
-                f"  {c('magenta', '[SubAgent Done]')} "
+                f"  {c('magenta', '╰─')} {tag} {c('magenta', '完成')} "
                 f"{c('dim', f'turns={event.turn_count}, tokens={event.total_usage.total_tokens}')}"
-                f"{status}",
+                f"{status} {c('magenta', '─' * 28)}",
                 flush=True,
             )
 

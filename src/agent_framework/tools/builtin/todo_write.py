@@ -124,7 +124,10 @@ class TodoManager:
             ))
 
         if in_progress_count > 1:
-            raise ValueError("同时只能有 1 个 in_progress 状态的条目")
+            raise ValueError(
+                "同时只能有 1 个 in_progress 状态的条目。"
+                "请将当前正在执行的任务标记为 in_progress，其余标记为 pending。"
+            )
 
         self.state.items = normalized
         self.state.rounds_since_update = 0
@@ -271,6 +274,8 @@ def create_todo_write_tool(
             "（而非增量修改），请传入完整的任务列表。"
             "多步骤任务时主动使用此工具跟踪进度。"
             "计划会自动保存到本地文件，防止上下文丢失。"
+            "**注意**：同一时刻最多只能有 1 个 in_progress 状态的条目。"
+            "此工具必须单独调用，不可与其他工具（如子代理）放在同一批调用中。"
         ),
     )
     async def _todo_write(items: list[dict]) -> str:
@@ -307,6 +312,7 @@ def create_todo_write_tool(
             "查看当前会话计划的完整状态。"
             "当你不确定当前计划内容、或想确认进度时调用此工具。"
             "返回包含所有任务的状态清单。"
+            "此工具必须单独调用，不可与其他工具放在同一批调用中。"
         ),
     )
     async def _todo_read() -> str:
