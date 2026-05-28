@@ -21,9 +21,19 @@ from agent_framework import (
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolConfirmRequired, ToolResult,
     AgentDone, AgentError,
+    SubAgentConfig, create_subagent_tools,
+    SubAgentEvent, SubAgentDone,
 )
 from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool, create_todo_write_tool
+from agent_framework.tools.builtin import (
+    BUILTIN_TOOLS,
+    create_structured_output_tool,
+    create_todo_write_tool,
+    web_search,
+    http_request,
+    file,
+    python_repl,
+)
 from agent_framework.tools.builtin.todo_write import TodoManager
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -61,6 +71,7 @@ def print_header():
     _all_names = [t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool(), *_todo_tools]]
     print(f"""
   内置工具: {', '.join(_all_names)}
+  子代理:   researcher（调研助手）, coder（编程助手）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
   计划文件: {PLAN_FILE}
 
@@ -99,12 +110,47 @@ async def confirm_dangerous(tool_name: str, args_str: str) -> ConfirmResponse:
 # ── Agent 构建 ──────────────────────────────────────────
 
 def build_agent() -> Agent:
-    """构建带全部内置工具的 Agent"""
+    """构建带全部内置工具和子代理的 Agent"""
     llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=True)
 
     so_tool = create_structured_output_tool()
     todo_write, todo_read = create_todo_write_tool(plan_file=PLAN_FILE)
-    all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read]
+
+    # 创建子代理工具
+    subagent_tools = create_subagent_tools(
+        llm=llm,
+        subagents=[
+            SubAgentConfig(
+                name="researcher",
+                description=(
+                    "调研助手：擅长搜索和整理信息。"
+                    "当需要查找资料、对比分析、总结报告时委派此代理。"
+                ),
+                system_prompt=(
+                    "你是一个专业的调研助手。你的任务是搜索和整理信息，"
+                    "提供准确、全面的调研结果。请引用信息来源。"
+                ),
+                tools=[web_search, http_request],
+                config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
+            ),
+            SubAgentConfig(
+                name="coder",
+                description=(
+                    "编程助手：擅长写代码和调试。"
+                    "当需要编写、修改、测试代码或解决编程问题时委派此代理。"
+                ),
+                system_prompt=(
+                    "你是一个专业的编程助手。你擅长 Python 编程，"
+                    "可以编写清晰的代码、调试问题、创建示例文件。"
+                    "操作文件时先用 index 了解结构，再精确操作。"
+                ),
+                tools=[file, python_repl],
+                config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
+            ),
+        ],
+    )
+
+    all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read, *subagent_tools]
 
     history = ConversationHistory(
         strategy="sliding_window",
@@ -114,7 +160,7 @@ def build_agent() -> Agent:
     agent = Agent(
         llm=llm,
         system_prompt=(
-            "你是一个功能强大的 AI 助手，拥有丰富的工具集。\n"
+            "你是一个功能强大的 AI 助手，拥有丰富的工具集和专业子代理团队。\n"
             "核心原则：\n"
             "  1. 主动使用工具完成任务，不要只描述怎么做——直接做\n"
             "  2. 保持上下文连贯，记住之前对话中的信息\n"
@@ -126,7 +172,10 @@ def build_agent() -> Agent:
             "  6. 对于多步骤任务，主动使用 todo_write 制定并跟踪计划。"
             "计划会自动保存到本地文件，如果看到提醒消息中的当前计划，"
             "请根据进度继续工作或更新计划状态。"
-            "不确定当前计划时，调用 todo_read 查看"
+            "不确定当前计划时，调用 todo_read 查看\n"
+            "  7. 你拥有两个专业子代理：researcher（调研助手）和 coder（编程助手）。"
+            "当任务需要专项能力时，委派给对应子代理。给子代理清晰的任务描述，"
+            "综合其结果给出最终回复。简单任务可直接处理，不必委派"
         ),
         tools=all_tools,
         history=history,
@@ -181,6 +230,29 @@ async def handle_turn(agent: Agent, user_input: str):
                     print(f"  {c('red', '[REJECTED]')} 用户指示: {c('cyan', event.message)}", flush=True)
                 else:
                     print(f"  {c('red', '[REJECTED]')} 用户拒绝执行", flush=True)
+
+        # ── 子代理内部事件 ──
+        elif isinstance(event, SubAgentEvent):
+            if isinstance(event.event, ToolCallStart):
+                print(
+                    f"    {c('cyan', '->')} {event.event.tool_name}"
+                    f"{c('dim', '(' + str(event.event.arguments)[:60] + ')')}",
+                    flush=True,
+                )
+            elif isinstance(event.event, ToolResult):
+                tag = c("green", "OK") if not event.event.is_error else c("red", "ERR")
+                output = event.event.output[:120] + "..." if len(event.event.output) > 120 else event.event.output
+                print(f"    {tag} {c('dim', output)}", flush=True)
+
+        # ── 子代理完成 ──
+        elif isinstance(event, SubAgentDone):
+            status = c("red", " [ERROR]") if event.is_error else ""
+            print(
+                f"  {c('magenta', '[SubAgent Done]')} "
+                f"{c('dim', f'turns={event.turn_count}, tokens={event.total_usage.total_tokens}')}"
+                f"{status}",
+                flush=True,
+            )
 
         # ── 工具结果 ──
         elif isinstance(event, ToolResult):
@@ -264,8 +336,17 @@ def handle_command(agent: Agent, cmd: str) -> bool:
                 desc = wrapper.description[:40] if wrapper else ""
                 print(f"  {c('cyan', name):<30} {desc}")
 
+        # 子代理工具
+        subagent_names = {"researcher", "coder"}
+        for name in subagent_names:
+            if name in active_tools:
+                wrapper = agent.tools.get_tool(name)
+                desc = wrapper.description[:40] if wrapper else ""
+                print(f"  {c('magenta', name + ' [SubAgent]'):<30} {desc}")
+
         # 已激活的 MCP 工具
-        activated_mcp = [n for n in active_tools if n not in builtin_names and n not in meta_names]
+        all_special_names = builtin_names | meta_names | subagent_names
+        activated_mcp = [n for n in active_tools if n not in all_special_names]
         if activated_mcp:
             print(DIVIDER)
             print(c("bold", "  已激活 MCP 工具"))

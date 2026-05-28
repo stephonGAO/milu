@@ -2,6 +2,7 @@
 from agent_framework.agent.agent import Agent
 from agent_framework.agent.config import AgentConfig
 from agent_framework.agent.history import ConversationHistory
+from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
 from agent_framework.agent.events import (
     AgentEvent,
     TextDelta,
@@ -11,6 +12,8 @@ from agent_framework.agent.events import (
     ToolResult,
     AgentDone,
     AgentError,
+    SubAgentEvent,
+    SubAgentDone,
 )
 from agent_framework.agent.exceptions import (
     AgentLoopError,
@@ -25,6 +28,9 @@ __all__ = [
     "Agent",
     "AgentConfig",
     "ConversationHistory",
+    # SubAgent
+    "SubAgentConfig",
+    "create_subagent_tools",
     # Events
     "AgentEvent",
     "TextDelta",
@@ -34,6 +40,8 @@ __all__ = [
     "ToolResult",
     "AgentDone",
     "AgentError",
+    "SubAgentEvent",
+    "SubAgentDone",
     # Exceptions
     "AgentLoopError",
     "AgentTimeout",

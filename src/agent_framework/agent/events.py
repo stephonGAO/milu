@@ -78,3 +78,27 @@ class AgentError(AgentEvent):
     """Agent 异常终止"""
     error_type: str  # "max_turns" | "call_timeout" | "total_timeout" | "token_limit" | "tool_limit"
     message: str
+
+
+@dataclass(frozen=True)
+class SubAgentEvent(AgentEvent):
+    """子代理执行过程中的内部事件。
+
+    父 Agent 转发此事件，让消费者能区分子代理输出和父代理输出。
+    内部事件可以是 TextDelta、ReasoningDelta、ToolCallStart、ToolResult。
+    """
+    subagent_name: str    # 哪个子代理产生的事件
+    event: AgentEvent     # 实际事件
+
+
+@dataclass(frozen=True)
+class SubAgentDone(AgentEvent):
+    """子代理执行完毕。
+
+    在一次 SubAgentEvent 序列结束后发出一次，携带摘要元数据。
+    """
+    subagent_name: str
+    final_text: str         # 子代理最终回答
+    turn_count: int         # 子代理使用的 LLM 轮数
+    total_usage: TokenUsage  # 子代理的 token 消耗
+    is_error: bool          # 是否以错误结束

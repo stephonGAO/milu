@@ -15,6 +15,8 @@ from agent_framework.agent.events import (
     AgentEvent,
     ConfirmResponse,
     ReasoningDelta,
+    SubAgentDone,
+    SubAgentEvent,
     TextDelta,
     ToolCallStart,
     ToolConfirmRequired,
@@ -111,6 +113,7 @@ class Agent:
         config: AgentConfig | None = None,
         on_confirm: Callable[[str, str], Awaitable[Union[bool, ConfirmResponse]]] | None = None,
         mcp_config_path: str | None = None,
+        register_catalog: bool = True,
     ):
         self._llm = llm
         self._config = config or AgentConfig()
@@ -121,10 +124,13 @@ class Agent:
         if tools:
             self._registry.register_many(tools)
 
-        # 注册元工具（始终活跃，用于发现和激活休眠工具）
-        from agent_framework.tools.catalog import create_catalog_tools
-        self._catalog_tools = create_catalog_tools(self._registry)
-        self._registry.register_many(self._catalog_tools)
+        # 注册元工具（用于发现和激活休眠工具）
+        # register_catalog=False 时跳过（如 SubAgent，避免 LLM 被无用的元工具误导）
+        self._catalog_tools = []
+        if register_catalog:
+            from agent_framework.tools.catalog import create_catalog_tools
+            self._catalog_tools = create_catalog_tools(self._registry)
+            self._registry.register_many(self._catalog_tools)
 
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
@@ -391,6 +397,32 @@ class Agent:
 
                 # 通过 executor 执行
                 exec_result: ToolExecutionResult = await self._executor.execute(call)
+
+                # 子代理事件转发：检查是否为子代理工具，转发内部事件
+                if wrapper and getattr(wrapper, '_is_subagent', False):
+                    sub_events = getattr(wrapper, '_subagent_events', [])
+                    sub_final_text = ""
+                    sub_turn_count = 0
+                    sub_total_usage = TokenUsage()
+                    sub_is_error = False
+
+                    for sevt in sub_events:
+                        yield SubAgentEvent(subagent_name=tool_name, event=sevt)
+                        if isinstance(sevt, AgentDone):
+                            sub_final_text = sevt.final_text
+                            sub_turn_count = sevt.turn_count
+                            sub_total_usage = sevt.total_usage
+                        elif isinstance(sevt, AgentError):
+                            sub_is_error = True
+                            sub_final_text = sevt.message
+
+                    yield SubAgentDone(
+                        subagent_name=tool_name,
+                        final_text=sub_final_text,
+                        turn_count=sub_turn_count,
+                        total_usage=sub_total_usage,
+                        is_error=sub_is_error,
+                    )
 
                 # 产出 ToolResult 事件
                 yield ToolResult(
