@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import asyncio
 import io
+import locale
+import os
+import sys
 import traceback
 from contextlib import redirect_stdout
 
@@ -13,6 +16,36 @@ from agent_framework.tools.decorator import tool
 
 # 执行超时（秒）
 _EXEC_TIMEOUT = 30
+
+
+# ── Windows 中文编码修复 ────────────────────────────────────
+# 在 Windows 中文系统上，locale.getencoding() 在解释器启动时
+# 缓存为 cp936 (GBK)。subprocess._text_encoding() 使用该值决定
+# 管道编解码方式，导致用户代码中的 subprocess 调用遇到 UTF-8 中文输出时
+# 报 UnicodeDecodeError。
+#
+# 修复（两步缺一不可）：
+#   1. os.environ["PYTHONUTF8"] = "1"
+#      → 子进程 Python 启动时读取，启用 UTF-8 模式，stdout 使用 UTF-8
+#   2. locale.getencoding monkey-patch → "utf-8"
+#      → 父进程 subprocess 模块用 UTF-8 解码管道数据
+if sys.platform == "win32" and not getattr(sys.flags, "utf8_mode", False):
+    os.environ["PYTHONUTF8"] = "1"
+
+    _orig_getencoding = locale.getencoding
+
+    def _utf8_getencoding() -> str:
+        return "utf-8"
+
+    locale.getencoding = _utf8_getencoding
+
+    # 同步修复当前进程的 stdout/stderr
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
 def _exec_code(code: str) -> str:
