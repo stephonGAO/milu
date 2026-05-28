@@ -1,4 +1,5 @@
 """测试子代理（SubAgent）功能"""
+import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
@@ -57,7 +58,7 @@ class TestSubAgentConfig:
         cfg = SubAgentConfig(name="t", description="d", system_prompt="s")
         assert cfg.tools == []
         assert cfg.config is None
-        assert cfg.history_max_turns == 20
+        assert cfg.history_max_turns == 50
         assert cfg.history_max_tokens is None
 
     def test_custom_config(self):
@@ -692,3 +693,86 @@ class TestParentAgentIntegration:
         results = [e for e in events if isinstance(e, ToolResult)]
         faulty_result = next(r for r in results if r.tool_name == "faulty")
         assert "faulty" in faulty_result.output
+
+    @pytest.mark.asyncio
+    async def test_concurrent_execution(self):
+        """多个子代理应并发执行（总时间接近单个子代理时间，而非累加）"""
+        import time
+
+        async def slow_chat(*args, **kwargs):
+            # 每个子代理模拟 0.3s 延迟
+            await asyncio.sleep(0.3)
+            yield StreamChunk(content="完成", finish_reason="stop")
+            yield StreamChunk(usage=TokenUsage(
+                prompt_tokens=10, completion_tokens=5, total_tokens=15
+            ))
+
+        sub_llm = AsyncMock()
+        sub_llm.chat = slow_chat
+
+        parent_call_count = 0
+
+        async def parent_chat(*args, **kwargs):
+            nonlocal parent_call_count
+            parent_call_count += 1
+            if parent_call_count == 1:
+                # 一次调用 3 个子代理
+                yield StreamChunk(tool_calls=[
+                    type('obj', (), {
+                        'index': 0, 'id': 'call_1',
+                        'function': type('obj', (), {
+                            'name': 'agent_a',
+                            'arguments': '{"task": "任务A"}'
+                        })()
+                    })(),
+                    type('obj', (), {
+                        'index': 1, 'id': 'call_2',
+                        'function': type('obj', (), {
+                            'name': 'agent_b',
+                            'arguments': '{"task": "任务B"}'
+                        })()
+                    })(),
+                    type('obj', (), {
+                        'index': 2, 'id': 'call_3',
+                        'function': type('obj', (), {
+                            'name': 'agent_c',
+                            'arguments': '{"task": "任务C"}'
+                        })()
+                    })(),
+                ])
+                yield StreamChunk(finish_reason="tool_calls")
+            else:
+                yield StreamChunk(content="综合结果", finish_reason="stop")
+                yield StreamChunk(usage=TokenUsage(
+                    prompt_tokens=60, completion_tokens=5, total_tokens=65
+                ))
+
+        parent_llm = AsyncMock()
+        parent_llm.chat = parent_chat
+
+        sub_tools = create_subagent_tools(sub_llm, [
+            SubAgentConfig(name="agent_a", description="A", system_prompt="A"),
+            SubAgentConfig(name="agent_b", description="B", system_prompt="B"),
+            SubAgentConfig(name="agent_c", description="C", system_prompt="C"),
+        ])
+
+        agent = Agent(
+            llm=parent_llm,
+            system_prompt="总指挥",
+            tools=sub_tools,
+        )
+
+        start = time.monotonic()
+        events = []
+        async for event in agent.run("执行三个任务"):
+            events.append(event)
+        elapsed = time.monotonic() - start
+
+        # 3 个子代理各 0.3s，顺序执行需要 ~0.9s+，并发执行应 < 0.7s
+        assert elapsed < 0.7, f"并发执行时间 {elapsed:.2f}s 过长，可能未并发"
+
+        # 3 个子代理都应完成
+        sub_dones = [e for e in events if isinstance(e, SubAgentDone)]
+        assert len(sub_dones) == 3
+        names = {d.subagent_name for d in sub_dones}
+        assert names == {"agent_a", "agent_b", "agent_c"}

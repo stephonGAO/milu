@@ -329,17 +329,20 @@ class Agent:
                 )
                 return
 
-            # 10. 执行每个工具调用
-            for call in resolved_calls:
-                # 检查工具调用次数上限
-                total_tool_calls += 1
-                if total_tool_calls > self._config.tool_call_limit:
-                    yield AgentError(
-                        error_type="tool_limit",
-                        message=f"超出工具调用上限 {self._config.tool_call_limit}",
-                    )
-                    return
+            # 10. 执行工具调用
+            # ── 10a. 检查工具调用次数上限（提前检查整批）──
+            batch_size = len(resolved_calls)
+            if total_tool_calls + batch_size > self._config.tool_call_limit:
+                yield AgentError(
+                    error_type="tool_limit",
+                    message=f"超出工具调用上限 {self._config.tool_call_limit}",
+                )
+                return
+            total_tool_calls += batch_size
 
+            # ── 10b. 顺序发出 ToolCallStart + 危险工具确认 ──
+            confirmed = []
+            for call in resolved_calls:
                 tool_call_id = call.get("id", "")
                 fn = call.get("function", {})
                 tool_name = fn.get("name", "")
@@ -395,49 +398,69 @@ class Agent:
                         ))
                         continue
 
-                # 通过 executor 执行
-                exec_result: ToolExecutionResult = await self._executor.execute(call)
+                confirmed.append({
+                    "call": call,
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "wrapper": wrapper,
+                })
 
-                # 子代理事件转发：检查是否为子代理工具，转发内部事件
-                if wrapper and getattr(wrapper, '_is_subagent', False):
-                    sub_events = getattr(wrapper, '_subagent_events', [])
-                    sub_final_text = ""
-                    sub_turn_count = 0
-                    sub_total_usage = TokenUsage()
-                    sub_is_error = False
+            # ── 10c. 并发执行所有已确认的工具 ──
+            if confirmed:
+                async def _execute_one(item):
+                    result = await self._executor.execute(item["call"])
+                    return item, result
 
-                    for sevt in sub_events:
-                        yield SubAgentEvent(subagent_name=tool_name, event=sevt)
-                        if isinstance(sevt, AgentDone):
-                            sub_final_text = sevt.final_text
-                            sub_turn_count = sevt.turn_count
-                            sub_total_usage = sevt.total_usage
-                        elif isinstance(sevt, AgentError):
-                            sub_is_error = True
-                            sub_final_text = sevt.message
-
-                    yield SubAgentDone(
-                        subagent_name=tool_name,
-                        final_text=sub_final_text,
-                        turn_count=sub_turn_count,
-                        total_usage=sub_total_usage,
-                        is_error=sub_is_error,
-                    )
-
-                # 产出 ToolResult 事件
-                yield ToolResult(
-                    tool_name=tool_name,
-                    tool_call_id=tool_call_id,
-                    output=exec_result.output,
-                    is_error=exec_result.is_error,
+                results = await asyncio.gather(
+                    *[_execute_one(item) for item in confirmed]
                 )
 
-                # 将工具结果加入历史
-                self._history.add(Message(
-                    role=MessageRole.TOOL,
-                    content=exec_result.output,
-                    tool_call_id=tool_call_id,
-                    name=tool_name,
-                ))
+                # ── 10d. 顺序处理结果：转发事件、产出 ToolResult ──
+                for item, exec_result in results:
+                    tool_name = item["tool_name"]
+                    tool_call_id = item["tool_call_id"]
+                    wrapper = item["wrapper"]
+
+                    # 子代理事件转发
+                    if wrapper and getattr(wrapper, '_is_subagent', False):
+                        sub_events = getattr(wrapper, '_subagent_events', [])
+                        sub_final_text = ""
+                        sub_turn_count = 0
+                        sub_total_usage = TokenUsage()
+                        sub_is_error = False
+
+                        for sevt in sub_events:
+                            yield SubAgentEvent(subagent_name=tool_name, event=sevt)
+                            if isinstance(sevt, AgentDone):
+                                sub_final_text = sevt.final_text
+                                sub_turn_count = sevt.turn_count
+                                sub_total_usage = sevt.total_usage
+                            elif isinstance(sevt, AgentError):
+                                sub_is_error = True
+                                sub_final_text = sevt.message
+
+                        yield SubAgentDone(
+                            subagent_name=tool_name,
+                            final_text=sub_final_text,
+                            turn_count=sub_turn_count,
+                            total_usage=sub_total_usage,
+                            is_error=sub_is_error,
+                        )
+
+                    # 产出 ToolResult 事件
+                    yield ToolResult(
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        output=exec_result.output,
+                        is_error=exec_result.is_error,
+                    )
+
+                    # 将工具结果加入历史
+                    self._history.add(Message(
+                        role=MessageRole.TOOL,
+                        content=exec_result.output,
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                    ))
 
             # 11. 继续循环，LLM 将看到工具结果

@@ -64,7 +64,8 @@ async def main():
     print(c("bold", c("cyan", "  SubAgent 子代理委派示例")))
     print(BANNER)
 
-    llm = ModelRegistry.create("qwen", model="qwen3.7-max", enable_thinking=True)
+    llm = ModelRegistry.create("qwen", model="qwen3.7-max", enable_thinking=True, web_search=True)
+    llm2 = ModelRegistry.create("qwen", model="qwen3.7-max", enable_thinking=True)
 
     # 定义子代理
     subagent_tools = create_subagent_tools(
@@ -80,7 +81,7 @@ async def main():
                     "你是一个专业的调研助手。你的任务是搜索和整理信息，"
                     "提供准确、全面的调研结果。请引用信息来源。"
                 ),
-                tools=[web_search, http_request],
+                tools=[],
                 config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
             ),
             SubAgentConfig(
@@ -102,7 +103,7 @@ async def main():
 
     # 构建父 Agent
     agent = Agent(
-        llm=llm,
+        llm=llm2,
         system_prompt=(
             "你是一个项目经理，拥有两个专业子代理：\n"
             "  - researcher：调研助手，擅长搜索和整理信息\n"
@@ -119,7 +120,7 @@ async def main():
 
     # 测试任务
     tasks = [
-        "帮我调研一下 2025 年最流行的 Python Web 框架，简要对比优缺点",
+        "帮我调研一下 2026 年最流行的 Python Web 框架，简要对比优缺点",
         "用 Python 写一个快速排序的示例文件，保存到 quicksort_demo.py",
     ]
 
