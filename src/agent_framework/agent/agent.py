@@ -6,6 +6,8 @@ import logging
 import time
 from typing import AsyncIterator, Awaitable, Callable, Union
 
+import os
+
 from agent_framework.agent.config import AgentConfig
 from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
 from agent_framework.agent.history import ConversationHistory
@@ -31,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 # 计划工具名称集合 — 不可与其他工具同批并发执行
 _PLAN_TOOLS = {"todo_write", "todo_read"}
+
+# 技能目录自动搜索路径
+_SKILL_SEARCH_PATHS = [
+    "skills",
+    os.path.expanduser("~/.agent_framework/skills"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +125,9 @@ class Agent:
         on_confirm: Callable[[str, str], Awaitable[Union[bool, ConfirmResponse]]] | None = None,
         mcp_config_path: str | None = None,
         register_catalog: bool = True,
+        skills: list | None = None,
+        skills_dir: str | None = None,
+        register_skills: bool = True,
     ):
         self._llm = llm
         self._config = config or AgentConfig()
@@ -142,12 +153,34 @@ class Agent:
         self._mcp_config_path = mcp_config_path
         self._mcp_manager = None
 
-        # 设置 system prompt
-        self._history.set_system(Message(role=MessageRole.SYSTEM, content=system_prompt))
-
         # 流程约束状态标记
         self._work_started = False   # 非计划工具是否已执行
         self._plan_created = False   # todo_write 是否已被成功调用
+
+        # ── 技能（Skills）初始化 ──
+        from agent_framework.skills.registry import SkillRegistry
+        self._skill_registry = SkillRegistry()
+
+        # 注册编程方式传入的技能
+        if skills:
+            for cfg in skills:
+                self._skill_registry.add(cfg)
+
+        # 扫描技能目录
+        if skills_dir:
+            self._skill_registry.load_from_directory(skills_dir)
+        else:
+            for search_path in _SKILL_SEARCH_PATHS:
+                if os.path.isdir(search_path):
+                    self._skill_registry.load_from_directory(search_path)
+                    break
+
+        # 保存原始 system prompt（每轮动态拼装，不在此处 set_system）
+        self._system_prompt = system_prompt
+
+        # 注册 load_skill 元工具（register_skills=False 时跳过，如 SubAgent）
+        if register_skills:
+            self._registry.register_wrapper(self._skill_registry.as_tool())
 
     # -- 属性 ----------------------------------------------------------------
 
@@ -161,6 +194,11 @@ class Agent:
         """工具注册表。"""
         return self._registry
 
+    @property
+    def skill_registry(self) -> "SkillRegistry":
+        """技能注册表。"""
+        return self._skill_registry
+
     # -- 公开方法 ------------------------------------------------------------
 
     async def reset(self) -> None:
@@ -168,6 +206,23 @@ class Agent:
         self._history.clear()
         self._work_started = False
         self._plan_created = False
+
+    # -- 内部方法 ------------------------------------------------------------
+
+    def _build_system_prompt(self) -> None:
+        """动态拼装 system prompt 并写入历史（每轮调用一次）。
+
+        拼装顺序：原始 prompt → 技能目录元数据
+        """
+        parts = [self._system_prompt]
+
+        skill_catalog = self._skill_registry.describe_available()
+        if skill_catalog:
+            parts.append(f"\n\n## 可用技能\n{skill_catalog}")
+
+        self._history.set_system(
+            Message(role=MessageRole.SYSTEM, content="".join(parts))
+        )
 
     # -- MCP 生命周期 --------------------------------------------------------
 
@@ -260,6 +315,9 @@ class Agent:
                     message=f"总超时 {self._config.total_timeout}s",
                 )
                 return
+
+            # 1.5 每轮重建 system prompt（反映技能目录等动态状态）
+            self._build_system_prompt()
 
             # 2. 获取截断后的历史消息
             messages = self._history.get_messages()

@@ -23,6 +23,7 @@ from agent_framework import (
     AgentDone, AgentError,
     SubAgentConfig, create_subagent_tools,
     SubAgentEvent, SubAgentDone,
+    SkillConfig,
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools.builtin import (
@@ -72,12 +73,14 @@ def print_header():
   内置工具: {', '.join(_all_names)}
   子代理:   researcher（调研助手）, coder（编程助手）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
+  技能:     自动扫描 skills/ 目录，LLM 按需调用 load_skill 加载
   计划文件: {PLAN_FILE}
 
   命令:
     /history   — 查看对话历史
     /reset     — 重置对话（清空上下文）
     /tools     — 查看可用工具（含休眠工具）
+    /skills    — 查看可用技能
     /plan      — 查看当前会话计划
     /quit      — 退出
 """)
@@ -372,7 +375,7 @@ def handle_command(agent: Agent, cmd: str) -> bool:
                 print(f"  {c('yellow', w.name):<30} {w.description[:40]}{danger}")
 
         # 元工具
-        meta_names = {"list_catalog", "search_tools", "activate_tools"}
+        meta_names = {"list_catalog", "search_tools", "activate_tools", "load_skill"}
         for name in meta_names:
             if name in active_tools:
                 wrapper = agent.tools.get_tool(name)
@@ -422,6 +425,7 @@ def handle_command(agent: Agent, cmd: str) -> bool:
   /history   — 查看对话历史
   /reset     — 重置对话（清空上下文）
   /tools     — 查看可用工具
+  /skills    — 查看可用技能
   /plan      — 查看当前会话计划
   /help      — 显示帮助
   /quit      — 退出
@@ -462,6 +466,22 @@ def handle_command(agent: Agent, cmd: str) -> bool:
             print(DIVIDER + "\n")
         else:
             print(f"\n  {c('dim', '暂无会话计划（计划文件不存在）。')}\n")
+
+    elif cmd == "/skills":
+        skill_names = agent.skill_registry.list_names()
+        if not skill_names:
+            print(f"\n  {c('dim', '暂无可用技能（skills/ 目录为空）。')}\n")
+            return True
+
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  可用技能") + c("dim", f" ({len(skill_names)} 个)"))
+        print(DIVIDER)
+        for name in skill_names:
+            cfg = agent.skill_registry.get(name)
+            trigger_part = f"  {c('dim', '[' + ', '.join(cfg.triggers) + ']')}" if cfg.triggers else ""
+            print(f"  {c('blue', name):<30} {cfg.description}{trigger_part}")
+        print(f"\n  {c('dim', 'LLM 会自动调用 load_skill 按需加载技能正文')}")
+        print(DIVIDER + "\n")
 
     else:
         print(c("red", f"\n  未知命令: {cmd}  (输入 /help 查看帮助)\n"))

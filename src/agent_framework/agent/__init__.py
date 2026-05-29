@@ -3,6 +3,8 @@ from agent_framework.agent.agent import Agent
 from agent_framework.agent.config import AgentConfig
 from agent_framework.agent.history import ConversationHistory
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
+from agent_framework.skills.config import SkillConfig
+from agent_framework.skills.registry import SkillRegistry
 from agent_framework.agent.events import (
     AgentEvent,
     TextDelta,
@@ -31,6 +33,9 @@ __all__ = [
     # SubAgent
     "SubAgentConfig",
     "create_subagent_tools",
+    # Skills
+    "SkillConfig",
+    "SkillRegistry",
     # Events
     "AgentEvent",
     "TextDelta",

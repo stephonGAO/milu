@@ -37,6 +37,8 @@ from agent_framework.agent.events import (
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig, ConversationHistory
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
+from agent_framework.skills.config import SkillConfig
+from agent_framework.skills.registry import SkillRegistry
 from agent_framework.tools.mcp.config import MCPServerConfig
 
 __all__ = [
@@ -86,4 +88,7 @@ __all__ = [
     "ModelRegistry",
     # MCP
     "MCPServerConfig",
+    # Skills
+    "SkillConfig",
+    "SkillRegistry",
 ]
