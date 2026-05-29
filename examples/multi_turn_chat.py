@@ -136,6 +136,26 @@ def build_agent() -> Agent:
                 # 依靠共享 LLM 的 Qwen 内置搜索（web_search=True）
                 tools=[http_request],
                 config=AgentConfig(),
+                # 演示 skills 参数：编程方式直接传入 SkillConfig
+                skills=[
+                    SkillConfig(
+                        name="deep-research",
+                        description="深度调研专家，擅长多角度分析和系统性总结",
+                        triggers=["调研", "研究", "分析"],
+                        content=(
+                            "你是一位深度调研专家。请按以下流程工作：\n\n"
+                            "## 调研流程\n"
+                            "1. **明确问题** — 拆解用户问题为 2-3 个子问题\n"
+                            "2. **多源搜索** — 从不同角度搜索信息\n"
+                            "3. **交叉验证** — 对比多个来源，标注可信度\n"
+                            "4. **系统总结** — 按重要性排序，给出结论\n\n"
+                            "## 输出格式\n"
+                            "- 关键发现：编号列表\n"
+                            "- 信息来源：标注 URL 或出处\n"
+                            "- 可信度评级：[高/中/低]\n"
+                        ),
+                    ),
+                ],
             ),
             SubAgentConfig(
                 name="coder",
@@ -150,6 +170,31 @@ def build_agent() -> Agent:
                 ),
                 tools=[file, python_repl],
                 config=AgentConfig(),
+            ),
+            # ── skills 参数演示 ──
+            # skills: 编程方式，直接传入 SkillConfig 实例列表（适合动态生成的技能）
+            # skills_dir: 声明式，扫描目录下的 .md 文件（适合预定义的技能文件）
+            # 两者可同时使用，技能会合并到同一个注册表中
+            SubAgentConfig(
+                name="reviewer",
+                description=(
+                    "代码审查专家：擅长代码审查与建议提出。"
+                    "当需要审查、修改、优化代码时委派此代理。"
+                ),
+                system_prompt=(
+                    "你是一个专业的代码审查助手。"
+                ),
+                tools=[file, python_repl],
+                config=AgentConfig(),
+                # 手动加载 code-review.md 技能文件，通过 skills 参数传入
+                skills=[
+                    SkillConfig.from_file(
+                        str(Path(__file__).resolve().parent.parent / "skills" / "code-review.md")
+                    ),
+                ],
+
+                # skills_dir: 声明式，扫描目录下的 .md 文件（适合预定义的技能文件）
+                # skills_dir=str(Path(__file__).resolve().parent.parent / "skills"),
             ),
         ],
     )
@@ -528,6 +573,9 @@ async def main():
 
     turn_count = 0
 
+# 案例输入
+# 使用子代理帮我调研一下 2026 年最流行的 Python Web 框架，简要对比优缺点。
+# 并用 Python 写一个快速排序的示例文件，保存到 quicksort_demo.py。并对写出的代码进行审查。根据审查意见再进行修改。
     try:
         while True:
             # ── 读取用户输入 ──

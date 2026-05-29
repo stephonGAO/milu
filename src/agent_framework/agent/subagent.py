@@ -55,6 +55,8 @@ class SubAgentConfig:
     :param history_max_turns: 子代理对话历史最大轮数
     :param history_max_tokens: 子代理对话历史 token 上限（None 为不限）
     :param llm_kwargs: 传递给子代理 LLM 的额外参数（如 web_search=True, enable_thinking=True）
+    :param skills: 子代理可用的技能列表（SkillConfig 实例）
+    :param skills_dir: 子代理技能目录路径（None 时不自动扫描）
     """
     name: str
     description: str
@@ -64,6 +66,8 @@ class SubAgentConfig:
     history_max_turns: int = 50
     history_max_tokens: int | None = None
     llm_kwargs: dict = field(default_factory=dict)
+    skills: list | None = None
+    skills_dir: str | None = None
 
 
 # ── 内部：子代理默认配置 ──────────────────────────────────────
@@ -138,7 +142,10 @@ def _create_single_subagent_tool(llm: "BaseLLM", cfg: SubAgentConfig):
             tools=cfg.tools if cfg.tools else None,
             history=sub_history,
             config=sub_config,
-            register_catalog=False,  # 子代理不注册元工具，避免误导
+            register_catalog=False,  # 子代理不注册mcp元工具，避免误导
+            skills=cfg.skills,
+            skills_dir=cfg.skills_dir,
+            register_skills=bool(cfg.skills or cfg.skills_dir),
         )
         # 不调用 create_subagent_tools → 子代理不能嵌套子代理（结构性保证）
 
