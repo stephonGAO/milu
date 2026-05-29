@@ -302,7 +302,7 @@ class Agent:
         final_text = ""
 
         self._work_started = False
-        self._plan_created = False
+        # self._plan_created = False #如果之前创建过任务，但对话中断后又继续，agent就认为没有创建过就不能再使用工具更新了。
 
         while True:
             turn_count += 1
