@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 # 计划工具名称集合 — 不可与其他工具同批并发执行
 _PLAN_TOOLS = {"todo_write", "todo_read"}
 
+# 元工具名称集合 — 用于发现和加载工具（MCP / Skill），不视为"已开始工作"
+_META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill"}
+
 # 技能目录自动搜索路径
 _SKILL_SEARCH_PATHS = [
     "skills",
@@ -417,7 +420,8 @@ class Agent:
                 for c in resolved_calls
             }
             has_plan = bool(batch_names & _PLAN_TOOLS)
-            has_non_plan = bool(batch_names - _PLAN_TOOLS)
+            # 元工具（发现/加载）与计划工具同批不视为冲突
+            has_non_plan = bool(batch_names - _PLAN_TOOLS - _META_TOOLS)
 
             if has_plan and has_non_plan:
                 plan_names = ", ".join(batch_names & _PLAN_TOOLS)
@@ -586,7 +590,7 @@ class Agent:
                     # 标记流程约束状态
                     if tool_name == "todo_write" and not exec_result.is_error:
                         self._plan_created = True
-                    if tool_name not in _PLAN_TOOLS:
+                    if tool_name not in _PLAN_TOOLS and tool_name not in _META_TOOLS:
                         self._work_started = True
 
                     # 将工具结果加入历史
