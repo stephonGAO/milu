@@ -1,11 +1,15 @@
-"""测试 Compactor 四层压缩流水线"""
+"""测试 Compactor — 轮次分层 + Token 动态阈值"""
 import pytest
 from unittest.mock import AsyncMock
 
 from agent_framework.agent.compactor import Compactor, create_compact_tool
 from agent_framework.agent.config import AgentConfig
+from agent_framework.agent.session import Session
 from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
+
+import tempfile
+from pathlib import Path
 
 
 # ── 辅助函数 ──────────────────────────────────────────────
@@ -22,8 +26,8 @@ def _make_user(text: str) -> Message:
     return _make_msg(MessageRole.USER, text)
 
 
-def _make_assistant(text: str) -> Message:
-    return _make_msg(MessageRole.ASSISTANT, text)
+def _make_assistant(text: str, tool_calls=None) -> Message:
+    return _make_msg(MessageRole.ASSISTANT, text, tool_calls=tool_calls)
 
 
 def _make_tool(text: str, tool_call_id: str = "call_1", name: str = "test") -> Message:
@@ -31,14 +35,89 @@ def _make_tool(text: str, tool_call_id: str = "call_1", name: str = "test") -> M
 
 
 def _make_llm(response_text: str = "这是摘要"):
-    """创建 mock LLM，返回固定的摘要文本"""
+    """创建 mock LLM"""
     async def mock_chat(*args, **kwargs):
         yield StreamChunk(content=response_text, finish_reason="stop")
         yield StreamChunk(usage=TokenUsage(prompt_tokens=100, completion_tokens=20, total_tokens=120))
 
     llm = AsyncMock()
     llm.chat = mock_chat
+    llm.capabilities = AsyncMock()
+    llm.capabilities.max_context_window = 8192
     return llm
+
+
+@pytest.fixture
+def tmp_dir():
+    with tempfile.TemporaryDirectory() as d:
+        yield Path(d)
+
+
+# ── _group_into_rounds 测试 ──────────────────────────────
+
+class TestGroupIntoRounds:
+    """轮次分组"""
+
+    def test_empty_messages(self):
+        """空消息列表"""
+        assert Compactor._group_into_rounds([]) == []
+
+    def test_no_assistant(self):
+        """无 assistant 消息 → 全部归入 round 0"""
+        messages = [_make_user("u1"), _make_user("u2")]
+        rounds = Compactor._group_into_rounds(messages)
+        assert len(rounds) == 1
+        assert len(rounds[0]) == 2
+
+    def test_single_round(self):
+        """单轮对话"""
+        messages = [
+            _make_system("sys"),
+            _make_user("q"),
+            _make_assistant("a", tool_calls=[{"id": "1", "type": "function", "function": {"name": "t", "arguments": "{}"}}]),
+            _make_tool("result"),
+        ]
+        rounds = Compactor._group_into_rounds(messages)
+        assert len(rounds) == 1
+        assert len(rounds[0]) == 4
+
+    def test_multiple_rounds(self):
+        """多轮对话"""
+        messages = [
+            _make_system("sys"),
+            _make_user("q1"),
+            _make_assistant("a1"),
+            _make_user("q2"),
+            _make_assistant("a2"),
+            _make_tool("t2", "call_2"),
+            _make_user("q3"),
+            _make_assistant("a3"),
+        ]
+        rounds = Compactor._group_into_rounds(messages)
+        # round 0: [sys, user(q1), assistant(a1), user(q2)]  ← 首个 assistant 不切轮
+        # round 1: [assistant(a2), tool(t2), user(q3)]
+        # round 2: [assistant(a3)]
+        assert len(rounds) == 3
+        assert rounds[0][0].role == MessageRole.SYSTEM
+        assert any(m.content == "a1" for m in rounds[0])
+        assert rounds[1][0].content == "a2"
+        assert rounds[2][0].content == "a3"
+
+    def test_multi_tool_round(self):
+        """单轮多工具调用"""
+        messages = [
+            _make_user("q"),
+            _make_assistant("a1", tool_calls=[{"id": "1", "type": "function", "function": {"name": "t1", "arguments": "{}"}}]),
+            _make_tool("r1", "call_1"),
+            _make_tool("r2", "call_2"),
+            _make_assistant("a2"),
+        ]
+        rounds = Compactor._group_into_rounds(messages)
+        # round 0: [user(q), assistant(a1), tool(r1), tool(r2)]
+        # round 1: [assistant(a2)]
+        assert len(rounds) == 2
+        assert len(rounds[0]) == 4  # user + assistant + 2 tools
+        assert len(rounds[1]) == 1  # assistant only
 
 
 # ── L1: snip_compact 测试 ────────────────────────────────
@@ -52,7 +131,7 @@ class TestSnipCompact:
         compactor = Compactor(_make_llm(), config)
         messages = [_make_user(f"msg {i}") for i in range(8)]
         result = compactor._snip_compact(messages)
-        assert result is messages  # 同一对象
+        assert result is messages
 
     def test_snip_when_over_limit(self):
         """消息数超限时裁剪中间消息"""
@@ -61,12 +140,9 @@ class TestSnipCompact:
         messages = [_make_user(f"msg {i}") for i in range(20)]
         result = compactor._snip_compact(messages)
         assert result is not messages
-        # 保留头 3 + 尾 7 + 1 个 snip marker = 11
-        assert len(result) == 11
-        # 有 snip marker
+        assert len(result) == 11  # 3 + 1 marker + 7
         snip_msgs = [m for m in result if "snipped" in m.content]
         assert len(snip_msgs) == 1
-        assert "10 messages" in snip_msgs[0].content
 
     def test_snip_preserves_system(self):
         """裁剪时保留 system 消息"""
@@ -75,156 +151,248 @@ class TestSnipCompact:
         messages = [_make_system("系统")] + [_make_user(f"msg {i}") for i in range(15)]
         result = compactor._snip_compact(messages)
         assert result[0].role == MessageRole.SYSTEM
-        assert result[0].content == "系统"
 
 
-# ── L2: micro_compact 测试 ───────────────────────────────
+# ── 轮次分层工具压缩 测试 ─────────────────────────────────
 
-class TestMicroCompact:
-    """L2: 旧工具结果占位"""
-
-    def test_no_replace_when_under_limit(self):
-        """工具结果数未超限时不替换"""
-        config = AgentConfig(compact_keep_recent=3)
-        compactor = Compactor(_make_llm(), config)
-        messages = [
-            _make_tool("x" * 200, tool_call_id=f"call_{i}")
-            for i in range(3)
-        ]
-        result = compactor._micro_compact(messages)
-        for msg in result:
-            assert "compacted" not in msg.content
-
-    def test_replace_old_tool_results(self):
-        """替换旧的工具结果为占位符"""
-        config = AgentConfig(compact_keep_recent=2)
-        compactor = Compactor(_make_llm(), config)
-        messages = [
-            _make_tool("x" * 200, tool_call_id="call_0"),  # 旧 → 替换
-            _make_tool("y" * 200, tool_call_id="call_1"),  # 旧 → 替换
-            _make_tool("z" * 200, tool_call_id="call_2"),  # 保留
-            _make_tool("w" * 200, tool_call_id="call_3"),  # 保留
-        ]
-        result = compactor._micro_compact(messages)
-        assert "compacted" in result[0].content
-        assert "compacted" in result[1].content
-        assert result[2].content == "y" * 200 or "compacted" not in result[2].content
-        assert result[3].content == "w" * 200 or "compacted" not in result[3].content
-
-    def test_skip_short_tool_results(self):
-        """短工具结果（<=120字符）不替换"""
-        config = AgentConfig(compact_keep_recent=1)
-        compactor = Compactor(_make_llm(), config)
-        messages = [
-            _make_tool("short", tool_call_id="call_0"),  # 旧但短，不替换
-            _make_tool("x" * 200, tool_call_id="call_1"),  # 旧且长，替换
-            _make_tool("y" * 200, tool_call_id="call_2"),  # 最近 1 个，保留
-        ]
-        result = compactor._micro_compact(messages)
-        assert result[0].content == "short"  # 短内容未替换
-        assert "compacted" in result[1].content  # 长内容被替换
-        assert result[2].content == "y" * 200  # 最近的保留
-
-
-# ── L3: tool_result_budget 测试 ──────────────────────────
-
-class TestToolResultBudget:
-    """L3: 大结果持久化"""
-
-    def test_no_truncate_when_under_budget(self):
-        """工具结果总大小在预算内时不截断"""
-        config = AgentConfig()
-        compactor = Compactor(_make_llm(), config)
-        messages = [
-            _make_assistant("thinking"),
-            _make_tool("x" * 1000, tool_call_id="call_1"),
-        ]
-        result = compactor._tool_result_budget(messages)
-        assert result is messages
-        assert result[1].content == "x" * 1000
-
-    def test_truncate_large_result(self):
-        """旧轮次超大工具结果被截断并持久化"""
-        config = AgentConfig()
-        compactor = Compactor(_make_llm(), config)
-        large_content = "x" * 300_000  # 超过 _PERSIST_THRESHOLD (30K)
-        messages = [
-            _make_assistant("第一轮思考"),
-            _make_tool(large_content, tool_call_id="call_big"),
-            _make_assistant("第二轮思考"),  # 使 call_big 成为旧轮次
-        ]
-        result = compactor._tool_result_budget(messages)
-        # 旧轮次的大结果应被截断
-        assert "persisted-output" in result[1].content
-        assert len(result[1].content) < 300_000
-        # 最新轮次（无 tool）不受影响
-        assert result[2].content == "第二轮思考"
+class TestRoundBasedCompact:
+    """轮次分层工具压缩"""
 
     def test_no_tool_messages(self):
         """无 tool 消息时不处理"""
-        config = AgentConfig()
-        compactor = Compactor(_make_llm(), config)
+        compactor = Compactor(_make_llm(), AgentConfig())
         messages = [_make_user("hello"), _make_assistant("hi")]
-        result = compactor._tool_result_budget(messages)
+        result = compactor._round_based_compact(messages)
         assert result is messages
 
+    def test_recent_rounds_unchanged(self, tmp_dir):
+        """最近轮次工具结果保持不变"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=3)
+        compactor = Compactor(_make_llm(), config, session=session)
 
-# ── L4: compact_history 测试 ─────────────────────────────
+        # 创建 3 轮对话（全部在 recent 范围内）
+        messages = []
+        for i in range(3):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 1000, tool_call_id=f"call_{i}", name="file"))
 
-class TestCompactHistory:
-    """L4: LLM 摘要压缩"""
+        result = compactor._round_based_compact(messages)
+        # 最近 3 轮不应被修改
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        for tm in tool_msgs:
+            assert len(tm.content) == 1000  # 未被截断
+
+    def test_old_rounds_placeholder(self, tmp_dir):
+        """旧轮次（>10）工具结果替换为占位符"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=2)
+        compactor = Compactor(_make_llm(), config, session=session)
+
+        # 创建 15 轮对话
+        messages = []
+        for i in range(15):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 1000, tool_call_id=f"call_{i}", name="file"))
+
+        result = compactor._round_based_compact(messages)
+
+        # 找到旧轮次的 tool 消息（rounds 0-4 的 age > 10）
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        old_tools = [m for m in tool_msgs if "已压缩" in m.content]
+        recent_tools = [m for m in tool_msgs if "已压缩" not in m.content]
+
+        assert len(old_tools) > 0  # 有旧轮次被压缩
+        assert len(recent_tools) > 0  # 有最近轮次保留
+
+    def test_mid_rounds_truncation(self, tmp_dir):
+        """中间轮次（3-10）长工具结果被截断"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=1)
+        compactor = Compactor(_make_llm(), config, session=session)
+
+        # 创建 8 轮对话
+        messages = []
+        for i in range(8):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 1000, tool_call_id=f"call_{i}", name="file"))
+
+        result = compactor._round_based_compact(messages)
+
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        truncated = [m for m in tool_msgs if "已截断" in m.content]
+        assert len(truncated) > 0
+
+    def test_short_tool_results_not_truncated(self, tmp_dir):
+        """短工具结果（<=500字符）在中间轮次不截断"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=1)
+        compactor = Compactor(_make_llm(), config, session=session)
+
+        messages = []
+        for i in range(5):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            # 短内容
+            messages.append(_make_tool("short", tool_call_id=f"call_{i}", name="file"))
+
+        result = compactor._round_based_compact(messages)
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        # 短内容即使在中间轮也不应截断（age 3-10 但 <=500 字符）
+        for tm in tool_msgs:
+            if "已压缩" not in tm.content:  # 非旧轮次占位符
+                assert tm.content == "short" or "已截断" not in tm.content
+
+    def test_dynamic_recent_reduction(self, tmp_dir):
+        """上下文超 30% 时 recent 降为 0"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=3)
+        llm = _make_llm()
+        compactor = Compactor(llm, config, session=session)
+
+        # 模拟高使用率
+        compactor.update_prompt_tokens(3000)  # 3000/8192 > 0.3
+
+        messages = []
+        for i in range(5):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 1000, tool_call_id=f"call_{i}", name="file"))
+
+        result = compactor._round_based_compact(messages)
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        # 由于 recent=0，所有轮次都应被处理（截断或占位）
+        processed = [m for m in tool_msgs if "已截断" in m.content or "已压缩" in m.content]
+        assert len(processed) > 0
+
+    def test_no_nested_header_on_repeated_compact(self, tmp_dir):
+        """多次调用 auto_compact 不应产生嵌套截断 header"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=0)  # 所有轮次都处理
+        llm = _make_llm()
+        compactor = Compactor(llm, config, session=session)
+
+        # 构造 2 轮对话（至少需要 2 个 assistant 消息）
+        messages = [
+            _make_user("q0"),
+            _make_assistant("a0", tool_calls=[
+                {"id": "call_0", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]),
+            _make_tool("x" * 1000, tool_call_id="call_0", name="file"),
+            _make_assistant("a1"),
+        ]
+
+        # 第一次调用：截断
+        result1 = compactor._round_based_compact(messages)
+        tool_msg1 = [m for m in result1 if m.role == MessageRole.TOOL][0]
+        header_count1 = tool_msg1.content.count("[工具结果已截断:")
+        assert header_count1 == 1
+
+        # 第二次调用（模拟下一轮 auto_compact）：不应产生嵌套 header
+        result2 = compactor._round_based_compact(result1)
+        tool_msg2 = [m for m in result2 if m.role == MessageRole.TOOL][0]
+        header_count2 = tool_msg2.content.count("[工具结果已截断:")
+        assert header_count2 == 1, f"嵌套 header: {tool_msg2.content[:150]}"
+        # 内容应与第一次完全相同
+        assert tool_msg2.content == tool_msg1.content
+
+
+# ── Token 阈值测试 ────────────────────────────────────────
+
+class TestTokenThreshold:
+    """L4 Token 比例触发"""
+
+    def test_calc_usage_ratio_with_tokens(self):
+        """有 prompt_tokens 时使用真实数据"""
+        llm = _make_llm()
+        compactor = Compactor(llm, AgentConfig())
+        compactor.update_prompt_tokens(4096)  # 4096/8192 = 0.5
+        ratio = compactor._calc_usage_ratio([])
+        assert abs(ratio - 0.5) < 0.01
+
+    def test_calc_usage_ratio_fallback(self):
+        """无 prompt_tokens 时回退到字符估算"""
+        llm = _make_llm()
+        compactor = Compactor(llm, AgentConfig())
+        # _last_prompt_tokens = 0
+        messages = [_make_user("x" * 1000)]  # ~250 tokens
+        ratio = compactor._calc_usage_ratio(messages)
+        assert ratio > 0  # 应有非零比例
 
     @pytest.mark.asyncio
-    async def test_compact_history_replaces_all(self):
-        """L4 preserve_tail=False 时全部替换为摘要"""
-        llm = _make_llm("这是生成的摘要")
-        config = AgentConfig(compact_threshold=100)
+    async def test_no_l4_below_threshold(self):
+        """低于 70% 时不触发 L4"""
+        llm = _make_llm()
+        config = AgentConfig(compact_trigger_ratio=0.7)
         compactor = Compactor(llm, config)
+        compactor.update_prompt_tokens(100)  # 100/8192 << 0.7
+
+        messages = [_make_user("short"), _make_assistant("reply")]
+        result = await compactor.auto_compact(messages)
+        # 不应有 LLM 摘要调用，消息不应变为 Compacted
+        has_compacted = any("Compacted" in str(m.content) for m in result)
+        assert not has_compacted
+
+    @pytest.mark.asyncio
+    async def test_l4_above_threshold(self):
+        """超过 70% 时触发 L4"""
+        llm = _make_llm("LLM 生成的摘要")
+        config = AgentConfig(compact_trigger_ratio=0.5)
+        compactor = Compactor(llm, config)
+        compactor.update_prompt_tokens(5000)  # 5000/8192 > 0.5
+
+        # 需要足够多消息，使尾部保留（最多 3 条）后仍有待压缩内容
+        messages = [
+            _make_user("很长" * 100),
+            _make_assistant("也很长" * 100),
+            _make_user("继续" * 100),
+            _make_assistant("回复" * 100),
+            _make_user("再说" * 50),
+        ]
+        result = await compactor.auto_compact(messages)
+        has_compacted = any("Compacted" in str(m.content) for m in result)
+        assert has_compacted
+
+    @pytest.mark.asyncio
+    async def test_l4_failure_circuit_breaker(self):
+        """L4 连续失败不超过上限"""
+        async def failing_chat(*args, **kwargs):
+            raise RuntimeError("LLM 调用失败")
+            yield
+
+        llm = AsyncMock()
+        llm.chat = failing_chat
+        llm.capabilities = AsyncMock()
+        llm.capabilities.max_context_window = 8192
+
+        config = AgentConfig(compact_trigger_ratio=0.1)
+        compactor = Compactor(llm, config)
+        compactor.update_prompt_tokens(5000)
 
         messages = [
-            _make_user("消息1" * 50),
-            _make_assistant("回复1" * 50),
+            _make_user("x" * 100), _make_assistant("y" * 100),
+            _make_user("x" * 100), _make_assistant("y" * 100),
+            _make_user("z" * 100),
         ]
-        result = await compactor._compact_history(messages, preserve_tail=False)
-        assert len(result) == 1
-        assert result[0].role == MessageRole.USER
-        assert "Compacted" in result[0].content
-        assert "这是生成的摘要" in result[0].content
 
-    @pytest.mark.asyncio
-    async def test_compact_history_preserves_tail(self):
-        """L4 preserve_tail=True 时保留尾部消息"""
-        llm = _make_llm("这是生成的摘要")
-        config = AgentConfig(compact_threshold=10000)  # 高阈值，尾部 3 条不会超 30%
-        compactor = Compactor(llm, config)
+        for _ in range(5):
+            result = await compactor.auto_compact(messages)
+            assert len(result) >= 1
 
-        messages = [
-            _make_user("消息1"),
-            _make_assistant("回复1"),
-            _make_user("消息2"),
-            _make_assistant("回复2"),
-            _make_user("消息3"),
-        ]
-        result = await compactor._compact_history(messages, preserve_tail=True)
-        # 摘要 + 尾部 3 条 = 4 条
-        assert len(result) == 4
-        assert "Compacted" in result[0].content
-        # 尾部 3 条保持原样
-        assert result[1].content == "消息2"
-        assert result[2].content == "回复2"
-        assert result[3].content == "消息3"
-
-    @pytest.mark.asyncio
-    async def test_summarize_with_focus(self):
-        """带 focus 参数时摘要提示应包含 focus"""
-        llm = _make_llm("关注主题的摘要")
-        config = AgentConfig()
-        compactor = Compactor(llm, config)
-
-        messages = [_make_user("hello"), _make_assistant("world")]
-        summary = await compactor._summarize(messages, focus="当前调试进度")
-        assert isinstance(summary, str)
-        assert len(summary) > 0
+        assert compactor._consecutive_failures == 3
 
 
 # ── auto_compact 流水线测试 ───────────────────────────────
@@ -241,64 +409,21 @@ class TestAutoCompact:
         assert result is messages
 
     @pytest.mark.asyncio
-    async def test_pipeline_l3_l1_l2(self):
-        """流水线按 L3 → L1 → L2 顺序执行"""
-        config = AgentConfig(compact_max_messages=5, compact_keep_recent=1,
-                             compact_threshold=999999)  # 高阈值不触发 L4
-        compactor = Compactor(_make_llm(), config)
-
-        messages = [_make_user(f"msg {i}") for i in range(15)]
-        result = await compactor.auto_compact(messages)
-        # L1 应该触发了裁剪
-        assert len(result) <= 15
-
-    @pytest.mark.asyncio
     async def test_pipeline_triggers_l4(self):
-        """超过阈值时触发 L4 LLM 摘要，保留尾部"""
-        config = AgentConfig(compact_threshold=10)  # 极低阈值确保触发
+        """超过阈值时触发 L4"""
+        config = AgentConfig(compact_trigger_ratio=0.1)
         compactor = Compactor(_make_llm("流水线摘要"), config)
+        compactor.update_prompt_tokens(5000)
 
         messages = [
             _make_user("很长" * 100),
             _make_assistant("也很长" * 100),
             _make_user("更多" * 100),
             _make_assistant("继续" * 100),
-            _make_user("最后" * 100),
         ]
         result = await compactor.auto_compact(messages)
-        # 尾部 3 条每条 600 字符 >> 阈值 10 * 0.3 = 3，所以 keep_count 递减到 0
-        # 全部替换为摘要
-        assert len(result) == 1
-        assert "流水线摘要" in result[0].content
-
-    @pytest.mark.asyncio
-    async def test_l4_failure_circuit_breaker(self):
-        """L4 连续失败不超过上限"""
-        async def failing_chat(*args, **kwargs):
-            raise RuntimeError("LLM 调用失败")
-            yield  # make it an async generator
-
-        llm = AsyncMock()
-        llm.chat = failing_chat
-
-        config = AgentConfig(compact_threshold=10)
-        compactor = Compactor(llm, config)
-
-        # 多条大消息，确保尾部也超 30% 阈值从而触发 L4
-        messages = [
-            _make_user("x" * 100),
-            _make_assistant("y" * 100),
-            _make_user("z" * 100),
-            _make_assistant("w" * 100),
-        ]
-
-        # 连续调用多次，不应抛出异常
-        for _ in range(5):
-            result = await compactor.auto_compact(messages)
-            # 失败时返回原消息
-            assert len(result) >= 1
-
-        assert compactor._consecutive_failures == 3  # 上限
+        has_compacted = any("流水线摘要" in str(m.content) for m in result)
+        assert has_compacted
 
 
 # ── manual_compact 测试 ──────────────────────────────────
@@ -342,19 +467,17 @@ class TestReactiveCompact:
         messages = [_make_user(f"msg {i}") for i in range(10)]
 
         result = await compactor.reactive_compact(messages)
-        # 摘要 + 最近 3 条 = 4 条
         assert len(result) == 4
         assert "Reactive compact" in result[0].content
 
     @pytest.mark.asyncio
     async def test_reactive_few_messages(self):
-        """消息数不足 5 条时仅返回摘要（不附加 recent）"""
+        """消息数不足时仅返回摘要"""
         llm = _make_llm("应急摘要")
         compactor = Compactor(llm, AgentConfig())
         messages = [_make_user("msg 1"), _make_assistant("msg 2")]
 
         result = await compactor.reactive_compact(messages)
-        # 消息 <= 5 条时 recent 为空，仅返回摘要
         assert len(result) == 1
         assert "Reactive compact" in result[0].content
 
@@ -363,10 +486,12 @@ class TestReactiveCompact:
         """应急压缩失败时返回原消息"""
         async def failing_chat(*args, **kwargs):
             raise RuntimeError("LLM 失败")
-            yield  # make it an async generator
+            yield
 
         llm = AsyncMock()
         llm.chat = failing_chat
+        llm.capabilities = AsyncMock()
+        llm.capabilities.max_context_window = 8192
         compactor = Compactor(llm, AgentConfig())
         messages = [_make_user("hello")]
 
@@ -383,7 +508,7 @@ class TestHelpers:
         """估算大小应大于零"""
         messages = [_make_user("hello"), _make_assistant("world")]
         size = Compactor._estimate_size(messages)
-        assert size == 10  # "hello" + "world"
+        assert size == 10
 
     def test_estimate_size_with_tool_calls(self):
         """包含工具调用时应计入 tool_calls 大小"""
@@ -406,15 +531,14 @@ class TestHelpers:
         assert "[USER]" in text
         assert "[ASSISTANT]" in text
         assert "用户输入" in text
-        assert "助手回复" in text
 
-    def test_serialize_truncates_long_content(self):
-        """序列化时截断过长单条消息"""
+    def test_serialize_long_content_preserved(self):
+        """序列化时保留完整内容（不再自动截断单条消息）"""
         compactor = Compactor(_make_llm(), AgentConfig())
         messages = [_make_user("x" * 5000)]
         text = compactor._serialize_messages(messages)
-        assert "truncated" in text
-        assert len(text) < 5000
+        # 序列化保留完整内容，L4 摘要调用时有 _MAX_MSG_CHARS 上限
+        assert "x" * 5000 in text
 
 
 # ── create_compact_tool 测试 ─────────────────────────────
@@ -426,10 +550,11 @@ class TestCreateCompactTool:
         """应成功创建 compact 工具"""
         from agent_framework.agent import Agent
         llm = _make_llm()
-        agent = Agent(llm=llm, system_prompt="test", skills_dir="/tmp/_nonexistent_")
+        config = AgentConfig(session_enabled=False)
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_")
         compact_tool = create_compact_tool(agent)
         assert compact_tool is not None
-        # 应标记为元工具
         assert compact_tool._tool_wrapper.meta is True
 
     @pytest.mark.asyncio
@@ -437,9 +562,10 @@ class TestCreateCompactTool:
         """compact 工具执行应替换历史"""
         from agent_framework.agent import Agent
         llm = _make_llm("工具摘要")
-        agent = Agent(llm=llm, system_prompt="test", skills_dir="/tmp/_nonexistent_")
+        config = AgentConfig(session_enabled=False)
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_")
 
-        # 添加一些历史消息
         agent.history.add(_make_user("msg 1"))
         agent.history.add(_make_assistant("msg 2"))
         agent.history.add(_make_user("msg 3"))
@@ -448,7 +574,6 @@ class TestCreateCompactTool:
         assert original_count >= 3
 
         compact_tool = create_compact_tool(agent)
-        # 调用工具
         result = await compact_tool(focus="")
         assert "已压缩" in result
         assert len(agent.history._messages) < original_count

@@ -15,8 +15,8 @@ class AgentConfig:
     confirm_dangerous: bool = True  # 危险工具调用前需确认（预留接口）
     mcp_tools_active_by_default: bool = False  # MCP 工具默认激活（False=进入休眠池，需手动激活）
     compact_enabled: bool = True       # 自动上下文压缩总开关
-    compact_threshold: int = 80000     # L4 触发阈值（字符数），超过时调用 LLM 生成摘要
-    compact_keep_recent: int = 3       # L2 保留最近 N 个工具结果不压缩
+    compact_trigger_ratio: float = 0.7 # L4 触发：prompt_tokens / max_context_window > 此比例时调用 LLM 摘要
+    compact_recent_rounds: int = 3     # 保留最近 N 轮工具结果完整（动态：上下文超 30% 时降为 0）
     compact_max_messages: int = 50     # L1 消息数量上限，超过时裁剪中间消息
 
     # Session 会话配置

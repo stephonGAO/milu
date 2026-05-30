@@ -170,7 +170,7 @@ class Agent:
         self._compactor = None
         if self._config.compact_enabled:
             from agent_framework.agent.compactor import Compactor, create_compact_tool
-            self._compactor = Compactor(llm, self._config)
+            self._compactor = Compactor(llm, self._config, session=self._session)
             if register_catalog:
                 self._compact_tool = create_compact_tool(self)
                 self._registry.register(self._compact_tool)
@@ -474,6 +474,9 @@ class Agent:
                         # 累积 usage
                         if chunk.usage:
                             _merge_usage(total_usage, chunk.usage)
+                            # 更新压缩器的 token 跟踪
+                            if self._compactor and chunk.usage.prompt_tokens:
+                                self._compactor.update_prompt_tokens(chunk.usage.prompt_tokens)
 
                         if chunk.finish_reason == "stop":
                             break

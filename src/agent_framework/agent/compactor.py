@@ -1,16 +1,19 @@
-"""上下文压缩流水线 — 四层压缩，便宜优先、昂贵兜底
+"""上下文压缩流水线 — 轮次分层 + Token 动态阈值
 
 执行顺序（每轮 LLM 调用前）：
-    L3 budget → L1 snip → L2 micro → [超阈值?] L4 compact
+    L1 snip → 轮次分层工具压缩 → [超阈值?] L4 LLM 摘要
 
 层级说明：
   L1 snip_compact:     消息数 > max_messages 时裁剪中间消息（0 API 调用）
-  L2 micro_compact:    旧工具结果替换为占位符（0 API 调用）
-  L3 budget:           旧轮次超大工具结果截断并持久化到磁盘（保护最新一轮，0 API 调用）
-  L4 compact_history:  调用 LLM 生成对话摘要，智能保留尾部 0-3 条（1 API 调用）
+  轮次分层工具压缩:     按 assistant 消息计轮次，分层处理工具结果（0 API 调用）
+    age > 10:  ALL tool results → 占位符 + session 文件指针
+    age 3~10:  tool results > 500 字符 → 截断 + 文件指针
+    age 0~3:   保持不变（动态：上下文超 30% 时 recent 降为 0）
+  L4 compact_history:  调用 LLM 生成对话摘要（1 API 调用）
+    触发条件: prompt_tokens / max_context_window > compact_trigger_ratio
 
 使用方式：
-    compactor = Compactor(llm, config)
+    compactor = Compactor(llm, config, session)
     compacted = await compactor.auto_compact(messages)
 
 参考：Claude Code compaction pipeline (query.ts / autoCompact.ts)
@@ -19,10 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import re
-import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agent_framework.agent.events import HistoryCompacted
@@ -32,15 +31,10 @@ from agent_framework.tools.decorator import tool
 if TYPE_CHECKING:
     from agent_framework.agent.agent import Agent
     from agent_framework.agent.config import AgentConfig
+    from agent_framework.agent.session import Session
     from agent_framework.llm.providers.base import BaseLLM
 
 logger = logging.getLogger(__name__)
-
-# 大结果持久化目录
-_COMPACT_OUTPUTS_DIR = Path.cwd() / ".compact_outputs"
-
-# 大结果持久化阈值（字符数）
-_PERSIST_THRESHOLD = 30000
 
 # L4 序列化时每条消息的最大字符数
 _MAX_MSG_CHARS = 80000
@@ -48,53 +42,76 @@ _MAX_MSG_CHARS = 80000
 # 连续压缩失败上限
 _MAX_CONSECUTIVE_FAILURES = 3
 
+# 工具结果截断阈值（字符数）
+_TOOL_TRUNCATE_THRESHOLD = 500
+
+# 旧轮次占位符的 age 阈值
+_OLD_ROUND_THRESHOLD = 10
+
 
 class Compactor:
-    """四层上下文压缩器。
+    """上下文压缩器 — 轮次分层 + Token 动态阈值。
 
     用法：
-        compactor = Compactor(llm, config)
+        compactor = Compactor(llm, config, session)
         compacted = await compactor.auto_compact(messages)
-        # compacted 可能与 messages 相同（无需压缩），也可能是新列表
     """
 
-    def __init__(self, llm: "BaseLLM", config: "AgentConfig") -> None:
+    def __init__(
+        self,
+        llm: "BaseLLM",
+        config: "AgentConfig",
+        session: "Session | None" = None,
+    ) -> None:
         self._llm = llm
         self._config = config
+        self._session = session
+        self._last_prompt_tokens = 0
         self._consecutive_failures = 0
 
-    async def auto_compact(self, messages: list[Message]) -> list[Message]:
-        """自动压缩流水线：L3 → L1 → L2 → [超阈值?] L4。
+        # 从 LLM 获取最大上下文窗口
+        try:
+            val = llm.capabilities.max_context_window
+            if isinstance(val, int) and val > 0:
+                self._max_context_window = val
+            else:
+                self._max_context_window = 8192
+        except (AttributeError, TypeError):
+            self._max_context_window = 8192  # 默认回退值
 
-        :param messages: 当前历史消息列表（会被原地修改或替换）
+    def update_prompt_tokens(self, tokens: int) -> None:
+        """Agent 每次 LLM 调用后更新 prompt_tokens。"""
+        if tokens > 0:
+            self._last_prompt_tokens = tokens
+
+    async def auto_compact(self, messages: list[Message]) -> list[Message]:
+        """自动压缩流水线：L1 snip → 轮次分层 → [超阈值?] L4。
+
+        :param messages: 当前历史消息列表
         :return: 压缩后的消息列表（可能与传入的是同一对象）
         """
         if len(messages) <= 1:
             return messages
 
-        # L3: 大结果持久化（必须在 L2 之前）
-        messages = self._tool_result_budget(messages)
-
         # L1: 消息数量裁剪
-        messages = self._snip_compact(messages) #静默执行
+        messages = self._snip_compact(messages)
 
-        # L2: 旧工具结果占位
-        messages = self._micro_compact(messages) #静默执行
+        # 轮次分层工具压缩
+        messages = self._round_based_compact(messages)
 
-        # L4: 超阈值时 LLM 摘要（连续失败时跳过）
-        if (
-            self._estimate_size(messages) > self._config.compact_threshold
-            and self._consecutive_failures < _MAX_CONSECUTIVE_FAILURES
-        ):
-            try:
-                messages = await self._compact_history(messages)
-                self._consecutive_failures = 0
-            except Exception as e:
-                self._consecutive_failures += 1
-                logger.warning(
-                    "L4 压缩失败 (%d/%d): %s",
-                    self._consecutive_failures, _MAX_CONSECUTIVE_FAILURES, e,
-                )
+        # L4: Token 比例触发 LLM 摘要
+        if self._consecutive_failures < _MAX_CONSECUTIVE_FAILURES:
+            ratio = self._calc_usage_ratio(messages)
+            if ratio >= self._config.compact_trigger_ratio:
+                try:
+                    messages = await self._compact_history(messages)
+                    self._consecutive_failures = 0
+                except Exception as e:
+                    self._consecutive_failures += 1
+                    logger.warning(
+                        "L4 压缩失败 (%d/%d): %s",
+                        self._consecutive_failures, _MAX_CONSECUTIVE_FAILURES, e,
+                    )
 
         return messages
 
@@ -131,6 +148,20 @@ class Compactor:
             *recent,
         ]
 
+    # ── Token 比例计算 ────────────────────────────────────────
+
+    def _calc_usage_ratio(self, messages: list[Message]) -> float:
+        """计算当前上下文使用率。
+
+        优先使用 API 返回的 prompt_tokens，回退到字符估算。
+        """
+        if self._last_prompt_tokens > 0:
+            return self._last_prompt_tokens / self._max_context_window
+
+        # 首次调用无 token 数据，回退到字符估算（约 2 字符/token）
+        estimated_tokens = self._estimate_size(messages) // 2
+        return estimated_tokens / self._max_context_window
+
     # ── L1: snip_compact ──────────────────────────────────────
 
     def _snip_compact(self, messages: list[Message]) -> list[Message]:
@@ -160,97 +191,173 @@ class Compactor:
         result = system_msgs + non_system[:keep_head] + [snip_marker] + non_system[-keep_tail:]
         return result
 
-    # ── L2: micro_compact ─────────────────────────────────────
+    # ── 轮次分层工具压缩 ──────────────────────────────────────
 
-    def _micro_compact(self, messages: list[Message]) -> list[Message]:
-        """L2: 保留最近 N 个工具结果，旧结果替换为占位符。"""
-        keep_recent = self._config.compact_keep_recent
+    @staticmethod
+    def _group_into_rounds(messages: list[Message]) -> list[list[Message]]:
+        """将消息按轮次分组。
 
-        # 收集所有 tool 角色消息的索引
-        tool_indices = [
-            i for i, m in enumerate(messages) if m.role == MessageRole.TOOL
-        ]
-
-        if len(tool_indices) <= keep_recent:
-            return messages
-
-        # 替换除最近 keep_recent 个之外的工具结果
-        for idx in tool_indices[:-keep_recent]:
-            msg = messages[idx]
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            if len(content) > 120:
-                messages[idx] = Message(
-                    role=MessageRole.TOOL,
-                    content="[Earlier tool result compacted. Re-run if needed.]",
-                    tool_call_id=msg.tool_call_id,
-                    name=msg.name,
-                )
-
-        return messages
-
-    # ── L3: tool_result_budget ────────────────────────────────
-
-    def _tool_result_budget(self, messages: list[Message]) -> list[Message]:
-        """L3: 仅对旧轮次的 tool 结果做截断持久化，保护最新一轮结果完整性。
-
-        最新一轮（最后一条 assistant 之后的 tool 结果）保持原样，
-        因为 LLM 主动请求了这些数据，还没来得及消化。
+        一轮 = 一个 assistant 消息 + 其后的 tool/user 消息，直到下一个 assistant。
+        首个 assistant 之前的消息（system, user）归入 round 0。
         """
-        if not messages:
+        rounds: list[list[Message]] = []
+        current_round: list[Message] = []
+        has_seen_assistant = False
+
+        for msg in messages:
+            if msg.role == MessageRole.ASSISTANT:
+                if has_seen_assistant and current_round:
+                    # 遇到新的 assistant，把之前的轮次存起来
+                    rounds.append(current_round)
+                    current_round = []
+                has_seen_assistant = True
+                current_round.append(msg)
+            else:
+                current_round.append(msg)
+
+        if current_round:
+            rounds.append(current_round)
+
+        return rounds
+
+    def _round_based_compact(self, messages: list[Message]) -> list[Message]:
+        """按轮次分层处理工具结果。
+
+        age > 10: ALL tool results → 占位符
+        age 3~10: tool results > 500 chars → 截断
+        age 0~3:  保持不变（动态：上下文超 30% 时 recent 降为 0）
+        """
+        # 检查是否有任何 tool 消息
+        has_tool = any(m.role == MessageRole.TOOL for m in messages)
+        if not has_tool:
             return messages
 
-        # 找到最后一条 assistant 消息的位置
-        last_assistant_idx = -1
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == MessageRole.ASSISTANT:
-                last_assistant_idx = i
-                break
-
-        if last_assistant_idx <= 0:
+        rounds = self._group_into_rounds(messages)
+        if len(rounds) <= 1:
             return messages
 
-        # 只处理最后一条 assistant 之前的 tool 消息（旧轮次）
-        old_tool_blocks = []
-        for i in range(last_assistant_idx):
-            if messages[i].role == MessageRole.TOOL:
-                old_tool_blocks.append(i)
+        total_rounds = len(rounds)
 
-        if not old_tool_blocks:
+        # 动态计算 recent 保留轮数
+        recent_rounds = self._config.compact_recent_rounds
+        usage_ratio = self._calc_usage_ratio(messages)
+        if usage_ratio > 0.3:
+            recent_rounds = 0
+
+        changed = False
+        new_rounds = []
+
+        for i, round_msgs in enumerate(rounds):
+            age = total_rounds - 1 - i  # 距离最新轮的距离
+
+            if age <= recent_rounds:
+                # 最近轮：保持不变
+                new_rounds.append(round_msgs)
+            elif age <= _OLD_ROUND_THRESHOLD:
+                # 中间轮：截断长工具结果
+                processed = self._process_mid_round(round_msgs, age, truncate=True)
+                if processed is not round_msgs:
+                    changed = True
+                new_rounds.append(processed)
+            else:
+                # 旧轮：全部占位符
+                processed = self._process_mid_round(round_msgs, age, truncate=False)
+                if processed is not round_msgs:
+                    changed = True
+                new_rounds.append(processed)
+
+        if not changed:
             return messages
 
-        for idx in old_tool_blocks:
-            msg = messages[idx]
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            if len(content) <= _PERSIST_THRESHOLD:
+        # 展平
+        result = []
+        for r in new_rounds:
+            result.extend(r)
+        return result
+
+    def _process_mid_round(
+        self, round_msgs: list[Message], age: int, truncate: bool
+    ) -> list[Message]:
+        """处理中间/旧轮次的工具结果。
+
+        :param truncate: True=截断（保留前 500 字符），False=全部占位符
+        """
+        result = []
+        changed = False
+
+        for msg in round_msgs:
+            if msg.role != MessageRole.TOOL:
+                result.append(msg)
                 continue
 
-            # 持久化到磁盘
-            tool_id = msg.tool_call_id or msg.name or "unknown"
-            persisted = self._persist_large_output(tool_id, content)
+            content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
 
-            messages[idx] = Message(
+            # 已被压缩过的消息不再重新处理（防止多次 auto_compact 产生嵌套 header）
+            if content.startswith("[工具结果已压缩:") or content.startswith("[工具结果已截断:"):
+                result.append(msg)
+                continue
+
+            tool_name = msg.name or "unknown"
+            tool_id = msg.tool_call_id or ""
+
+            # session 文件指针
+            session_ref = self._get_session_ref(msg)
+
+            if truncate and len(content) <= _TOOL_TRUNCATE_THRESHOLD:
+                # 短内容不需要截断
+                result.append(msg)
+                continue
+
+            if truncate:
+                # 截断模式：保留前 500 字符
+                preview = content[:_TOOL_TRUNCATE_THRESHOLD]
+                new_content = (
+                    f"[工具结果已截断: {tool_name}"
+                    + (f" ({tool_id})" if tool_id else "")
+                    + f" → 前{_TOOL_TRUNCATE_THRESHOLD}字符如下]\n"
+                    f"{preview}\n"
+                    f"{session_ref}"
+                )
+            else:
+                # 占位符模式
+                new_content = (
+                    f"[工具结果已压缩: {tool_name}"
+                    + (f" ({tool_id})" if tool_id else "")
+                    + f"]\n{session_ref}"
+                )
+
+            result.append(Message(
                 role=MessageRole.TOOL,
-                content=persisted,
+                content=new_content,
                 tool_call_id=msg.tool_call_id,
                 name=msg.name,
-            )
+            ))
+            changed = True
 
-        return messages
+        if not changed:
+            return round_msgs
+        return result
 
-    def _persist_large_output(self, tool_id: str, output: str) -> str:
-        """将大输出持久化到磁盘，返回截断版本。"""
-        _COMPACT_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-        safe_id = re.sub(r'[^\w\-]', '_', tool_id)
-        path = _COMPACT_OUTPUTS_DIR / f"{safe_id}_{int(time.time())}.txt"
-        path.write_text(output, encoding="utf-8")
+    def _get_session_ref(self, msg: Message) -> str:
+        """生成 session 文件指针字符串。"""
+        if not self._session:
+            return "[原始内容未被持久化]"
 
-        preview = output[:2000]
-        return (
-            f"<persisted-output>\n"
-            f"Full output: {path}\n"
-            f"Preview:\n{preview}\n"
-            f"</persisted-output>"
-        )
+        # 尝试从 JSONL 中找到对应的行号
+        # 通过 tool_call_id 匹配
+        line_ref = ""
+        if msg.tool_call_id and self._session.conversation_path.exists():
+            try:
+                with open(self._session.conversation_path, "r", encoding="utf-8") as f:
+                    for i, line in enumerate(f):
+                        if msg.tool_call_id in line:
+                            line_ref = f" 第{i}行"
+                            break
+            except OSError:
+                pass
+
+        conv_path = self._session.conversation_path
+        return f"[完整内容 → {conv_path}{line_ref}]"
 
     # ── L4: compact_history ───────────────────────────────────
 
@@ -258,7 +365,7 @@ class Compactor:
         """L4: 调用 LLM 生成对话摘要。
 
         :param messages: 当前历史消息
-        :param preserve_tail: 是否保留尾部消息（自动压缩时为 True，保护最新数据）
+        :param preserve_tail: 是否保留尾部消息
         :return: 压缩后的消息列表
         """
         if not preserve_tail:
@@ -266,9 +373,8 @@ class Compactor:
             summary = await self._summarize(messages)
             return [Message(role=MessageRole.USER, content=f"[Compacted]\n\n{summary}")]
 
-        # 智能保留尾部：优先保留 3 条，但尾部总大小不超过阈值的 30%
-        threshold = self._config.compact_threshold
-        max_tail_ratio = 0.3
+        # 智能保留尾部：基于 token 预算
+        max_tail_tokens = int(self._max_context_window * 0.30)  # 尾部占 30% 上下文
 
         keep_count = 0
         for try_count in (3, 2, 1, 0):
@@ -279,10 +385,10 @@ class Compactor:
                 # 消息数不足，保留全部
                 keep_count = len(messages)
                 break
-            # 检查尾部是否在 30% 阈值内
+            # 检查尾部 token 是否在预算内
             tail_messages = messages[-try_count:]
-            tail_size = self._estimate_size(tail_messages)
-            if tail_size <= threshold * max_tail_ratio:
+            tail_size = self._estimate_size(tail_messages) // 2  # 粗略 token 估算
+            if tail_size <= max_tail_tokens:
                 keep_count = try_count
                 break
 
@@ -309,8 +415,8 @@ class Compactor:
         """调用 LLM 生成对话摘要。"""
         conversation = self._serialize_messages(messages)
         # 截断序列化结果，防止摘要请求本身超限
-        if len(conversation) > _MAX_MSG_CHARS:
-            conversation = conversation[:_MAX_MSG_CHARS] + "\n\n[... truncated ...]"
+        # if len(conversation) > _MAX_MSG_CHARS:
+        #     conversation = conversation[:_MAX_MSG_CHARS] + "\n\n[... truncated ...]"
 
         focus_hint = f"\nFocus especially on: {focus}" if focus else ""
         prompt = (
@@ -354,8 +460,8 @@ class Compactor:
                 content = "(no content)"
 
             # 截断过长的单条消息
-            if len(content) > 2000:
-                content = content[:2000] + "... [truncated]"
+            # if len(content) > 2000:
+            #     content = content[:2000] + "... [truncated]"
 
             line = f"[{role}]"
             if msg.name:
