@@ -2,6 +2,7 @@
 from agent_framework.agent.agent import Agent
 from agent_framework.agent.config import AgentConfig
 from agent_framework.agent.history import ConversationHistory
+from agent_framework.agent.session import Session
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
 from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
@@ -16,6 +17,7 @@ from agent_framework.agent.events import (
     AgentError,
     SubAgentEvent,
     SubAgentDone,
+    SessionLoaded,
 )
 from agent_framework.agent.exceptions import (
     AgentLoopError,
@@ -30,6 +32,7 @@ __all__ = [
     "Agent",
     "AgentConfig",
     "ConversationHistory",
+    "Session",
     # SubAgent
     "SubAgentConfig",
     "create_subagent_tools",
@@ -47,6 +50,7 @@ __all__ = [
     "AgentError",
     "SubAgentEvent",
     "SubAgentDone",
+    "SessionLoaded",
     # Exceptions
     "AgentLoopError",
     "AgentTimeout",

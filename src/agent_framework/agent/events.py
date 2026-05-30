@@ -113,3 +113,13 @@ class HistoryCompacted(AgentEvent):
     strategy: str          # "auto" | "manual" | "reactive"
     original_count: int    # 压缩前消息数
     compacted_count: int   # 压缩后消息数
+
+
+@dataclass(frozen=True)
+class SessionLoaded(AgentEvent):
+    """会话被加载或切换。
+
+    在 load_session() 或 new_session() 后发出。
+    """
+    session_id: str
+    message_count: int

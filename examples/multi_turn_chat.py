@@ -23,7 +23,8 @@ from agent_framework import (
     AgentDone, AgentError,
     SubAgentConfig, create_subagent_tools,
     SubAgentEvent, SubAgentDone,
-    HistoryCompacted,
+    HistoryCompacted, SessionLoaded,
+    Session,
     SkillConfig,
 )
 from agent_framework.llm.providers import ModelRegistry
@@ -83,6 +84,10 @@ def print_header():
     /tools     — 查看可用工具（含休眠工具）
     /skills    — 查看可用技能
     /plan      — 查看当前会话计划
+    /save      — 保存当前会话
+    /sessions  — 查看所有会话
+    /new       — 新建会话
+    /load <id> — 加载历史会话
     /quit      — 退出
 """)
 
@@ -457,6 +462,10 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
   /plan      — 查看当前会话计划
   /prompt    — 查看当前系统提示词
   /compact   — 手动压缩对话历史
+  /save      — 保存当前会话
+  /sessions  — 查看所有会话
+  /new       — 新建会话（自动保存当前）
+  /load <id> — 加载历史会话
   /help      — 显示帮助
   /quit      — 退出
 """)
@@ -560,6 +569,62 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         print(f"  {c('dim', preview)}")
         print(DIVIDER + "\n")
 
+    elif cmd == "/save":
+        agent.save_session()
+        if agent.session:
+            print(f"\n  {c('green', '会话已保存')}")
+            print(f"  ID: {c('cyan', agent.session.session_id)}")
+            print(f"  路径: {c('dim', str(agent.session.dir_path))}")
+            print(f"  消息数: {agent.session.message_count}\n")
+        else:
+            print(f"\n  {c('dim', '会话功能未启用。')}\n")
+
+    elif cmd == "/sessions":
+        from agent_framework.agent.session import Session as SessionClass
+        base_dir = Path(agent.session.base_dir) if agent.session else Path(".sessions")
+        sessions = SessionClass.list_sessions(base_dir)
+        if not sessions:
+            print(f"\n  {c('dim', '暂无历史会话。')}\n")
+            return True
+
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  历史会话") + c("dim", f" ({len(sessions)} 个)"))
+        print(DIVIDER)
+        current_id = agent.session.session_id if agent.session else None
+        for s in sessions:
+            sid = s.get("session_id", "?")
+            model = s.get("model", "")
+            msg_count = s.get("message_count", 0)
+            updated = s.get("updated_at", 0)
+            from datetime import datetime
+            time_str = datetime.fromtimestamp(updated).strftime("%m-%d %H:%M") if updated else "?"
+            marker = c("green", " ← 当前") if sid == current_id else ""
+            model_str = c("dim", f" ({model})") if model else ""
+            print(f"  {c('cyan', sid)}  {c('dim', time_str)}  {msg_count} 条消息{model_str}{marker}")
+        print(DIVIDER + "\n")
+
+    elif cmd == "/new":
+        agent.new_session()
+        print(f"\n  {c('green', '新会话已创建')}")
+        if agent.session:
+            print(f"  ID: {c('cyan', agent.session.session_id)}\n")
+
+    elif cmd.startswith("/load"):
+        parts = cmd.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            print(f"\n  {c('yellow', '用法: /load <session_id>')}\n")
+            return True
+        session_id = parts[1].strip()
+        try:
+            msg_count = agent.load_session(session_id)
+            print(f"\n  {c('green', '会话已加载')}")
+            print(f"  ID: {c('cyan', session_id)}")
+            print(f"  消息数: {msg_count}\n")
+        except FileNotFoundError:
+            print(f"\n  {c('red', f'会话不存在: {session_id}')}\n")
+        except Exception as e:
+            print(f"\n  {c('red', f'加载失败: {e}')}\n")
+
     else:
         print(c("red", f"\n  未知命令: {cmd}  (输入 /help 查看帮助)\n"))
 
@@ -583,6 +648,11 @@ async def main():
         summary = ", ".join(f"{cat}({len(names)}个)" for cat, names in categories.items())
         print(c("cyan", f"  MCP 工具已加载（休眠态）: {summary}"))
         print(c("dim", "  输入 /tools 查看详情，或通过 search_tools / activate_tools 按需激活\n"))
+
+    # 显示会话信息
+    if agent.session:
+        print(c("cyan", f"  会话 ID: {agent.session.session_id}"))
+        print(c("dim", f"  日志路径: {agent.session.dir_path}\n"))
 
     # 显示恢复的计划状态
     if PLAN_FILE.exists():
@@ -636,7 +706,8 @@ async def main():
             except Exception as e:
                 print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
     finally:
-        # 断开 MCP 连接
+        # 保存会话并断开 MCP 连接
+        agent.save_session()
         await agent.disconnect_mcp()
 
 

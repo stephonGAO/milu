@@ -18,3 +18,7 @@ class AgentConfig:
     compact_threshold: int = 80000     # L4 触发阈值（字符数），超过时调用 LLM 生成摘要
     compact_keep_recent: int = 3       # L2 保留最近 N 个工具结果不压缩
     compact_max_messages: int = 50     # L1 消息数量上限，超过时裁剪中间消息
+
+    # Session 会话配置
+    session_enabled: bool = True           # 自动创建会话（对话日志持久化）
+    session_dir: str | None = None         # 会话目录（默认 .sessions/）

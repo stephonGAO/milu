@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable, Union
 
 import os
@@ -18,6 +19,7 @@ from agent_framework.agent.events import (
     ConfirmResponse,
     HistoryCompacted,
     ReasoningDelta,
+    SessionLoaded,
     SubAgentDone,
     SubAgentEvent,
     TextDelta,
@@ -140,6 +142,18 @@ class Agent:
         self._history = history or ConversationHistory(
             max_tokens=self._config.max_total_tokens,
         )
+
+        # ── 会话持久化 ──
+        self._session = None
+        if self._config.session_enabled:
+            from agent_framework.agent.session import Session
+            base_dir = Path(self._config.session_dir or ".sessions")
+            model = self._extract_model_name(llm)
+            self._session = Session(
+                Session.generate_id(), base_dir, model=model,
+            )
+            self._history.attach_session(self._session)
+
         self._registry = ToolRegistry()
         if tools:
             self._registry.register_many(tools)
@@ -226,6 +240,11 @@ class Agent:
         """提示词构建器（None 表示未使用 prompt_dir）。"""
         return self._prompt_builder
 
+    @property
+    def session(self):
+        """当前会话（None 表示未启用 session）。"""
+        return self._session
+
     # -- 公开方法 ------------------------------------------------------------
 
     async def reset(self) -> None:
@@ -234,7 +253,56 @@ class Agent:
         self._work_started = False
         self._plan_created = False
 
+    def save_session(self) -> None:
+        """保存当前会话元数据到 session.json。"""
+        if self._session:
+            self._session.save_metadata()
+
+    def new_session(self) -> None:
+        """保存当前会话，创建新会话，清空历史。"""
+        from agent_framework.agent.session import Session as SessionClass
+
+        if self._session:
+            self._session.save_metadata()
+
+        base_dir = self._session.base_dir if self._session else Path(self._config.session_dir or ".sessions")
+        model = self._extract_model_name(self._llm)
+
+        self._session = SessionClass(SessionClass.generate_id(), base_dir, model=model)
+        self._history.clear()
+        self._history.attach_session(self._session)
+        self._work_started = False
+        self._plan_created = False
+
+    def load_session(self, session_id: str) -> int:
+        """加载历史会话，恢复对话。返回消息数量。"""
+        from agent_framework.agent.session import Session as SessionClass
+
+        # 保存当前会话
+        if self._session:
+            self._session.save_metadata()
+
+        base_dir = self._session.base_dir if self._session else Path(self._config.session_dir or ".sessions")
+        self._session = SessionClass.load_session(session_id, base_dir)
+        self._history.load_from_session(self._session)
+        self._work_started = False
+        self._plan_created = False
+        return self._session.message_count
+
     # -- 内部方法 ------------------------------------------------------------
+
+    @staticmethod
+    def _extract_model_name(llm) -> str:
+        """从 LLM 实例安全提取模型名称。"""
+        try:
+            config = getattr(llm, '_model_config', None)
+            if config is not None and not isinstance(config, type):
+                model = getattr(config, 'model', None)
+                if isinstance(model, str):
+                    return model
+        except Exception:
+            pass
+        return ""
 
     def _build_system_prompt(self) -> None:
         """动态拼装 system prompt 并写入历史（每轮调用一次）。
@@ -319,6 +387,7 @@ class Agent:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.save_session()
         await self.disconnect_mcp()
         return False
 
@@ -465,6 +534,7 @@ class Agent:
 
             # 8. 无工具调用 → 结束
             if not resolved_calls:
+                self.save_session()
                 yield AgentDone(
                     final_text=final_text,
                     total_usage=total_usage,

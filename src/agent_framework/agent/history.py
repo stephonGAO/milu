@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from agent_framework.llm.base.message import Message, MessageRole
+
+if TYPE_CHECKING:
+    from agent_framework.agent.session import Session
 
 
 def _estimate_tokens(text: str) -> int:
@@ -34,6 +38,7 @@ class ConversationHistory:
         self._preserve_system = preserve_system
         self._head_turns = head_turns
         self._tail_turns = tail_turns
+        self._session: "Session | None" = None  # 会话日志（可选）
 
     def set_system(self, message: Message) -> None:
         """设置 system 消息（始终作为第一条）"""
@@ -43,8 +48,23 @@ class ConversationHistory:
             self._messages.insert(0, message)
 
     def add(self, message: Message) -> None:
-        """追加一条消息"""
+        """追加一条消息，同时写入会话日志（如有）"""
         self._messages.append(message)
+        if self._session:
+            self._session.log_message(message)
+
+    def attach_session(self, session: "Session") -> None:
+        """绑定会话日志，后续 add() 会自动写入 JSONL"""
+        self._session = session
+
+    def detach_session(self) -> None:
+        """解绑会话日志"""
+        self._session = None
+
+    def load_from_session(self, session: "Session") -> None:
+        """从会话日志批量加载消息（不重复写入 JSONL）"""
+        self._session = session
+        self._messages = session.load_messages()
 
     def get_messages(self) -> list[Message]:
         """获取截断后的消息列表（用于传给 LLM）"""
