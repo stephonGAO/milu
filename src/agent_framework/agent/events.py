@@ -102,3 +102,14 @@ class SubAgentDone(AgentEvent):
     turn_count: int         # 子代理使用的 LLM 轮数
     total_usage: TokenUsage  # 子代理的 token 消耗
     is_error: bool          # 是否以错误结束
+
+
+@dataclass(frozen=True)
+class HistoryCompacted(AgentEvent):
+    """对话历史被压缩。
+
+    在自动压缩（auto）、手动压缩（manual）或应急压缩（reactive）后发出。
+    """
+    strategy: str          # "auto" | "manual" | "reactive"
+    original_count: int    # 压缩前消息数
+    compacted_count: int   # 压缩后消息数

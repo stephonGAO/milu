@@ -23,6 +23,7 @@ from agent_framework import (
     AgentDone, AgentError,
     SubAgentConfig, create_subagent_tools,
     SubAgentEvent, SubAgentDone,
+    HistoryCompacted,
     SkillConfig,
 )
 from agent_framework.llm.providers import ModelRegistry
@@ -343,10 +344,19 @@ async def handle_turn(agent: Agent, user_input: str):
         elif isinstance(event, AgentError):
             print(f"\n  {c('red', '[ERROR]')} {c('red', event.message)}")
 
+        # ── 上下文压缩 ──
+        elif isinstance(event, HistoryCompacted):
+            print(
+                f"\n  {c('cyan', '[COMPACT]')} "
+                f"对话历史已压缩: {event.original_count} → {event.compacted_count} 条消息 "
+                f"({c('dim', event.strategy)})",
+                flush=True,
+            )
+
 
 # ── 内置命令处理 ──────────────────────────────────────────
 
-def handle_command(agent: Agent, cmd: str) -> bool:
+async def handle_command(agent: Agent, cmd: str) -> bool:
     """
     处理 / 命令。返回 True 表示已处理（不发送给 Agent），
     返回 False 表示应退出循环。
@@ -446,6 +456,7 @@ def handle_command(agent: Agent, cmd: str) -> bool:
   /skills    — 查看可用技能
   /plan      — 查看当前会话计划
   /prompt    — 查看当前系统提示词
+  /compact   — 手动压缩对话历史
   /help      — 显示帮助
   /quit      — 退出
 """)
@@ -531,6 +542,24 @@ def handle_command(agent: Agent, cmd: str) -> bool:
         print(content)
         print(DIVIDER + "\n")
 
+    elif cmd == "/compact":
+        if not agent._compactor:
+            print(f"\n  {c('dim', '上下文压缩未启用。')}\n")
+            return True
+        original_count = len(agent.history._messages)
+        compacted, summary = await agent._compactor.manual_compact(
+            agent.history._messages
+        )
+        agent.history.replace_all(compacted)
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  手动压缩完成")
+              + c("dim", f"  ({original_count} → {len(compacted)} 条消息)"))
+        print(DIVIDER)
+        # 显示摘要前 500 字符
+        preview = summary[:500] + "..." if len(summary) > 500 else summary
+        print(f"  {c('dim', preview)}")
+        print(DIVIDER + "\n")
+
     else:
         print(c("red", f"\n  未知命令: {cmd}  (输入 /help 查看帮助)\n"))
 
@@ -593,7 +622,7 @@ async def main():
 
             # ── / 命令 ──
             if user_input.startswith("/"):
-                if not handle_command(agent, user_input):
+                if not await handle_command(agent, user_input):
                     break
                 continue
 

@@ -16,6 +16,7 @@ from agent_framework.agent.events import (
     AgentError,
     AgentEvent,
     ConfirmResponse,
+    HistoryCompacted,
     ReasoningDelta,
     SubAgentDone,
     SubAgentEvent,
@@ -35,7 +36,7 @@ logger = logging.getLogger(__name__)
 _PLAN_TOOLS = {"todo_write", "todo_read"}
 
 # 元工具名称集合 — 用于发现和加载工具（MCP / Skill），不视为"已开始工作"
-_META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill"}
+_META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill", "compact"}
 
 # 技能目录自动搜索路径
 _SKILL_SEARCH_PATHS = [
@@ -150,6 +151,15 @@ class Agent:
             from agent_framework.tools.catalog import create_catalog_tools
             self._catalog_tools = create_catalog_tools(self._registry)
             self._registry.register_many(self._catalog_tools)
+
+        # ── 上下文压缩器 ──
+        self._compactor = None
+        if self._config.compact_enabled:
+            from agent_framework.agent.compactor import Compactor, create_compact_tool
+            self._compactor = Compactor(llm, self._config)
+            if register_catalog:
+                self._compact_tool = create_compact_tool(self)
+                self._registry.register(self._compact_tool)
 
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
@@ -353,6 +363,18 @@ class Agent:
             # 1.5 每轮重建 system prompt（反映技能目录等动态状态）
             self._build_system_prompt()
 
+            # 1.6 自动压缩（如果启用）
+            if self._compactor:
+                original_count = len(self._history._messages)
+                compacted = await self._compactor.auto_compact(self._history._messages)
+                if compacted is not self._history._messages:
+                    self._history.replace_all(compacted)
+                    yield HistoryCompacted(
+                        strategy="auto",
+                        original_count=original_count,
+                        compacted_count=len(compacted),
+                    )
+
             # 2. 获取截断后的历史消息
             messages = self._history.get_messages()
 
@@ -392,6 +414,31 @@ class Agent:
                     message=f"单次调用超时 {self._config.timeout}s",
                 )
                 return
+            except Exception as e:
+                # 检测上下文过长错误，尝试应急压缩后重试
+                error_str = str(e).lower()
+                context_too_long_keywords = [
+                    "context_length", "too_long", "token", "maximum",
+                    "max_tokens", "reduce", "truncat",
+                ]
+                is_context_error = any(
+                    kw in error_str for kw in context_too_long_keywords
+                )
+                if is_context_error and self._compactor:
+                    logger.info("检测到上下文过长错误，触发应急压缩: %s", e)
+                    original_count = len(self._history._messages)
+                    compacted = await self._compactor.reactive_compact(
+                        self._history._messages
+                    )
+                    if compacted is not self._history._messages:
+                        self._history.replace_all(compacted)
+                        yield HistoryCompacted(
+                            strategy="reactive",
+                            original_count=original_count,
+                            compacted_count=len(compacted),
+                        )
+                    continue  # 重试本轮
+                raise
 
             # 7. 记录 assistant 消息到历史
             assistant_content = "".join(turn_text_parts) if turn_text_parts else None

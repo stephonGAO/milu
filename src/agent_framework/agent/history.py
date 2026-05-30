@@ -71,6 +71,13 @@ class ConversationHistory:
         """获取完整未截断的历史（用于调试/日志）"""
         return list(self._messages)
 
+    def replace_all(self, messages: list[Message]) -> None:
+        """替换全部消息（压缩后调用）。
+
+        system 消息在下一轮 _build_system_prompt 中会自动重建。
+        """
+        self._messages = messages
+
     def _apply_sliding_window(self) -> list[Message]:
         """滑动窗口截断：保留 system + 最近 max_turns 条消息"""
         non_system = [m for m in self._messages if m.role != MessageRole.SYSTEM]

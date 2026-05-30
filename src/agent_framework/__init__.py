@@ -33,6 +33,7 @@ from agent_framework.agent.events import (
     AgentError,
     SubAgentEvent,
     SubAgentDone,
+    HistoryCompacted,
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig, ConversationHistory
@@ -78,6 +79,7 @@ __all__ = [
     "AgentError",
     "SubAgentEvent",
     "SubAgentDone",
+    "HistoryCompacted",
     # Agent
     "Agent",
     "AgentConfig",
