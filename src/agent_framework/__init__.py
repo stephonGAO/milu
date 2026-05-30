@@ -39,6 +39,7 @@ from agent_framework.agent import Agent, AgentConfig, ConversationHistory
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
 from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
+from agent_framework.prompts.builder import PromptBuilder
 from agent_framework.tools.mcp.config import MCPServerConfig
 
 __all__ = [
@@ -91,4 +92,6 @@ __all__ = [
     # Skills
     "SkillConfig",
     "SkillRegistry",
+    # Prompts
+    "PromptBuilder",
 ]

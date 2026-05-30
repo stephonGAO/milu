@@ -118,6 +118,9 @@ def build_agent() -> Agent:
     so_tool = create_structured_output_tool()
     todo_write, todo_read = create_todo_write_tool(plan_file=PLAN_FILE)
 
+    # 提示词目录路径（相对于项目根目录）
+    prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
+
     # 创建子代理工具
     subagent_tools = create_subagent_tools(
         llm=llm,
@@ -128,10 +131,7 @@ def build_agent() -> Agent:
                     "调研助手：擅长搜索和整理信息。"
                     "当需要查找资料、对比分析、总结报告时委派此代理。"
                 ),
-                system_prompt=(
-                    "你是一个专业的调研助手。你的任务是搜索和整理信息，"
-                    "提供准确、全面的调研结果。请引用信息来源。"
-                ),
+                prompt_dir=prompts_base / "researcher",
                 # 不传 DuckDuckGo web_search 工具（国内不可用），
                 # 依靠共享 LLM 的 Qwen 内置搜索（web_search=True）
                 tools=[http_request],
@@ -163,11 +163,7 @@ def build_agent() -> Agent:
                     "编程助手：擅长写代码和调试。"
                     "当需要编写、修改、测试代码或解决编程问题时委派此代理。"
                 ),
-                system_prompt=(
-                    "你是一个专业的编程助手。你擅长 Python 编程，"
-                    "可以编写清晰的代码、调试问题、创建示例文件。"
-                    "操作文件时先用 index 了解结构，再精确操作。"
-                ),
+                prompt_dir=prompts_base / "coder",
                 tools=[file, python_repl],
                 config=AgentConfig(),
             ),
@@ -181,9 +177,7 @@ def build_agent() -> Agent:
                     "代码审查专家：擅长代码审查与建议提出。"
                     "当需要审查、修改、优化代码时委派此代理。"
                 ),
-                system_prompt=(
-                    "你是一个专业的代码审查助手。"
-                ),
+                prompt_dir=prompts_base / "reviewer",
                 tools=[file, python_repl],
                 config=AgentConfig(),
                 # 手动加载 code-review.md 技能文件，通过 skills 参数传入
@@ -208,28 +202,7 @@ def build_agent() -> Agent:
 
     agent = Agent(
         llm=llm,
-        system_prompt=(
-            "你是一个功能强大的 AI 助手，拥有丰富的工具集和专业子代理团队。\n"
-            "## 核心原则：\n"
-            "  1. 主动使用工具完成任务，不要只描述怎么做——直接做\n"
-            "  2. 保持上下文连贯，记住之前对话中的信息\n"
-            "  3. 回答简洁准确，必要时给出代码或数据佐证\n"
-            "  4. 操作文件时先用 index 了解结构，再精确操作\n"
-            "  5. 你拥有元工具 list_catalog / search_tools / activate_tools，"
-            "可以动态发现和激活 MCP 外部工具（如 fetch、数据库、Figma 等）。"
-            "当需要外部能力时，先用 search_tools 搜索，再用 activate_tools 激活后调用\n"
-            "  6. 对于复杂多步骤任务，主动使用 todo_write 制定并跟踪计划。"
-            "注意：绝对不要在创建计划的同一轮调用中同时启动子代理或其他工具。"
-            "如需更新计划并执行任务，必须分两轮调用：第一轮只调用 todo_write，"
-            "第二轮再调用其他工具\n"
-            "特别注意：只可在用户提出一个新任务需求的开头允许使用 todo_write 制定计划，"
-            "如果一个新任务需求的开始没有创建计划之后就只专注执行不要再新创建。"
-            "如果创建了计划就要经常跟进及时更新进度！"
-            "不确定当前计划时，调用 todo_read 查看。"
-            "  7. 你拥有两个专业子代理：researcher（调研助手）和 coder（编程助手）。"
-            "当任务需要专项能力时，委派给对应子代理。给子代理清晰的任务描述，"
-            "综合其结果给出最终回复。简单任务可直接处理，不必委派"
-        ),
+        prompt_dir=prompts_base / "main",
         tools=all_tools,
         history=history,
         # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300, confirm_dangerous=True),
@@ -472,6 +445,7 @@ def handle_command(agent: Agent, cmd: str) -> bool:
   /tools     — 查看可用工具
   /skills    — 查看可用技能
   /plan      — 查看当前会话计划
+  /prompt    — 查看当前系统提示词
   /help      — 显示帮助
   /quit      — 退出
 """)
@@ -526,6 +500,35 @@ def handle_command(agent: Agent, cmd: str) -> bool:
             trigger_part = f"  {c('dim', '[' + ', '.join(cfg.triggers) + ']')}" if cfg.triggers else ""
             print(f"  {c('blue', name):<30} {cfg.description}{trigger_part}")
         print(f"\n  {c('dim', 'LLM 会自动调用 load_skill 按需加载技能正文')}")
+        print(DIVIDER + "\n")
+
+    elif cmd == "/prompt":
+        # 触发一次最新拼装（支持热重载：用户可能在运行中改了 .md 文件）
+        agent._build_system_prompt()
+        system_msg = agent.history.all_messages[0] if agent.history.all_messages else None
+        content = system_msg.content if system_msg else ""
+
+        if not content:
+            print(f"\n  {c('dim', '当前系统提示词为空。')}\n")
+            return True
+
+        # 统计：按 section 拆分（如果来自 PromptBuilder）
+        line_count = content.count("\n") + 1
+        char_count = len(content)
+
+        # 提取 PromptBuilder 文件列表（如果存在）
+        file_list = []
+        if agent.prompt_builder:
+            file_list = agent.prompt_builder.list_files()
+
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  当前系统提示词")
+              + c("dim", f"  ({line_count} 行, {char_count} 字符)"))
+        if file_list:
+            names = ", ".join(f["file"] for f in file_list)
+            print(c("dim", f"  来源: {names}"))
+        print(DIVIDER)
+        print(content)
         print(DIVIDER + "\n")
 
     else:

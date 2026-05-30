@@ -121,7 +121,7 @@ class Agent:
     def __init__(
         self,
         llm: BaseLLM,
-        system_prompt: str,
+        system_prompt: str = "",
         tools: list | None = None,
         history: ConversationHistory | None = None,
         config: AgentConfig | None = None,
@@ -131,6 +131,8 @@ class Agent:
         skills: list | None = None,
         skills_dir: str | None = None,
         register_skills: bool = True,
+        prompt_dir: "str | os.PathLike | None" = None,
+        prompt_variables: dict[str, str] | None = None,
     ):
         self._llm = llm
         self._config = config or AgentConfig()
@@ -178,6 +180,13 @@ class Agent:
                     self._skill_registry.load_from_directory(search_path)
                     break
 
+        # ── PromptBuilder 初始化 ──
+        self._prompt_builder = None
+        self._prompt_variables: dict[str, str] = prompt_variables or {}
+        if prompt_dir:
+            from agent_framework.prompts.builder import PromptBuilder
+            self._prompt_builder = PromptBuilder(prompt_dir)
+
         # 保存原始 system prompt（每轮动态拼装，不在此处 set_system）
         self._system_prompt = system_prompt
 
@@ -202,6 +211,11 @@ class Agent:
         """技能注册表。"""
         return self._skill_registry
 
+    @property
+    def prompt_builder(self):
+        """提示词构建器（None 表示未使用 prompt_dir）。"""
+        return self._prompt_builder
+
     # -- 公开方法 ------------------------------------------------------------
 
     async def reset(self) -> None:
@@ -215,10 +229,27 @@ class Agent:
     def _build_system_prompt(self) -> None:
         """动态拼装 system prompt 并写入历史（每轮调用一次）。
 
-        拼装顺序：原始 prompt → 技能目录元数据
+        拼装顺序：
+        1. PromptBuilder 输出（prompt_dir 指定的文件目录）
+        2. system_prompt 字符串（向后兼容的内联提示词）
+        3. 技能目录元数据
         """
-        parts = [self._system_prompt]
+        parts: list[str] = []
 
+        # 1. PromptBuilder 输出（每轮重读文件 → 热重载）
+        if self._prompt_builder:
+            try:
+                prompt_text = self._prompt_builder.build(**self._prompt_variables)
+                if prompt_text:
+                    parts.append(prompt_text)
+            except FileNotFoundError as e:
+                logger.warning("提示词目录加载失败: %s", e)
+
+        # 2. 原始 system_prompt（向后兼容）
+        if self._system_prompt:
+            parts.append(self._system_prompt)
+
+        # 3. 技能目录元数据
         skill_catalog = self._skill_registry.describe_available()
         if skill_catalog:
             parts.append(f"\n\n## 可用技能\n{skill_catalog}")

@@ -294,7 +294,7 @@ def create_todo_write_tool(
     async def _wrapped_write(**kwargs):
         result = await _write_original_func(**kwargs)
         # 每次工具调用后重置轮次计数器
-        mgr.state.rounds_since_update = 0
+        # mgr.state.rounds_since_update = 0  更新时已重置
         # 如果计划长期未被 todo_write 刷新，附加提醒（含完整计划内容）
         reminder = mgr.maybe_reminder()
         if reminder:

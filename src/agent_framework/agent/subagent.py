@@ -48,7 +48,7 @@ class SubAgentConfig:
 
     :param name: 工具名（如 "researcher"），父 LLM 通过此名称调用
     :param description: 工具描述，出现在父 LLM 的 tool schema 中
-    :param system_prompt: 子代理的系统提示
+    :param system_prompt: 子代理的系统提示（可选，可与 prompt_dir 组合使用）
     :param tools: 子代理可用的工具列表（@tool 装饰的函数）
     :param config: 子代理的 AgentConfig（None 时使用默认值：
         max_turns=50, timeout=120, total_timeout=600, confirm_dangerous=False）
@@ -57,10 +57,12 @@ class SubAgentConfig:
     :param llm_kwargs: 传递给子代理 LLM 的额外参数（如 web_search=True, enable_thinking=True）
     :param skills: 子代理可用的技能列表（SkillConfig 实例）
     :param skills_dir: 子代理技能目录路径（None 时不自动扫描）
+    :param prompt_dir: 提示词文件目录路径（None 时不使用文件化提示词）
+    :param prompt_variables: 提示词变量，替换文件中的 {{key}}
     """
     name: str
     description: str
-    system_prompt: str
+    system_prompt: str = ""
     tools: list = field(default_factory=list)
     config: AgentConfig | None = None
     history_max_turns: int = 50
@@ -68,6 +70,8 @@ class SubAgentConfig:
     llm_kwargs: dict = field(default_factory=dict)
     skills: list | None = None
     skills_dir: str | None = None
+    prompt_dir: "str | None" = None
+    prompt_variables: dict[str, str] | None = None
 
 
 # ── 内部：子代理默认配置 ──────────────────────────────────────
@@ -146,6 +150,8 @@ def _create_single_subagent_tool(llm: "BaseLLM", cfg: SubAgentConfig):
             skills=cfg.skills,
             skills_dir=cfg.skills_dir,
             register_skills=bool(cfg.skills or cfg.skills_dir),
+            prompt_dir=cfg.prompt_dir,
+            prompt_variables=cfg.prompt_variables,
         )
         # 不调用 create_subagent_tools → 子代理不能嵌套子代理（结构性保证）
 
