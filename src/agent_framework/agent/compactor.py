@@ -6,8 +6,8 @@
 层级说明：
   L1 snip_compact:     消息数 > max_messages 时裁剪中间消息（0 API 调用）
   L2 micro_compact:    旧工具结果替换为占位符（0 API 调用）
-  L3 budget:           超大工具结果截断并持久化到磁盘（0 API 调用）
-  L4 compact_history:  调用 LLM 生成对话摘要（1 API 调用）
+  L3 budget:           旧轮次超大工具结果截断并持久化到磁盘（保护最新一轮，0 API 调用）
+  L4 compact_history:  调用 LLM 生成对话摘要，智能保留尾部 0-3 条（1 API 调用）
 
 使用方式：
     compactor = Compactor(llm, config)
@@ -41,9 +41,6 @@ _COMPACT_OUTPUTS_DIR = Path.cwd() / ".compact_outputs"
 
 # 大结果持久化阈值（字符数）
 _PERSIST_THRESHOLD = 30000
-
-# L3 最后一条消息的工具结果总预算（字符数）
-_BUDGET_MAX_BYTES = 200_000
 
 # L4 序列化时每条消息的最大字符数
 _MAX_MSG_CHARS = 80000
@@ -117,15 +114,18 @@ class Compactor:
     async def reactive_compact(self, messages: list[Message]) -> list[Message]:
         """应急压缩（API 返回 context too long 时触发）。
 
-        比 manual_compact 多保留最近 5 条消息。
+        压缩历史为摘要，保留最近 3 条消息原样不动。
         """
         try:
-            summary = await self._summarize(messages)
+            # 只对前面的消息生成摘要，尾部 3 条保留完整内容
+            keep_recent = 3
+            to_summarize = messages[:-keep_recent] if len(messages) > keep_recent else messages
+            summary = await self._summarize(to_summarize)
         except Exception as e:
             logger.warning("应急压缩失败: %s", e)
             return messages
 
-        recent = messages[-5:] if len(messages) > 5 else []
+        recent = messages[-keep_recent:] if len(messages) > keep_recent else []
         return [
             Message(role=MessageRole.USER, content=f"[Reactive compact]\n\n{summary}"),
             *recent,
@@ -191,42 +191,34 @@ class Compactor:
     # ── L3: tool_result_budget ────────────────────────────────
 
     def _tool_result_budget(self, messages: list[Message]) -> list[Message]:
-        """L3: 最后一条 tool 消息如果过大，截断并持久化到磁盘。"""
+        """L3: 仅对旧轮次的 tool 结果做截断持久化，保护最新一轮结果完整性。
+
+        最新一轮（最后一条 assistant 之后的 tool 结果）保持原样，
+        因为 LLM 主动请求了这些数据，还没来得及消化。
+        """
         if not messages:
             return messages
 
-        # 从后往前找最后几条 tool 消息
-        tool_blocks = []
+        # 找到最后一条 assistant 消息的位置
+        last_assistant_idx = -1
         for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == MessageRole.TOOL:
-                tool_blocks.append(i)
-            elif messages[i].role == MessageRole.ASSISTANT:
-                break  # 遇到 assistant 消息就停止
-
-        if not tool_blocks:
-            return messages
-
-        # 计算总大小
-        total = 0
-        for idx in tool_blocks:
-            content = messages[idx].content
-            if isinstance(content, str):
-                total += len(content)
-
-        if total <= _BUDGET_MAX_BYTES:
-            return messages
-
-        # 按大小排序，从最大的开始截断
-        ranked = sorted(
-            tool_blocks,
-            key=lambda i: len(messages[i].content or ""),
-            reverse=True,
-        )
-
-        for idx in ranked:
-            if total <= _BUDGET_MAX_BYTES:
+            if messages[i].role == MessageRole.ASSISTANT:
+                last_assistant_idx = i
                 break
 
+        if last_assistant_idx <= 0:
+            return messages
+
+        # 只处理最后一条 assistant 之前的 tool 消息（旧轮次）
+        old_tool_blocks = []
+        for i in range(last_assistant_idx):
+            if messages[i].role == MessageRole.TOOL:
+                old_tool_blocks.append(i)
+
+        if not old_tool_blocks:
+            return messages
+
+        for idx in old_tool_blocks:
             msg = messages[idx]
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             if len(content) <= _PERSIST_THRESHOLD:
@@ -242,9 +234,6 @@ class Compactor:
                 tool_call_id=msg.tool_call_id,
                 name=msg.name,
             )
-
-            # 重新计算总大小
-            total = total - len(content) + len(persisted)
 
         return messages
 
@@ -265,10 +254,54 @@ class Compactor:
 
     # ── L4: compact_history ───────────────────────────────────
 
-    async def _compact_history(self, messages: list[Message]) -> list[Message]:
-        """L4: 调用 LLM 生成对话摘要，替换全部消息。"""
-        summary = await self._summarize(messages)
-        return [Message(role=MessageRole.USER, content=f"[Compacted]\n\n{summary}")]
+    async def _compact_history(self, messages: list[Message], preserve_tail: bool = True) -> list[Message]:
+        """L4: 调用 LLM 生成对话摘要。
+
+        :param messages: 当前历史消息
+        :param preserve_tail: 是否保留尾部消息（自动压缩时为 True，保护最新数据）
+        :return: 压缩后的消息列表
+        """
+        if not preserve_tail:
+            # 全量压缩（手动模式）
+            summary = await self._summarize(messages)
+            return [Message(role=MessageRole.USER, content=f"[Compacted]\n\n{summary}")]
+
+        # 智能保留尾部：优先保留 3 条，但尾部总大小不超过阈值的 30%
+        threshold = self._config.compact_threshold
+        max_tail_ratio = 0.3
+
+        keep_count = 0
+        for try_count in (3, 2, 1, 0):
+            if try_count == 0:
+                keep_count = 0
+                break
+            if len(messages) <= try_count:
+                # 消息数不足，保留全部
+                keep_count = len(messages)
+                break
+            # 检查尾部是否在 30% 阈值内
+            tail_messages = messages[-try_count:]
+            tail_size = self._estimate_size(tail_messages)
+            if tail_size <= threshold * max_tail_ratio:
+                keep_count = try_count
+                break
+
+        # 分离要摘要的部分和要保留的尾部
+        if keep_count > 0:
+            to_summarize = messages[:-keep_count]
+            recent = messages[-keep_count:]
+        else:
+            to_summarize = messages
+            recent = []
+
+        if not to_summarize:
+            return messages
+
+        summary = await self._summarize(to_summarize)
+        return [
+            Message(role=MessageRole.USER, content=f"[Compacted]\n\n{summary}"),
+            *recent,
+        ]
 
     async def _summarize(
         self, messages: list[Message], focus: str = ""

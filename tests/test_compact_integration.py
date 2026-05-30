@@ -88,6 +88,11 @@ class TestAutoCompactIntegration:
         agent = Agent(llm=llm, system_prompt="test", config=config,
                       skills_dir="/tmp/_nonexistent_")
 
+        # 预填充足够多的历史消息，使尾部保留逻辑不会保留全部
+        for i in range(6):
+            agent.history.add(Message(role=MessageRole.USER, content=f"历史消息{i}" * 50))
+            agent.history.add(Message(role=MessageRole.ASSISTANT, content=f"历史回复{i}" * 50))
+
         events = []
         async for event in agent.run("很长" * 100):
             events.append(event)
@@ -219,6 +224,11 @@ class TestHistoryState:
         config = AgentConfig(compact_threshold=10)
         agent = Agent(llm=llm, system_prompt="test", config=config,
                       skills_dir="/tmp/_nonexistent_")
+
+        # 预填充足够多的历史消息
+        for i in range(6):
+            agent.history.add(Message(role=MessageRole.USER, content=f"历史消息{i}" * 50))
+            agent.history.add(Message(role=MessageRole.ASSISTANT, content=f"历史回复{i}" * 50))
 
         async for event in agent.run("很长" * 100):
             pass

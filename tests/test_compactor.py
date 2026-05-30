@@ -144,18 +144,21 @@ class TestToolResultBudget:
         assert result[1].content == "x" * 1000
 
     def test_truncate_large_result(self):
-        """超大工具结果被截断并持久化"""
+        """旧轮次超大工具结果被截断并持久化"""
         config = AgentConfig()
         compactor = Compactor(_make_llm(), config)
-        large_content = "x" * 300_000  # 超过 _BUDGET_MAX_BYTES (200K)
+        large_content = "x" * 300_000  # 超过 _PERSIST_THRESHOLD (30K)
         messages = [
-            _make_assistant("thinking"),
+            _make_assistant("第一轮思考"),
             _make_tool(large_content, tool_call_id="call_big"),
+            _make_assistant("第二轮思考"),  # 使 call_big 成为旧轮次
         ]
         result = compactor._tool_result_budget(messages)
-        # 截断后应包含 persisted-output 标记
+        # 旧轮次的大结果应被截断
         assert "persisted-output" in result[1].content
         assert len(result[1].content) < 300_000
+        # 最新轮次（无 tool）不受影响
+        assert result[2].content == "第二轮思考"
 
     def test_no_tool_messages(self):
         """无 tool 消息时不处理"""
@@ -173,20 +176,43 @@ class TestCompactHistory:
 
     @pytest.mark.asyncio
     async def test_compact_history_replaces_all(self):
-        """L4 应将全部消息替换为摘要"""
+        """L4 preserve_tail=False 时全部替换为摘要"""
         llm = _make_llm("这是生成的摘要")
-        config = AgentConfig(compact_threshold=100)  # 低阈值确保触发
+        config = AgentConfig(compact_threshold=100)
         compactor = Compactor(llm, config)
 
         messages = [
             _make_user("消息1" * 50),
             _make_assistant("回复1" * 50),
         ]
-        result = await compactor._compact_history(messages)
+        result = await compactor._compact_history(messages, preserve_tail=False)
         assert len(result) == 1
         assert result[0].role == MessageRole.USER
         assert "Compacted" in result[0].content
         assert "这是生成的摘要" in result[0].content
+
+    @pytest.mark.asyncio
+    async def test_compact_history_preserves_tail(self):
+        """L4 preserve_tail=True 时保留尾部消息"""
+        llm = _make_llm("这是生成的摘要")
+        config = AgentConfig(compact_threshold=10000)  # 高阈值，尾部 3 条不会超 30%
+        compactor = Compactor(llm, config)
+
+        messages = [
+            _make_user("消息1"),
+            _make_assistant("回复1"),
+            _make_user("消息2"),
+            _make_assistant("回复2"),
+            _make_user("消息3"),
+        ]
+        result = await compactor._compact_history(messages, preserve_tail=True)
+        # 摘要 + 尾部 3 条 = 4 条
+        assert len(result) == 4
+        assert "Compacted" in result[0].content
+        # 尾部 3 条保持原样
+        assert result[1].content == "消息2"
+        assert result[2].content == "回复2"
+        assert result[3].content == "消息3"
 
     @pytest.mark.asyncio
     async def test_summarize_with_focus(self):
@@ -228,15 +254,20 @@ class TestAutoCompact:
 
     @pytest.mark.asyncio
     async def test_pipeline_triggers_l4(self):
-        """超过阈值时触发 L4 LLM 摘要"""
+        """超过阈值时触发 L4 LLM 摘要，保留尾部"""
         config = AgentConfig(compact_threshold=10)  # 极低阈值确保触发
         compactor = Compactor(_make_llm("流水线摘要"), config)
 
         messages = [
             _make_user("很长" * 100),
             _make_assistant("也很长" * 100),
+            _make_user("更多" * 100),
+            _make_assistant("继续" * 100),
+            _make_user("最后" * 100),
         ]
         result = await compactor.auto_compact(messages)
+        # 尾部 3 条每条 600 字符 >> 阈值 10 * 0.3 = 3，所以 keep_count 递减到 0
+        # 全部替换为摘要
         assert len(result) == 1
         assert "流水线摘要" in result[0].content
 
@@ -253,7 +284,13 @@ class TestAutoCompact:
         config = AgentConfig(compact_threshold=10)
         compactor = Compactor(llm, config)
 
-        messages = [_make_user("x" * 100), _make_assistant("y" * 100)]
+        # 多条大消息，确保尾部也超 30% 阈值从而触发 L4
+        messages = [
+            _make_user("x" * 100),
+            _make_assistant("y" * 100),
+            _make_user("z" * 100),
+            _make_assistant("w" * 100),
+        ]
 
         # 连续调用多次，不应抛出异常
         for _ in range(5):
@@ -299,14 +336,14 @@ class TestReactiveCompact:
 
     @pytest.mark.asyncio
     async def test_reactive_keeps_recent_messages(self):
-        """应急压缩保留最近 5 条消息"""
+        """应急压缩保留最近 3 条消息"""
         llm = _make_llm("应急摘要")
         compactor = Compactor(llm, AgentConfig())
         messages = [_make_user(f"msg {i}") for i in range(10)]
 
         result = await compactor.reactive_compact(messages)
-        # 摘要 + 最近 5 条 = 6 条
-        assert len(result) == 6
+        # 摘要 + 最近 3 条 = 4 条
+        assert len(result) == 4
         assert "Reactive compact" in result[0].content
 
     @pytest.mark.asyncio
