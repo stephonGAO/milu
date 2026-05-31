@@ -7,6 +7,8 @@ from agent_framework.agent.events import (
     AgentDone, AgentError, HistoryCompacted, TextDelta,
 )
 from agent_framework.agent.compactor import Compactor
+from agent_framework.agent.config import CompactConfig
+from agent_framework.agent.history import ConversationHistory
 from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 
@@ -25,6 +27,14 @@ def _make_llm(response_text: str = "回复"):
     return llm
 
 
+def _make_agent(llm, compact_config=None, **kwargs):
+    """创建带压缩配置的 Agent"""
+    config = AgentConfig(session_enabled=False, **kwargs)
+    history = ConversationHistory(llm=llm, compact_config=compact_config)
+    return Agent(llm=llm, system_prompt="test", config=config,
+                 history=history, skills_dir="/tmp/_nonexistent_")
+
+
 # ── 初始化测试 ────────────────────────────────────────────
 
 class TestCompactorInit:
@@ -33,35 +43,29 @@ class TestCompactorInit:
     def test_compactor_enabled_by_default(self):
         """默认启用压缩"""
         llm = _make_llm()
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        assert agent._compactor is not None
-        assert isinstance(agent._compactor, Compactor)
+        agent = _make_agent(llm)
+        assert agent._history._compactor is not None
+        assert isinstance(agent._history._compactor, Compactor)
 
     def test_compactor_disabled(self):
-        """compact_enabled=False 时不创建压缩器"""
+        """CompactConfig.enabled=False 时不创建压缩器"""
         llm = _make_llm()
-        config = AgentConfig(compact_enabled=False, session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        assert agent._compactor is None
+        cc = CompactConfig(enabled=False)
+        agent = _make_agent(llm, compact_config=cc)
+        assert agent._history._compactor is None
 
     def test_compact_tool_registered(self):
         """启用压缩时注册 compact 元工具"""
         llm = _make_llm()
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        agent = _make_agent(llm)
         wrapper = agent.tools.get_tool("compact")
         assert wrapper is not None
 
     def test_compact_tool_not_registered_when_disabled(self):
         """禁用压缩时不注册 compact 工具"""
         llm = _make_llm()
-        config = AgentConfig(compact_enabled=False, session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        cc = CompactConfig(enabled=False)
+        agent = _make_agent(llm, compact_config=cc)
         wrapper = agent.tools.get_tool("compact")
         assert wrapper is None
 
@@ -69,26 +73,23 @@ class TestCompactorInit:
         """Compactor 接收 session 引用"""
         llm = _make_llm()
         config = AgentConfig(session_enabled=True, session_dir=".sessions_test")
+        history = ConversationHistory(llm=llm)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        if agent._compactor:
-            assert agent._compactor._session is agent.session
+                      history=history, skills_dir="/tmp/_nonexistent_")
+        if agent._history._compactor:
+            assert agent._history._compactor._session is agent.session
 
     def test_compactor_reads_context_window(self):
         """Compactor 读取 max_context_window"""
         llm = _make_llm()
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        assert agent._compactor._max_context_window == 8192
+        agent = _make_agent(llm)
+        assert agent._history._compactor._max_context_window == 8192
 
     def test_compactor_dynamic_thresholds_8k(self):
         """8K 窗口的动态阈值"""
         llm = _make_llm()
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        c = agent._compactor
+        agent = _make_agent(llm)
+        c = agent._history._compactor
         # 8192 // 1500 = 5, // 2 = 2, max(5, 2) = 5
         assert c._old_round_threshold == 5
         # 8192 // 20 = 409, max(500, 409) = 500
@@ -105,10 +106,11 @@ class TestCompactorInit:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 131072
 
+        history = ConversationHistory(llm=llm)
         config = AgentConfig(session_enabled=False)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        c = agent._compactor
+                      history=history, skills_dir="/tmp/_nonexistent_")
+        c = agent._history._compactor
         # 131072 // 1500 = 87, // 2 = 43, min(43, 30) = 30
         assert c._old_round_threshold == 30
         # 131072 // 20 = 6553, min(6553, 4000) = 4000
@@ -125,10 +127,11 @@ class TestCompactorInit:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 32768
 
+        history = ConversationHistory(llm=llm)
         config = AgentConfig(session_enabled=False)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
-        c = agent._compactor
+                      history=history, skills_dir="/tmp/_nonexistent_")
+        c = agent._history._compactor
         # 32768 // 1500 = 21, // 2 = 10, max(5, min(10, 30)) = 10
         assert c._old_round_threshold == 10
         # 32768 // 20 = 1638, max(500, min(1638, 4000)) = 1638
@@ -163,15 +166,14 @@ class TestAutoCompactIntegration:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
 
-        config = AgentConfig(
-            compact_trigger_ratio=0.5,  # 50% 阈值
-            session_enabled=False,
-        )
+        cc = CompactConfig(trigger_ratio=0.5)
+        history = ConversationHistory(llm=llm, compact_config=cc)
+        config = AgentConfig(session_enabled=False)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      history=history, skills_dir="/tmp/_nonexistent_")
 
         # 预填充历史（模拟之前的高 token 使用）
-        agent._compactor.update_prompt_tokens(7000)  # 7000/8192 > 0.5
+        agent._history.update_prompt_tokens(7000)  # 7000/8192 > 0.5
 
         for i in range(6):
             agent.history._messages.append(
@@ -193,12 +195,8 @@ class TestAutoCompactIntegration:
     async def test_no_compact_when_under_threshold(self):
         """高阈值时不触发自动压缩"""
         llm = _make_llm("正常回复")
-        config = AgentConfig(
-            compact_trigger_ratio=0.99,  # 极高阈值
-            session_enabled=False,
-        )
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        cc = CompactConfig(trigger_ratio=0.99)
+        agent = _make_agent(llm, compact_config=cc)
 
         events = []
         async for event in agent.run("短消息"):
@@ -209,11 +207,10 @@ class TestAutoCompactIntegration:
 
     @pytest.mark.asyncio
     async def test_no_compact_when_disabled(self):
-        """compact_enabled=False 时不触发任何压缩"""
+        """CompactConfig.enabled=False 时不触发任何压缩"""
         llm = _make_llm("正常回复")
-        config = AgentConfig(compact_enabled=False, session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        cc = CompactConfig(enabled=False)
+        agent = _make_agent(llm, compact_config=cc)
 
         events = []
         async for event in agent.run("消息"):
@@ -252,9 +249,11 @@ class TestReactiveCompactIntegration:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
 
-        config = AgentConfig(compact_trigger_ratio=0.99, session_enabled=False)
+        cc = CompactConfig(trigger_ratio=0.99)
+        history = ConversationHistory(llm=llm, compact_config=cc)
+        config = AgentConfig(session_enabled=False)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      history=history, skills_dir="/tmp/_nonexistent_")
 
         events = []
         async for event in agent.run("消息"):
@@ -280,9 +279,7 @@ class TestReactiveCompactIntegration:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
 
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        agent = _make_agent(llm)
 
         with pytest.raises(ValueError, match="其他错误"):
             async for event in agent.run("消息"):
@@ -298,15 +295,13 @@ class TestTokenTracking:
     async def test_prompt_tokens_updated_during_run(self):
         """run() 过程中 prompt_tokens 被更新到 compactor"""
         llm = _make_llm("回复")
-        config = AgentConfig(session_enabled=False)
-        agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+        agent = _make_agent(llm)
 
         async for _ in agent.run("hello"):
             pass
 
         # prompt_tokens 应被更新（mock 返回 10）
-        assert agent._compactor._last_prompt_tokens == 10
+        assert agent._history._compactor._last_prompt_tokens == 10
 
 
 # ── History 状态测试 ──────────────────────────────────────
@@ -335,11 +330,13 @@ class TestHistoryState:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
 
-        config = AgentConfig(compact_trigger_ratio=0.5, session_enabled=False)
+        cc = CompactConfig(trigger_ratio=0.5)
+        history = ConversationHistory(llm=llm, compact_config=cc)
+        config = AgentConfig(session_enabled=False)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      history=history, skills_dir="/tmp/_nonexistent_")
 
-        agent._compactor.update_prompt_tokens(7000)
+        agent._history.update_prompt_tokens(7000)
 
         for i in range(6):
             agent.history._messages.append(

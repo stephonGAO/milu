@@ -35,7 +35,7 @@ from agent_framework.tools.decorator import tool
 
 if TYPE_CHECKING:
     from agent_framework.agent.agent import Agent
-    from agent_framework.agent.config import AgentConfig
+    from agent_framework.agent.config import CompactConfig
     from agent_framework.agent.session import Session
     from agent_framework.llm.providers.base import BaseLLM
 
@@ -55,18 +55,19 @@ class Compactor:
     """上下文压缩器 — 轮次分层 + Token 动态阈值。
 
     用法：
-        compactor = Compactor(llm, config, session)
+        compactor = Compactor(llm, compact_config=config, session=session)
         compacted = await compactor.auto_compact(messages)
     """
 
     def __init__(
         self,
         llm: "BaseLLM",
-        config: "AgentConfig",
+        compact_config: "CompactConfig | None" = None,
         session: "Session | None" = None,
     ) -> None:
+        from agent_framework.agent.config import CompactConfig
         self._llm = llm
-        self._config = config
+        self._config = compact_config or CompactConfig()
         self._session = session
         self._last_prompt_tokens = 0
         self._consecutive_failures = 0
@@ -121,7 +122,7 @@ class Compactor:
         # L4: Token 比例触发 LLM 摘要
         if self._consecutive_failures < _MAX_CONSECUTIVE_FAILURES:
             ratio = self._calc_usage_ratio(messages)
-            if ratio >= self._config.compact_trigger_ratio:
+            if ratio >= self._config.trigger_ratio:
                 try:
                     messages = await self._compact_history(messages)
                     self._consecutive_failures = 0
@@ -185,7 +186,7 @@ class Compactor:
 
     def _snip_compact(self, messages: list[Message]) -> list[Message]:
         """L1: 消息数超限时，保留头尾、裁剪中间。"""
-        max_msgs = self._config.compact_max_messages
+        max_msgs = self._config.max_messages
         if len(messages) <= max_msgs:
             return messages
 
@@ -258,7 +259,7 @@ class Compactor:
         total_rounds = len(rounds)
 
         # 动态计算 recent 保留轮数
-        recent_rounds = self._config.compact_recent_rounds
+        recent_rounds = self._config.recent_rounds
         usage_ratio = self._calc_usage_ratio(messages)
         if usage_ratio > 0.3:
             recent_rounds = 0
@@ -536,7 +537,7 @@ def create_compact_tool(agent: "Agent"):
         """
         :param focus: 压缩时特别关注的主题（如 "当前调试进度"、"文件修改记录"）
         """
-        compactor = agent._compactor
+        compactor = agent._history._compactor
         if not compactor:
             return "上下文压缩未启用。"
 

@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from agent_framework.agent.compactor import Compactor, create_compact_tool
-from agent_framework.agent.config import AgentConfig
+from agent_framework.agent.config import AgentConfig, CompactConfig
 from agent_framework.agent.session import Session
 from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
@@ -127,16 +127,16 @@ class TestSnipCompact:
 
     def test_no_snip_when_under_limit(self):
         """消息数未超限时不裁剪"""
-        config = AgentConfig(compact_max_messages=10)
-        compactor = Compactor(_make_llm(), config)
+        config = CompactConfig(max_messages=10)
+        compactor = Compactor(_make_llm(), compact_config=config)
         messages = [_make_user(f"msg {i}") for i in range(8)]
         result = compactor._snip_compact(messages)
         assert result is messages
 
     def test_snip_when_over_limit(self):
         """消息数超限时裁剪中间消息"""
-        config = AgentConfig(compact_max_messages=10)
-        compactor = Compactor(_make_llm(), config)
+        config = CompactConfig(max_messages=10)
+        compactor = Compactor(_make_llm(), compact_config=config)
         messages = [_make_user(f"msg {i}") for i in range(20)]
         result = compactor._snip_compact(messages)
         assert result is not messages
@@ -146,8 +146,8 @@ class TestSnipCompact:
 
     def test_snip_preserves_system(self):
         """裁剪时保留 system 消息"""
-        config = AgentConfig(compact_max_messages=5)
-        compactor = Compactor(_make_llm(), config)
+        config = CompactConfig(max_messages=5)
+        compactor = Compactor(_make_llm(), compact_config=config)
         messages = [_make_system("系统")] + [_make_user(f"msg {i}") for i in range(15)]
         result = compactor._snip_compact(messages)
         assert result[0].role == MessageRole.SYSTEM
@@ -160,7 +160,7 @@ class TestRoundBasedCompact:
 
     def test_no_tool_messages(self):
         """无 tool 消息时不处理"""
-        compactor = Compactor(_make_llm(), AgentConfig())
+        compactor = Compactor(_make_llm())
         messages = [_make_user("hello"), _make_assistant("hi")]
         result = compactor._round_based_compact(messages)
         assert result is messages
@@ -168,8 +168,8 @@ class TestRoundBasedCompact:
     def test_recent_rounds_unchanged(self, tmp_dir):
         """最近轮次工具结果保持不变"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=3)
-        compactor = Compactor(_make_llm(), config, session=session)
+        config = CompactConfig(recent_rounds=3)
+        compactor = Compactor(_make_llm(), compact_config=config, session=session)
 
         # 创建 3 轮对话（全部在 recent 范围内）
         messages = []
@@ -189,8 +189,8 @@ class TestRoundBasedCompact:
     def test_old_rounds_placeholder(self, tmp_dir):
         """旧轮次（>10）工具结果替换为占位符"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=2)
-        compactor = Compactor(_make_llm(), config, session=session)
+        config = CompactConfig(recent_rounds=2)
+        compactor = Compactor(_make_llm(), compact_config=config, session=session)
 
         # 创建 15 轮对话
         messages = []
@@ -214,8 +214,8 @@ class TestRoundBasedCompact:
     def test_mid_rounds_truncation(self, tmp_dir):
         """中间轮次（3-10）长工具结果被截断"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=1)
-        compactor = Compactor(_make_llm(), config, session=session)
+        config = CompactConfig(recent_rounds=1)
+        compactor = Compactor(_make_llm(), compact_config=config, session=session)
 
         # 创建 8 轮对话
         messages = []
@@ -235,8 +235,8 @@ class TestRoundBasedCompact:
     def test_short_tool_results_not_truncated(self, tmp_dir):
         """短工具结果（<=500字符）在中间轮次不截断"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=1)
-        compactor = Compactor(_make_llm(), config, session=session)
+        config = CompactConfig(recent_rounds=1)
+        compactor = Compactor(_make_llm(), compact_config=config, session=session)
 
         messages = []
         for i in range(5):
@@ -257,9 +257,9 @@ class TestRoundBasedCompact:
     def test_dynamic_recent_reduction(self, tmp_dir):
         """上下文超 30% 时 recent 降为 0"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=3)
+        config = CompactConfig(recent_rounds=3)
         llm = _make_llm()
-        compactor = Compactor(llm, config, session=session)
+        compactor = Compactor(llm, compact_config=config, session=session)
 
         # 模拟高使用率
         compactor.update_prompt_tokens(3000)  # 3000/8192 > 0.3
@@ -281,9 +281,9 @@ class TestRoundBasedCompact:
     def test_no_nested_header_on_repeated_compact(self, tmp_dir):
         """多次调用 auto_compact 不应产生嵌套截断 header"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=0)  # 所有轮次都处理
+        config = CompactConfig(recent_rounds=0)  # 所有轮次都处理
         llm = _make_llm()
-        compactor = Compactor(llm, config, session=session)
+        compactor = Compactor(llm, compact_config=config, session=session)
 
         # 构造 2 轮对话（至少需要 2 个 assistant 消息）
         messages = [
@@ -312,9 +312,9 @@ class TestRoundBasedCompact:
     def test_truncated_upgraded_to_placeholder_in_old_round(self, tmp_dir):
         """已截断的消息进入旧轮次后应升级为占位符"""
         session = Session("test", tmp_dir)
-        config = AgentConfig(compact_recent_rounds=0)
+        config = CompactConfig(recent_rounds=0)
         llm = _make_llm()
-        compactor = Compactor(llm, config, session=session)
+        compactor = Compactor(llm, compact_config=config, session=session)
 
         # 构造一条已截断的消息
         truncated_content = "[工具结果已截断: file (call_0) → 前500字符如下]\npreview...\n[session ref]"
@@ -347,7 +347,7 @@ class TestTokenThreshold:
     def test_calc_usage_ratio_with_tokens(self):
         """有 prompt_tokens 时使用真实数据"""
         llm = _make_llm()
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         compactor.update_prompt_tokens(4096)  # 4096/8192 = 0.5
         ratio = compactor._calc_usage_ratio([])
         assert abs(ratio - 0.5) < 0.01
@@ -355,7 +355,7 @@ class TestTokenThreshold:
     def test_calc_usage_ratio_fallback(self):
         """无 prompt_tokens 时回退到字符估算"""
         llm = _make_llm()
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         # _last_prompt_tokens = 0
         messages = [_make_user("x" * 1000)]  # ~250 tokens
         ratio = compactor._calc_usage_ratio(messages)
@@ -365,8 +365,8 @@ class TestTokenThreshold:
     async def test_no_l4_below_threshold(self):
         """低于 70% 时不触发 L4"""
         llm = _make_llm()
-        config = AgentConfig(compact_trigger_ratio=0.7)
-        compactor = Compactor(llm, config)
+        config = CompactConfig(trigger_ratio=0.7)
+        compactor = Compactor(llm, compact_config=config)
         compactor.update_prompt_tokens(100)  # 100/8192 << 0.7
 
         messages = [_make_user("short"), _make_assistant("reply")]
@@ -379,8 +379,8 @@ class TestTokenThreshold:
     async def test_l4_above_threshold(self):
         """超过 70% 时触发 L4"""
         llm = _make_llm("LLM 生成的摘要")
-        config = AgentConfig(compact_trigger_ratio=0.5)
-        compactor = Compactor(llm, config)
+        config = CompactConfig(trigger_ratio=0.5)
+        compactor = Compactor(llm, compact_config=config)
         compactor.update_prompt_tokens(5000)  # 5000/8192 > 0.5
 
         # 需要足够多消息，使尾部保留（最多 3 条）后仍有待压缩内容
@@ -407,8 +407,8 @@ class TestTokenThreshold:
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
 
-        config = AgentConfig(compact_trigger_ratio=0.1)
-        compactor = Compactor(llm, config)
+        config = CompactConfig(trigger_ratio=0.1)
+        compactor = Compactor(llm, compact_config=config)
         compactor.update_prompt_tokens(5000)
 
         messages = [
@@ -432,7 +432,7 @@ class TestAutoCompact:
     @pytest.mark.asyncio
     async def test_single_message_no_compact(self):
         """单条消息不压缩"""
-        compactor = Compactor(_make_llm(), AgentConfig())
+        compactor = Compactor(_make_llm())
         messages = [_make_user("hello")]
         result = await compactor.auto_compact(messages)
         assert result is messages
@@ -440,8 +440,8 @@ class TestAutoCompact:
     @pytest.mark.asyncio
     async def test_pipeline_triggers_l4(self):
         """超过阈值时触发 L4"""
-        config = AgentConfig(compact_trigger_ratio=0.1)
-        compactor = Compactor(_make_llm("流水线摘要"), config)
+        config = CompactConfig(trigger_ratio=0.1)
+        compactor = Compactor(_make_llm("流水线摘要"), compact_config=config)
         compactor.update_prompt_tokens(5000)
 
         messages = [
@@ -464,7 +464,7 @@ class TestManualCompact:
     async def test_manual_compact_returns_summary(self):
         """手动压缩返回 (消息列表, 摘要文本)"""
         llm = _make_llm("手动摘要内容")
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         messages = [_make_user("hello"), _make_assistant("world")]
 
         compacted, summary = await compactor.manual_compact(messages)
@@ -476,7 +476,7 @@ class TestManualCompact:
     async def test_manual_compact_with_focus(self):
         """手动压缩支持 focus 参数"""
         llm = _make_llm("带焦点的摘要")
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         messages = [_make_user("hello")]
 
         compacted, summary = await compactor.manual_compact(messages, focus="调试进度")
@@ -492,7 +492,7 @@ class TestReactiveCompact:
     async def test_reactive_keeps_recent_messages(self):
         """应急压缩保留最近 3 条消息"""
         llm = _make_llm("应急摘要")
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         messages = [_make_user(f"msg {i}") for i in range(10)]
 
         result = await compactor.reactive_compact(messages)
@@ -503,7 +503,7 @@ class TestReactiveCompact:
     async def test_reactive_few_messages(self):
         """消息数不足时仅返回摘要"""
         llm = _make_llm("应急摘要")
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         messages = [_make_user("msg 1"), _make_assistant("msg 2")]
 
         result = await compactor.reactive_compact(messages)
@@ -521,7 +521,7 @@ class TestReactiveCompact:
         llm.chat = failing_chat
         llm.capabilities = AsyncMock()
         llm.capabilities.max_context_window = 8192
-        compactor = Compactor(llm, AgentConfig())
+        compactor = Compactor(llm)
         messages = [_make_user("hello")]
 
         result = await compactor.reactive_compact(messages)
@@ -551,7 +551,7 @@ class TestHelpers:
 
     def test_serialize_messages(self):
         """序列化消息应包含角色和内容"""
-        compactor = Compactor(_make_llm(), AgentConfig())
+        compactor = Compactor(_make_llm())
         messages = [
             _make_user("用户输入"),
             _make_assistant("助手回复"),
@@ -563,7 +563,7 @@ class TestHelpers:
 
     def test_serialize_long_content_preserved(self):
         """序列化时保留完整内容（不再自动截断单条消息）"""
-        compactor = Compactor(_make_llm(), AgentConfig())
+        compactor = Compactor(_make_llm())
         messages = [_make_user("x" * 5000)]
         text = compactor._serialize_messages(messages)
         # 序列化保留完整内容，L4 摘要调用时有 _MAX_MSG_CHARS 上限

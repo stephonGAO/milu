@@ -201,16 +201,17 @@ def build_agent() -> Agent:
 
     all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read, *subagent_tools]
 
-    history = ConversationHistory(
-        strategy="sliding_window",
-        max_turns=50,
-    )
+    # history = ConversationHistory(
+    #     strategy="auto_compact",
+    #     max_turns=50,
+    #     llm=llm,
+    # )
 
     agent = Agent(
         llm=llm,
         prompt_dir=prompts_base / "main",
         tools=all_tools,
-        history=history,
+        # history=history,
         # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300, confirm_dangerous=True),
         config=AgentConfig(),
         on_confirm=confirm_dangerous,
@@ -552,13 +553,11 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER + "\n")
 
     elif cmd == "/compact":
-        if not agent._compactor:
+        if not agent._history.compact_enabled:
             print(f"\n  {c('dim', '上下文压缩未启用。')}\n")
             return True
         original_count = len(agent.history._messages)
-        compacted, summary = await agent._compactor.manual_compact(
-            agent.history._messages
-        )
+        compacted, summary = await agent._history.manual_compact()
         agent.history.replace_all(compacted)
         print(f"\n{DIVIDER}")
         print(c("bold", "  手动压缩完成")
@@ -655,14 +654,14 @@ async def main():
         print(c("dim", f"  日志路径: {agent.session.dir_path}\n"))
 
     # 显示压缩器参数
-    if agent._compactor:
-        cp = agent._compactor
+    if agent._history.compact_enabled:
+        cp = agent._history._compactor
         print(c("dim", "  压缩器参数:"))
         print(c("dim", f"    最大上下文窗口: {cp._max_context_window:,} tokens"))
         print(c("dim", f"    占位符轮次阈值: {cp._old_round_threshold} 轮（age > 此值 → 全部占位符）"))
         print(c("dim", f"    截断字符数阈值: {cp._truncate_threshold} 字符（age 中间轮次 → 超过截断）"))
-        print(c("dim", f"    L4 触发比例:    {agent._config.compact_trigger_ratio:.0%}（token 占比超此值 → LLM 摘要）"))
-        print(c("dim", f"    最近保留轮数:   {agent._config.compact_recent_rounds} 轮（最后这部分上下文超 30% 时降为 0）"))
+        print(c("dim", f"    L4 触发比例:    {cp._config.trigger_ratio:.0%}（token 占比超此值 → LLM 摘要）"))
+        print(c("dim", f"    最近保留轮数:   {cp._config.recent_rounds} 轮（最后这部分上下文超 30% 时降为 0）"))
         print()
 
     # 显示恢复的计划状态

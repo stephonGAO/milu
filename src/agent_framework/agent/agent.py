@@ -140,7 +140,9 @@ class Agent:
         self._llm = llm
         self._config = config or AgentConfig()
         self._history = history or ConversationHistory(
+            strategy="auto_compact",
             max_tokens=self._config.max_total_tokens,
+            llm=llm,
         )
 
         # ── 会话持久化 ──
@@ -166,14 +168,11 @@ class Agent:
             self._catalog_tools = create_catalog_tools(self._registry)
             self._registry.register_many(self._catalog_tools)
 
-        # ── 上下文压缩器 ──
-        self._compactor = None
-        if self._config.compact_enabled:
-            from agent_framework.agent.compactor import Compactor, create_compact_tool
-            self._compactor = Compactor(llm, self._config, session=self._session)
-            if register_catalog:
-                self._compact_tool = create_compact_tool(self)
-                self._registry.register(self._compact_tool)
+        # ── 压缩元工具（压缩器由 history 内部管理）──
+        if register_catalog and self._history.compact_enabled:
+            from agent_framework.agent.compactor import create_compact_tool
+            self._compact_tool = create_compact_tool(self)
+            self._registry.register(self._compact_tool)
 
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
@@ -433,11 +432,11 @@ class Agent:
             self._build_system_prompt()
 
             # 1.6 自动压缩（如果启用）
-            if self._compactor:
+            if self._history.compact_enabled:
                 original_count = len(self._history._messages)
-                compacted = await self._compactor.auto_compact(self._history._messages)
-                if compacted is not self._history._messages:
-                    self._history.replace_all(compacted)
+                original_messages = self._history._messages
+                compacted = await self._history.auto_compact()
+                if compacted is not original_messages:
                     yield HistoryCompacted(
                         strategy="auto",
                         original_count=original_count,
@@ -475,8 +474,8 @@ class Agent:
                         if chunk.usage:
                             _merge_usage(total_usage, chunk.usage)
                             # 更新压缩器的 token 跟踪
-                            if self._compactor and chunk.usage.prompt_tokens:
-                                self._compactor.update_prompt_tokens(chunk.usage.prompt_tokens)
+                            if chunk.usage.prompt_tokens:
+                                self._history.update_prompt_tokens(chunk.usage.prompt_tokens)
 
                         if chunk.finish_reason == "stop":
                             break
@@ -496,20 +495,20 @@ class Agent:
                 is_context_error = any(
                     kw in error_str for kw in context_too_long_keywords
                 )
-                if is_context_error and self._compactor:
+                if is_context_error and self._history.compact_enabled:
                     logger.info("检测到上下文过长错误，触发应急压缩: %s", e)
                     original_count = len(self._history._messages)
-                    compacted = await self._compactor.reactive_compact(
-                        self._history._messages
-                    )
-                    if compacted is not self._history._messages:
-                        self._history.replace_all(compacted)
+                    original_messages = self._history._messages
+                    compacted = await self._history.reactive_compact()
+                    if compacted is not original_messages:
                         yield HistoryCompacted(
                             strategy="reactive",
                             original_count=original_count,
                             compacted_count=len(compacted),
                         )
-                    continue  # 重试本轮
+                        continue  # 压缩成功，重试本轮
+                    # 压缩无效果，无法恢复，直接抛出
+                    raise
                 raise
 
             # 7. 记录 assistant 消息到历史
