@@ -385,7 +385,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         for msg in messages:
             role = msg.role.value.upper()
             raw = msg.content or ""
-            content = raw[:120] + "..." if len(raw) > 120 else raw
+            content = raw[:500] + "..." if len(raw) > 500 else raw
             content = content.replace("\n", " ")
             print(f"  {c('cyan', f'[{role:<9}]')} {c('dim', content)}")
         print(DIVIDER + "\n")
@@ -653,6 +653,17 @@ async def main():
     if agent.session:
         print(c("cyan", f"  会话 ID: {agent.session.session_id}"))
         print(c("dim", f"  日志路径: {agent.session.dir_path}\n"))
+
+    # 显示压缩器参数
+    if agent._compactor:
+        cp = agent._compactor
+        print(c("dim", "  压缩器参数:"))
+        print(c("dim", f"    最大上下文窗口: {cp._max_context_window:,} tokens"))
+        print(c("dim", f"    占位符轮次阈值: {cp._old_round_threshold} 轮（age > 此值 → 全部占位符）"))
+        print(c("dim", f"    截断字符数阈值: {cp._truncate_threshold} 字符（age 中间轮次 → 超过截断）"))
+        print(c("dim", f"    L4 触发比例:    {agent._config.compact_trigger_ratio:.0%}（token 占比超此值 → LLM 摘要）"))
+        print(c("dim", f"    最近保留轮数:   {agent._config.compact_recent_rounds} 轮（最后这部分上下文超 30% 时降为 0）"))
+        print()
 
     # 显示恢复的计划状态
     if PLAN_FILE.exists():

@@ -82,6 +82,58 @@ class TestCompactorInit:
                       skills_dir="/tmp/_nonexistent_")
         assert agent._compactor._max_context_window == 8192
 
+    def test_compactor_dynamic_thresholds_8k(self):
+        """8K 窗口的动态阈值"""
+        llm = _make_llm()
+        config = AgentConfig(session_enabled=False)
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_")
+        c = agent._compactor
+        # 8192 // 1500 = 5, // 2 = 2, max(5, 2) = 5
+        assert c._old_round_threshold == 5
+        # 8192 // 20 = 409, max(500, 409) = 500
+        assert c._truncate_threshold == 500
+
+    def test_compactor_dynamic_thresholds_128k(self):
+        """128K 窗口的动态阈值"""
+        async def mock_chat(*args, **kwargs):
+            yield StreamChunk(content="回复", finish_reason="stop")
+
+        llm = AsyncMock()
+        llm.chat = mock_chat
+        llm._model_config = None
+        llm.capabilities = AsyncMock()
+        llm.capabilities.max_context_window = 131072
+
+        config = AgentConfig(session_enabled=False)
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_")
+        c = agent._compactor
+        # 131072 // 1500 = 87, // 2 = 43, min(43, 30) = 30
+        assert c._old_round_threshold == 30
+        # 131072 // 20 = 6553, min(6553, 4000) = 4000
+        assert c._truncate_threshold == 4000
+
+    def test_compactor_dynamic_thresholds_32k(self):
+        """32K 窗口的动态阈值"""
+        async def mock_chat(*args, **kwargs):
+            yield StreamChunk(content="回复", finish_reason="stop")
+
+        llm = AsyncMock()
+        llm.chat = mock_chat
+        llm._model_config = None
+        llm.capabilities = AsyncMock()
+        llm.capabilities.max_context_window = 32768
+
+        config = AgentConfig(session_enabled=False)
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_")
+        c = agent._compactor
+        # 32768 // 1500 = 21, // 2 = 10, max(5, min(10, 30)) = 10
+        assert c._old_round_threshold == 10
+        # 32768 // 20 = 1638, max(500, min(1638, 4000)) = 1638
+        assert c._truncate_threshold == 1638
+
 
 # ── 自动压缩集成 ──────────────────────────────────────────
 

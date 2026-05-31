@@ -309,6 +309,35 @@ class TestRoundBasedCompact:
         # 内容应与第一次完全相同
         assert tool_msg2.content == tool_msg1.content
 
+    def test_truncated_upgraded_to_placeholder_in_old_round(self, tmp_dir):
+        """已截断的消息进入旧轮次后应升级为占位符"""
+        session = Session("test", tmp_dir)
+        config = AgentConfig(compact_recent_rounds=0)
+        llm = _make_llm()
+        compactor = Compactor(llm, config, session=session)
+
+        # 构造一条已截断的消息
+        truncated_content = "[工具结果已截断: file (call_0) → 前500字符如下]\npreview...\n[session ref]"
+        messages = [
+            _make_user("q0"),
+            _make_assistant("a0", tool_calls=[
+                {"id": "call_0", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]),
+            _make_tool(truncated_content, tool_call_id="call_0", name="file"),
+        ]
+
+        # 添加足够多的轮次，让第一条消息变成"旧轮次"（age > _old_round_threshold）
+        for i in range(1, compactor._old_round_threshold + 2):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}"))
+
+        result = compactor._round_based_compact(messages)
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        assert len(tool_msgs) == 1
+        # 应该被升级为占位符，而不是保留截断格式
+        assert tool_msgs[0].content.startswith("[工具结果已压缩:")
+        assert "[工具结果已截断:" not in tool_msgs[0].content
+
 
 # ── Token 阈值测试 ────────────────────────────────────────
 

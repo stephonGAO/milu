@@ -6,9 +6,14 @@
 层级说明：
   L1 snip_compact:     消息数 > max_messages 时裁剪中间消息（0 API 调用）
   轮次分层工具压缩:     按 assistant 消息计轮次，分层处理工具结果（0 API 调用）
-    age > 10:  ALL tool results → 占位符 + session 文件指针
-    age 3~10:  tool results > 500 字符 → 截断 + 文件指针
-    age 0~3:   保持不变（动态：上下文超 30% 时 recent 降为 0）
+    age > old_round_threshold:  ALL tool results → 占位符 + session 文件指针
+    age recent~old:             tool results > truncate_threshold → 截断 + 文件指针
+    age 0~recent:               保持不变（动态：上下文超 30% 时 recent 降为 0）
+
+  动态阈值（根据 max_context_window 自动计算）：
+    old_round_threshold = max(5, min(max_context_window // 1500 // 2, 30))
+    truncate_threshold  = max(500, min(4000, max_context_window // 20))
+
   L4 compact_history:  调用 LLM 生成对话摘要（1 API 调用）
     触发条件: prompt_tokens / max_context_window > compact_trigger_ratio
 
@@ -42,11 +47,8 @@ _MAX_MSG_CHARS = 80000
 # 连续压缩失败上限
 _MAX_CONSECUTIVE_FAILURES = 3
 
-# 工具结果截断阈值（字符数）
-_TOOL_TRUNCATE_THRESHOLD = 500
-
-# 旧轮次占位符的 age 阈值
-_OLD_ROUND_THRESHOLD = 10
+# 每轮平均消耗的 token 数（经验值：1 轮 ≈ assistant + tools + results）
+_AVG_TOKENS_PER_ROUND = 1500
 
 
 class Compactor:
@@ -78,6 +80,23 @@ class Compactor:
                 self._max_context_window = 8192
         except (AttributeError, TypeError):
             self._max_context_window = 8192  # 默认回退值
+
+        # 动态计算阈值（基于上下文窗口大小）
+        self._calc_dynamic_thresholds()
+
+    def _calc_dynamic_thresholds(self) -> None:
+        """根据 max_context_window 动态计算压缩阈值。
+
+        占位符轮次：窗口能装下的轮数的一半（下限 5，上限 30）
+        截断字符数：随窗口缩放（下限 500，上限 4000）
+        """
+        # 占位符轮次阈值
+        max_keepable_rounds = self._max_context_window // _AVG_TOKENS_PER_ROUND
+        self._old_round_threshold = max(5, min(max_keepable_rounds // 2, 30))
+
+        # 截断字符数阈值
+        # 8K → 500, 32K → 1600, 128K → 4000（上限）
+        self._truncate_threshold = max(500, min(4000, self._max_context_window // 20))
 
     def update_prompt_tokens(self, tokens: int) -> None:
         """Agent 每次 LLM 调用后更新 prompt_tokens。"""
@@ -223,9 +242,9 @@ class Compactor:
     def _round_based_compact(self, messages: list[Message]) -> list[Message]:
         """按轮次分层处理工具结果。
 
-        age > 10: ALL tool results → 占位符
-        age 3~10: tool results > 500 chars → 截断
-        age 0~3:  保持不变（动态：上下文超 30% 时 recent 降为 0）
+        age > old_round_threshold: ALL tool results → 占位符
+        age recent~old:           tool results > truncate_threshold chars → 截断
+        age 0~recent:             保持不变（动态：上下文超 30% 时 recent 降为 0）
         """
         # 检查是否有任何 tool 消息
         has_tool = any(m.role == MessageRole.TOOL for m in messages)
@@ -253,7 +272,7 @@ class Compactor:
             if age <= recent_rounds:
                 # 最近轮：保持不变
                 new_rounds.append(round_msgs)
-            elif age <= _OLD_ROUND_THRESHOLD:
+            elif age <= self._old_round_threshold:
                 # 中间轮：截断长工具结果
                 processed = self._process_mid_round(round_msgs, age, truncate=True)
                 if processed is not round_msgs:
@@ -280,10 +299,11 @@ class Compactor:
     ) -> list[Message]:
         """处理中间/旧轮次的工具结果。
 
-        :param truncate: True=截断（保留前 500 字符），False=全部占位符
+        :param truncate: True=截断（保留前 N 字符），False=全部占位符
         """
         result = []
         changed = False
+        threshold = self._truncate_threshold
 
         for msg in round_msgs:
             if msg.role != MessageRole.TOOL:
@@ -292,8 +312,13 @@ class Compactor:
 
             content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
 
-            # 已被压缩过的消息不再重新处理（防止多次 auto_compact 产生嵌套 header）
-            if content.startswith("[工具结果已压缩:") or content.startswith("[工具结果已截断:"):
+            # 已压缩（占位符）的消息不再处理（已经是最简形式）
+            if content.startswith("[工具结果已压缩:"):
+                result.append(msg)
+                continue
+
+            # 已截断的消息：中间轮次跳过（避免重复截断），旧轮次升级为占位符
+            if content.startswith("[工具结果已截断:") and truncate:
                 result.append(msg)
                 continue
 
@@ -303,18 +328,18 @@ class Compactor:
             # session 文件指针
             session_ref = self._get_session_ref(msg)
 
-            if truncate and len(content) <= _TOOL_TRUNCATE_THRESHOLD:
+            if truncate and len(content) <= threshold:
                 # 短内容不需要截断
                 result.append(msg)
                 continue
 
             if truncate:
-                # 截断模式：保留前 500 字符
-                preview = content[:_TOOL_TRUNCATE_THRESHOLD]
+                # 截断模式：保留前 N 字符
+                preview = content[:threshold]
                 new_content = (
                     f"[工具结果已截断: {tool_name}"
                     + (f" ({tool_id})" if tool_id else "")
-                    + f" → 前{_TOOL_TRUNCATE_THRESHOLD}字符如下]\n"
+                    + f" → 前{threshold}字符如下]\n"
                     f"{preview}\n"
                     f"{session_ref}"
                 )
