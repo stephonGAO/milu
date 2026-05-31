@@ -138,6 +138,22 @@ class TodoManager:
 
         return self.render()
 
+    def set_plan_file(self, path: "Path | str | None") -> None:
+        """切换计划文件路径（session 切换时由 Agent 自动调用）。
+
+        重置内存状态并从新路径加载（如果文件存在）。
+        """
+        self._plan_file = Path(path) if path else None
+        self.state.items = []
+        self.state.rounds_since_update = 0
+        if self._plan_file and self._plan_file.exists():
+            try:
+                self.load_from_file()
+                logger.info("切换计划文件到 %s（%d 个条目）",
+                            self._plan_file, len(self.state.items))
+            except Exception as e:
+                logger.warning("加载计划文件失败: %s", e)
+
     def clear(self) -> str:
         """清空计划"""
         self.state.items = []
@@ -330,5 +346,9 @@ def create_todo_write_tool(
 
     _read_wrapper.func = _wrapped_read
     _todo_read._tool_wrapper = _read_wrapper
+
+    # 标记 TodoManager，供 Agent 自动发现并绑定 session
+    _wrapped_write._todo_manager = mgr
+    _wrapped_read._todo_manager = mgr
 
     return _todo_write, _todo_read

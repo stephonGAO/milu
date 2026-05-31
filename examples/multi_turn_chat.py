@@ -36,7 +36,6 @@ from agent_framework.tools.builtin import (
     file,
     python_repl,
 )
-from agent_framework.tools.builtin.todo_write import TodoManager
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -44,7 +43,6 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 DIVIDER  = "-" * 50
 BANNER   = "=" * 60
-PLAN_FILE = Path.cwd() / ".plan.json"
 
 COLORS = {
     "reset":    "\033[0m",
@@ -76,7 +74,7 @@ def print_header():
   子代理:   researcher（调研助手）, coder（编程助手）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
   技能:     自动扫描 skills/ 目录，LLM 按需调用 load_skill 加载
-  计划文件: {PLAN_FILE}
+  计划文件: 每个会话独立保存（.sessions/{{session_id}}/plan.json）
 
   命令:
     /history   — 查看对话历史
@@ -119,10 +117,10 @@ async def confirm_dangerous(tool_name: str, args_str: str) -> ConfirmResponse:
 
 def build_agent() -> Agent:
     """构建带全部内置工具和子代理的 Agent"""
-    llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=True)
+    llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=False)
 
     so_tool = create_structured_output_tool()
-    todo_write, todo_read = create_todo_write_tool(plan_file=PLAN_FILE)
+    todo_write, todo_read = create_todo_write_tool()
 
     # 提示词目录路径（相对于项目根目录）
     prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
@@ -372,10 +370,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         return False  # 信号：退出
 
     elif cmd == "/reset":
-        agent.history.clear()
-        # 同时清空计划文件
-        if PLAN_FILE.exists():
-            PLAN_FILE.unlink()
+        await agent.reset()
         print(c("yellow", "\n  对话已重置，上下文和计划已清空。\n"))
 
     elif cmd == "/history":
@@ -482,40 +477,31 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
 """)
 
     elif cmd == "/plan":
-        if PLAN_FILE.exists():
-            import json
-            try:
-                data = json.loads(PLAN_FILE.read_text(encoding="utf-8"))
-                items = data.get("items", [])
-            except Exception as e:
-                print(f"\n  {c('red', '计划文件读取失败')}: {e}\n")
-                return True
+        mgr = agent._todo_manager
+        if not mgr or not mgr.state.items:
+            print(f"\n  {c('dim', '暂无会话计划。')}\n")
+            return True
 
-            if not items:
-                print(f"\n  {c('dim', '暂无会话计划。')}\n")
-                return True
-
-            print(f"\n{DIVIDER}")
-            print(c("bold", "  当前会话计划") + c("dim", f" ({len(items)} 个条目)"))
-            print(DIVIDER)
-            markers = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
-            colors = {"pending": "yellow", "in_progress": "green", "completed": "dim"}
-            completed = 0
-            for item in items:
-                status = item.get("status", "pending")
-                marker = markers.get(status, "[ ]")
-                color = colors.get(status, "yellow")
-                line = f"  {marker} {item['content']}"
-                if status == "in_progress" and item.get("activeForm"):
-                    line += f"  ({c('cyan', item['activeForm'])})"
-                if status == "completed":
-                    completed += 1
-                print(f"  {c(color, line)}")
-            print(f"\n  {c('dim', f'({completed}/{len(items)} 已完成)')}")
-            print(f"  {c('dim', f'文件: {PLAN_FILE}')}")
-            print(DIVIDER + "\n")
-        else:
-            print(f"\n  {c('dim', '暂无会话计划（计划文件不存在）。')}\n")
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  当前会话计划") + c("dim", f" ({len(mgr.state.items)} 个条目)"))
+        print(DIVIDER)
+        markers = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
+        colors = {"pending": "yellow", "in_progress": "green", "completed": "dim"}
+        completed = 0
+        for item in mgr.state.items:
+            status = item.status
+            marker = markers.get(status, "[ ]")
+            color = colors.get(status, "yellow")
+            line = f"  {marker} {item.content}"
+            if status == "in_progress" and item.active_form:
+                line += f"  ({c('cyan', item.active_form)})"
+            if status == "completed":
+                completed += 1
+            print(f"  {c(color, line)}")
+        print(f"\n  {c('dim', f'({completed}/{len(mgr.state.items)} 已完成)')}")
+        if mgr.plan_file:
+            print(f"  {c('dim', f'文件: {mgr.plan_file}')}")
+        print(DIVIDER + "\n")
 
     elif cmd == "/skills":
         skill_names = agent.skill_registry.list_names()
@@ -676,23 +662,17 @@ async def main():
         print()
 
     # 显示恢复的计划状态
-    if PLAN_FILE.exists():
-        import json
-        try:
-            data = json.loads(PLAN_FILE.read_text(encoding="utf-8"))
-            items = data.get("items", [])
-            if items:
-                completed = sum(1 for i in items if i.get("status") == "completed")
-                in_progress = next(
-                    (i["content"] for i in items if i.get("status") == "in_progress"), None
-                )
-                status_line = f"  计划已恢复: {completed}/{len(items)} 已完成"
-                if in_progress:
-                    status_line += f" | 当前: {c('green', in_progress)}"
-                print(c("yellow", status_line))
-                print(c("dim", f"  输入 /plan 查看详情\n"))
-        except Exception:
-            pass
+    if agent._todo_manager and agent._todo_manager.state.items:
+        items = agent._todo_manager.state.items
+        completed = sum(1 for i in items if i.status == "completed")
+        in_progress = next(
+            (i.content for i in items if i.status == "in_progress"), None
+        )
+        status_line = f"  计划已恢复: {completed}/{len(items)} 已完成"
+        if in_progress:
+            status_line += f" | 当前: {c('green', in_progress)}"
+        print(c("yellow", status_line))
+        print(c("dim", f"  输入 /plan 查看详情\n"))
 
     turn_count = 0
 

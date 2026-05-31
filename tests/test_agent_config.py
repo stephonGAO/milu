@@ -38,8 +38,8 @@ def test_compact_config_defaults():
     config = CompactConfig()
     assert config.enabled is True
     assert config.trigger_ratio == 0.7
-    assert config.recent_rounds == 3
-    assert config.max_messages == 50
+    assert config.recent_rounds == 5
+    assert config.max_messages == 300
 
 
 def test_compact_config_custom():

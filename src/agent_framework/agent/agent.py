@@ -185,6 +185,11 @@ class Agent:
         self._work_started = False   # 非计划工具是否已执行
         self._plan_created = False   # todo_write 是否已被成功调用
 
+        # ── 自动发现 TodoManager（通过工具标记）──
+        self._todo_manager = self._find_todo_manager()
+        if self._todo_manager and self._session:
+            self._rebind_todo_manager()
+
         # ── 技能（Skills）初始化 ──
         from agent_framework.skills.registry import SkillRegistry
         self._skill_registry = SkillRegistry()
@@ -251,6 +256,8 @@ class Agent:
         self._history.clear()
         self._work_started = False
         self._plan_created = False
+        if self._todo_manager:
+            self._todo_manager.clear()
 
     def save_session(self) -> None:
         """保存当前会话元数据到 session.json。"""
@@ -272,6 +279,7 @@ class Agent:
         self._history.attach_session(self._session)
         self._work_started = False
         self._plan_created = False
+        self._rebind_todo_manager()
 
     def load_session(self, session_id: str) -> int:
         """加载历史会话，恢复对话。返回消息数量。"""
@@ -286,6 +294,7 @@ class Agent:
         self._history.load_from_session(self._session)
         self._work_started = False
         self._plan_created = False
+        self._rebind_todo_manager()
         return self._session.message_count
 
     # -- 内部方法 ------------------------------------------------------------
@@ -334,6 +343,19 @@ class Agent:
         self._history.set_system(
             Message(role=MessageRole.SYSTEM, content="".join(parts))
         )
+
+    def _find_todo_manager(self):
+        """从已注册工具中查找 TodoManager（通过 _todo_manager 标记）。"""
+        for name in self._registry.list_tools():
+            wrapper = self._registry.get_tool(name)
+            if wrapper and hasattr(wrapper.func, '_todo_manager'):
+                return wrapper.func._todo_manager
+        return None
+
+    def _rebind_todo_manager(self):
+        """将 TodoManager 的 plan 文件绑定到当前 session 目录。"""
+        if self._todo_manager and self._session:
+            self._todo_manager.set_plan_file(self._session.dir_path / "plan.json")
 
     # -- MCP 生命周期 --------------------------------------------------------
 

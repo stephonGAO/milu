@@ -300,6 +300,59 @@ class TestTodoManagerPersistence:
         mgr = TodoManager(plan_file=plan_file)
         assert len(mgr.state.items) == 0
 
+    def test_set_plan_file_switches_path(self, tmp_path):
+        """set_plan_file 切换文件路径并清空旧状态"""
+        file_a = tmp_path / "a" / "plan.json"
+        file_b = tmp_path / "b" / "plan.json"
+
+        mgr = TodoManager(plan_file=file_a)
+        mgr.update([{"content": "任务 A", "status": "completed"}])
+        assert file_a.exists()
+
+        # 切换到 file_b（不存在），状态应清空
+        mgr.set_plan_file(file_b)
+        assert mgr.plan_file == file_b
+        assert len(mgr.state.items) == 0
+
+        # 写入新文件
+        mgr.update([{"content": "任务 B", "status": "in_progress"}])
+        assert file_b.exists()
+        data = json.loads(file_b.read_text(encoding="utf-8"))
+        assert data["items"][0]["content"] == "任务 B"
+
+    def test_set_plan_file_loads_existing(self, tmp_path):
+        """set_plan_file 切换到已有文件时自动加载"""
+        file_a = tmp_path / "a" / "plan.json"
+        file_b = tmp_path / "b" / "plan.json"
+
+        # 预先写入 file_b
+        file_b.parent.mkdir(parents=True, exist_ok=True)
+        plan_data = {
+            "items": [
+                {"content": "已有任务", "status": "in_progress", "activeForm": "进行中"},
+            ]
+        }
+        file_b.write_text(json.dumps(plan_data, ensure_ascii=False), encoding="utf-8")
+
+        mgr = TodoManager(plan_file=file_a)
+        mgr.update([{"content": "临时任务", "status": "pending"}])
+
+        # 切换到 file_b，应自动加载
+        mgr.set_plan_file(file_b)
+        assert len(mgr.state.items) == 1
+        assert mgr.state.items[0].content == "已有任务"
+        assert mgr.state.items[0].status == "in_progress"
+
+    def test_set_plan_file_none(self, tmp_path):
+        """set_plan_file(None) 切换为纯内存模式"""
+        plan_file = tmp_path / "plan.json"
+        mgr = TodoManager(plan_file=plan_file)
+        mgr.update([{"content": "任务", "status": "pending"}])
+
+        mgr.set_plan_file(None)
+        assert mgr.plan_file is None
+        assert len(mgr.state.items) == 0
+
 
 # ── create_todo_write_tool 集成测试 ─────────────────────────
 
@@ -316,6 +369,17 @@ class TestTodoWriteTool:
         todo_write, todo_read = result
         assert todo_write._tool_wrapper.name == "todo_write"
         assert todo_read._tool_wrapper.name == "todo_read"
+
+    @pytest.mark.asyncio
+    async def test_tool_manager_marker(self):
+        """工具函数上有 _todo_manager 标记，供 Agent 自动发现"""
+        todo_write, todo_read = create_todo_write_tool()
+        # 标记在 wrapped func 上（wrapper.func）
+        assert hasattr(todo_write._tool_wrapper.func, '_todo_manager')
+        assert hasattr(todo_read._tool_wrapper.func, '_todo_manager')
+        # 两个工具共享同一个 TodoManager
+        assert todo_write._tool_wrapper.func._todo_manager is todo_read._tool_wrapper.func._todo_manager
+        assert isinstance(todo_write._tool_wrapper.func._todo_manager, TodoManager)
 
     @pytest.mark.asyncio
     async def test_write_tool_metadata(self):
@@ -547,7 +611,7 @@ class TestTodoWriteAgentIntegration:
             llm=llm,
             system_prompt="你是助手",
             tools=[todo_write, todo_read],
-            config=AgentConfig(max_turns=5),
+            config=AgentConfig(max_turns=5, session_enabled=False),
         )
 
         events = []

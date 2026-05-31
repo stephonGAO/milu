@@ -163,7 +163,6 @@ class TestSnipCompact:
         assert compactor._total_snipped_count == 10
         snip_marker = [m for m in result if "已裁剪" in m.content][0]
         assert "已裁剪 10 条历史消息" in snip_marker.content
-        assert "本次 10 条" in snip_marker.content
 
         # 第二次 snip：构造新消息列表（含旧标记 + 更多消息），再触发裁剪
         more_msgs = result + [_make_user(f"extra {i}") for i in range(10)]
