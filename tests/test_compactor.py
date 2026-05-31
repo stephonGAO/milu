@@ -141,7 +141,7 @@ class TestSnipCompact:
         result = compactor._snip_compact(messages)
         assert result is not messages
         assert len(result) == 11  # 3 + 1 marker + 7
-        snip_msgs = [m for m in result if "snipped" in m.content]
+        snip_msgs = [m for m in result if "已裁剪" in m.content]
         assert len(snip_msgs) == 1
 
     def test_snip_preserves_system(self):
@@ -151,6 +151,40 @@ class TestSnipCompact:
         messages = [_make_system("系统")] + [_make_user(f"msg {i}") for i in range(15)]
         result = compactor._snip_compact(messages)
         assert result[0].role == MessageRole.SYSTEM
+
+    def test_snip_cumulative_count(self):
+        """多次 snip 后累计计数正确"""
+        config = CompactConfig(max_messages=10)
+        compactor = Compactor(_make_llm(), compact_config=config)
+
+        # 第一次 snip：20 条 → 保留 3+7=10，裁剪 10 条
+        messages = [_make_user(f"msg {i}") for i in range(20)]
+        result = compactor._snip_compact(messages)
+        assert compactor._total_snipped_count == 10
+        snip_marker = [m for m in result if "已裁剪" in m.content][0]
+        assert "已裁剪 10 条历史消息" in snip_marker.content
+        assert "本次 10 条" in snip_marker.content
+
+        # 第二次 snip：构造新消息列表（含旧标记 + 更多消息），再触发裁剪
+        more_msgs = result + [_make_user(f"extra {i}") for i in range(10)]
+        result2 = compactor._snip_compact(more_msgs)
+        assert compactor._total_snipped_count > 10  # 累计数应增加
+        snip_marker2 = [m for m in result2 if "已裁剪" in m.content][0]
+        # 累计数应体现在标记中
+        assert f"已裁剪 {compactor._total_snipped_count} 条历史消息" in snip_marker2.content
+
+    def test_snip_marker_contains_session_ref(self):
+        """有 session 时标记中包含文件路径"""
+        with tempfile.TemporaryDirectory() as tmp:
+            session = Session("test", Path(tmp))
+            config = CompactConfig(max_messages=5)
+            compactor = Compactor(_make_llm(), compact_config=config, session=session)
+
+            messages = [_make_user(f"msg {i}") for i in range(15)]
+            result = compactor._snip_compact(messages)
+            snip_marker = [m for m in result if "已裁剪" in m.content][0]
+            assert "完整对话日志" in snip_marker.content
+            assert str(session.conversation_path) in snip_marker.content
 
 
 # ── 轮次分层工具压缩 测试 ─────────────────────────────────

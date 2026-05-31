@@ -148,6 +148,11 @@ class ConversationHistory:
             self._messages = []
 
     @property
+    def session(self) -> "Session | None":
+        """当前绑定的会话（None 表示未启用持久化）"""
+        return self._session
+
+    @property
     def all_messages(self) -> list[Message]:
         """获取完整未截断的历史（用于调试/日志）"""
         return list(self._messages)

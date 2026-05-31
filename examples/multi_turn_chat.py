@@ -380,8 +380,18 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
 
     elif cmd == "/history":
         messages = agent.history.all_messages
+        session = agent.history.session
+
         print(f"\n{DIVIDER}")
         print(c("bold", "  对话历史") + c("dim", f" ({len(messages)} 条消息)"))
+
+        # 显示 session 文件位置
+        if session:
+            print(c("dim", f"  会话 ID: {session.session_id}"))
+            print(c("dim", f"  日志文件: {session.conversation_path}"))
+            print(c("dim", f"  已记录消息: {session.message_count} 条 | "
+                            f"当前内存: {len(messages)} 条"))
+
         print(DIVIDER)
         for msg in messages:
             role = msg.role.value.upper()

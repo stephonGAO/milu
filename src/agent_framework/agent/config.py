@@ -9,8 +9,8 @@ class CompactConfig:
     """上下文压缩配置"""
     enabled: bool = True                # 自动压缩总开关
     trigger_ratio: float = 0.7          # L4 触发：prompt_tokens / max_context_window > 此比例
-    recent_rounds: int = 3              # 保留最近 N 轮工具结果完整（动态：超 30% 时降为 0）
-    max_messages: int = 50              # L1 消息数量上限
+    recent_rounds: int = 5              # 保留最近 N 轮工具结果完整（动态：超 30% 时降为 0）
+    max_messages: int = 300              # L1 消息数量上限
 
 
 @dataclass

@@ -71,6 +71,7 @@ class Compactor:
         self._session = session
         self._last_prompt_tokens = 0
         self._consecutive_failures = 0
+        self._total_snipped_count = 0  # L1 累计裁剪消息数
 
         # 从 LLM 获取最大上下文窗口
         try:
@@ -203,9 +204,22 @@ class Compactor:
             keep_tail = 1
 
         snipped_count = len(non_system) - keep_head - keep_tail
+        self._total_snipped_count += snipped_count
+
+        # session 文件指针
+        session_ref = ""
+        if self._session:
+            conv_path = self._session.conversation_path
+            session_ref = f"\n[完整对话日志 → {conv_path}]"
+
         snip_marker = Message(
             role=MessageRole.USER,
-            content=f"[snipped {snipped_count} messages]",
+            content=(
+                f"[已裁剪 {self._total_snipped_count} 条历史消息"
+                # f"（本次 {snipped_count} 条，"
+                # f"保留最近 {keep_tail} 条）"
+                f"{session_ref}]"
+            ),
         )
 
         result = system_msgs + non_system[:keep_head] + [snip_marker] + non_system[-keep_tail:]
