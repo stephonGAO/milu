@@ -135,6 +135,7 @@ def _create_single_subagent_tool(llm: "BaseLLM", cfg: SubAgentConfig):
 
         # 每次调用创建全新 Agent → 完全的历史隔离
         sub_config = cfg.config or _DEFAULT_SUBAGENT_CONFIG
+        sub_config.session_enabled = False  # 子代理不创建独立 session，结果已在主 agent 日志中记录
         sub_history = ConversationHistory(
             max_turns=cfg.history_max_turns,
             max_tokens=cfg.history_max_tokens,
