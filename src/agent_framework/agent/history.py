@@ -105,6 +105,7 @@ class ConversationHistory:
         compacted = await self._compactor.auto_compact(self._messages)
         if compacted is not self._messages:
             self._messages = compacted
+            self._log_compaction(compacted)
         return compacted
 
     async def reactive_compact(self) -> list[Message]:
@@ -114,13 +115,22 @@ class ConversationHistory:
         compacted = await self._compactor.reactive_compact(self._messages)
         if compacted is not self._messages:
             self._messages = compacted
+            self._log_compaction(compacted)
         return compacted
 
     async def manual_compact(self, focus: str = "") -> tuple[list[Message], str]:
-        """手动压缩（委托给压缩器）"""
+        """手动压缩（委托给压缩器）。
+
+        调用方需要在 replace_all() 后调用 _log_compaction() 持久化压缩状态。
+        """
         if not self._compactor:
             return self._messages, ""
         return await self._compactor.manual_compact(self._messages, focus)
+
+    def _log_compaction(self, messages: list[Message]) -> None:
+        """将压缩后的消息快照写入 session JSONL。"""
+        if self._session:
+            self._session.log_compaction(messages)
 
     def load_from_session(self, session: "Session") -> None:
         """从会话日志批量加载消息（不重复写入 JSONL）"""

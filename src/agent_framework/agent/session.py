@@ -65,6 +65,9 @@ class Session:
                     self._line_counter += 1
                     try:
                         obj = json.loads(line)
+                        # 跳过压缩事件（不是消息）
+                        if obj.get("type") == "compaction":
+                            continue
                         self._message_count += 1
                         if obj.get("role") == MessageRole.ASSISTANT.value:
                             round_val = obj.get("round", 0)
@@ -117,33 +120,130 @@ class Session:
         self._message_count += 1
         return line_no
 
+    def log_compaction(self, messages: list[Message]) -> int:
+        """记录压缩事件到 JSONL。
+
+        保存压缩后的消息快照，后续 load_messages() 从此点恢复。
+
+        :param messages: 压缩后的消息列表
+        :return: 行号，失败返回 -1
+        """
+        serialized = []
+        for msg in messages:
+            if msg.role == MessageRole.SYSTEM:
+                continue
+            entry: dict[str, Any] = {
+                "role": msg.role.value,
+                "content": msg.content if isinstance(msg.content, str) else str(msg.content or ""),
+            }
+            if msg.tool_calls:
+                entry["tool_calls"] = msg.tool_calls
+            if msg.tool_call_id:
+                entry["tool_call_id"] = msg.tool_call_id
+            if msg.name:
+                entry["name"] = msg.name
+            serialized.append(entry)
+
+        record: dict[str, Any] = {
+            "type": "compaction",
+            "line": self._line_counter,
+            "timestamp": time.time(),
+            "message_count": len(serialized),
+            "messages": serialized,
+        }
+
+        try:
+            with open(self.conversation_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.warning("写入压缩事件失败: %s", e)
+            return -1
+
+        line_no = self._line_counter
+        self._line_counter += 1
+        return line_no
+
     # ── 读取 ──────────────────────────────────────────────────
 
     def load_messages(self) -> list[Message]:
-        """读取全部 JSONL，重建 Message 列表（不含 system）。
+        """读取 JSONL，重建 Message 列表（不含 system）。
 
+        如果存在压缩事件，从最后一个压缩快照恢复，只加载压缩后的消息。
         跳过损坏的行（崩溃恢复）。
         """
-        messages: list[Message] = []
         if not self.conversation_path.exists():
-            return messages
+            return []
+
+        # 第一遍：找到最后一个 compaction 事件的位置
+        last_compaction_line = -1
+        last_compaction_messages: list[Message] | None = None
 
         try:
             with open(self.conversation_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for i, line in enumerate(f):
                     line = line.strip()
                     if not line:
                         continue
                     try:
                         obj = json.loads(line)
-                        msg = self._dict_to_message(obj)
-                        if msg is not None:
-                            messages.append(msg)
-                    except (json.JSONDecodeError, KeyError) as e:
-                        logger.debug("跳过损坏的 JSONL 行: %s", e)
+                        if obj.get("type") == "compaction":
+                            last_compaction_line = i
+                            last_compaction_messages = []
+                            for m_obj in obj.get("messages", []):
+                                msg = self._dict_to_message(m_obj)
+                                if msg is not None:
+                                    last_compaction_messages.append(msg)
+                    except (json.JSONDecodeError, KeyError):
                         continue
         except OSError as e:
-            logger.warning("读取 JSONL 失败: %s", e)
+            logger.warning("扫描压缩事件失败: %s", e)
+
+        # 第二遍：从压缩事件之后读取后续消息
+        messages: list[Message] = []
+        if last_compaction_messages is not None:
+            messages = list(last_compaction_messages)
+            # 读取 compaction 之后的新增消息
+            try:
+                with open(self.conversation_path, "r", encoding="utf-8") as f:
+                    for i, line in enumerate(f):
+                        if i <= last_compaction_line:
+                            continue
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            # 跳过后续可能出现的 compaction 事件（不应发生，但防御性处理）
+                            if obj.get("type") == "compaction":
+                                continue
+                            msg = self._dict_to_message(obj)
+                            if msg is not None:
+                                messages.append(msg)
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.debug("跳过损坏的 JSONL 行: %s", e)
+                            continue
+            except OSError as e:
+                logger.warning("读取 JSONL 失败: %s", e)
+        else:
+            # 无压缩事件，正常全量加载
+            try:
+                with open(self.conversation_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            obj = json.loads(line)
+                            if obj.get("type") == "compaction":
+                                continue  # 防御性跳过
+                            msg = self._dict_to_message(obj)
+                            if msg is not None:
+                                messages.append(msg)
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.debug("跳过损坏的 JSONL 行: %s", e)
+                            continue
+            except OSError as e:
+                logger.warning("读取 JSONL 失败: %s", e)
 
         return messages
 

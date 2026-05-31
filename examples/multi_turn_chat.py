@@ -569,6 +569,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         original_count = len(agent.history._messages)
         compacted, summary = await agent._history.manual_compact()
         agent.history.replace_all(compacted)
+        agent._history._log_compaction(compacted)
         print(f"\n{DIVIDER}")
         print(c("bold", "  手动压缩完成")
               + c("dim", f"  ({original_count} → {len(compacted)} 条消息)"))

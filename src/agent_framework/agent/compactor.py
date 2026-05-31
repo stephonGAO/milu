@@ -560,6 +560,7 @@ def create_compact_tool(agent: "Agent"):
             agent.history._messages, focus
         )
         agent.history.replace_all(compacted)
+        agent.history._log_compaction(compacted)
 
         return (
             f"对话历史已压缩: {original_count} → {len(compacted)} 条消息。\n"
