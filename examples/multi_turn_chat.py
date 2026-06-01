@@ -17,7 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from agent_framework import (
-    Agent, AgentConfig, ConversationHistory, ConfirmResponse,
+    Agent, AgentConfig, AgentMode, ConversationHistory, ConfirmResponse,
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolConfirmRequired, ToolResult,
     AgentDone, AgentError,
@@ -82,6 +82,7 @@ def print_header():
     /tools     — 查看可用工具（含休眠工具）
     /skills    — 查看可用技能
     /plan      — 查看当前会话计划
+    /mode      — 查看/切换操作模式（talk/auto/superwork）
     /save      — 保存当前会话
     /sessions  — 查看所有会话
     /new       — 新建会话
@@ -195,6 +196,7 @@ def build_agent() -> Agent:
                 # skills_dir=str(Path(__file__).resolve().parent.parent / "skills"),
             ),
         ],
+        get_parent_mode=lambda: agent.mode,
     )
 
     all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read, *subagent_tools]
@@ -466,6 +468,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
   /tools     — 查看可用工具
   /skills    — 查看可用技能
   /plan      — 查看当前会话计划
+  /mode      — 查看/切换操作模式（talk/auto/superwork）
   /prompt    — 查看当前系统提示词
   /compact   — 手动压缩对话历史
   /save      — 保存当前会话
@@ -475,6 +478,42 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
   /help      — 显示帮助
   /quit      — 退出
 """)
+
+    elif cmd == "/mode":
+        mode = agent.mode
+        mode_colors = {
+            AgentMode.TALK: "cyan",
+            AgentMode.AUTO: "green",
+            AgentMode.SUPERWORK: "red",
+        }
+        mode_desc = {
+            AgentMode.TALK: "只读模式（不可修改/执行）",
+            AgentMode.AUTO: "标准模式（dangerous 需确认）",
+            AgentMode.SUPERWORK: "全权限模式（无安全检查）",
+        }
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  操作模式"))
+        print(DIVIDER)
+        for m in AgentMode:
+            marker = c("bold", " → 当前") if m == mode else ""
+            color = mode_colors.get(m, "reset")
+            print(f"  {c(color, m.value):<20} {c('dim', mode_desc.get(m, ''))}{marker}")
+        print(DIVIDER)
+        print(c("dim", "  用法: /mode <talk|auto|superwork>\n"))
+
+    elif cmd.startswith("/mode "):
+        new_mode = cmd.split(maxsplit=1)[1].strip()
+        try:
+            agent.set_mode(new_mode)
+            mode_colors = {
+                "talk": "cyan",
+                "auto": "green",
+                "superwork": "red",
+            }
+            color = mode_colors.get(new_mode, "reset")
+            print(f"\n  {c('green', '模式已切换为:')} {c(color, c('bold', new_mode))}\n")
+        except ValueError:
+            print(f"\n  {c('red', f'无效模式: {new_mode}')}（可选: talk, auto, superwork）\n")
 
     elif cmd == "/plan":
         mgr = agent._todo_manager

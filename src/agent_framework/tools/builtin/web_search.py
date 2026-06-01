@@ -17,7 +17,7 @@ from agent_framework.tools.decorator import tool
 logger = logging.getLogger(__name__)
 
 
-@tool(name="web_search", description="搜索互联网信息，返回相关结果摘要")
+@tool(name="web_search", description="搜索互联网信息，返回相关结果摘要", read_only=True)
 async def web_search(query: str, num_results: int = 5) -> str:
     """
     搜索互联网并返回相关结果。默认使用 DuckDuckGo 搜索。

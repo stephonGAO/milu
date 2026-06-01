@@ -330,6 +330,7 @@ def create_todo_write_tool(
             "返回包含所有任务的状态清单。"
             "此工具必须单独调用，不可与其他工具放在同一批调用中。"
         ),
+        read_only=True,
     )
     async def _todo_read() -> str:
         """查看当前计划状态。"""

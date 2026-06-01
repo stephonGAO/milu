@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import AsyncIterator, Awaitable, Callable, Union
 
 import os
 
-from agent_framework.agent.config import AgentConfig
+from agent_framework.agent.config import AgentConfig, AgentMode
 from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
 from agent_framework.agent.history import ConversationHistory
 from agent_framework.agent.events import (
@@ -251,6 +252,22 @@ class Agent:
 
     # -- 公开方法 ------------------------------------------------------------
 
+    def set_mode(self, mode: "AgentMode | str") -> None:
+        """运行时切换操作模式。
+
+        :param mode: AgentMode 枚举或字符串（talk / auto / superwork）
+        """
+        if isinstance(mode, str):
+            mode = AgentMode(mode)
+        old = self._config.mode
+        self._config.mode = mode
+        logger.info("Agent 模式切换: %s → %s", old.value, mode.value)
+
+    @property
+    def mode(self) -> AgentMode:
+        """当前操作模式。"""
+        return self._config.mode
+
     async def reset(self) -> None:
         """清空对话历史（保留 system 消息）。"""
         self._history.clear()
@@ -298,6 +315,33 @@ class Agent:
         return self._session.message_count
 
     # -- 内部方法 ------------------------------------------------------------
+
+    @staticmethod
+    def _is_read_only_call(wrapper, args_str: str) -> bool:
+        """判断一次工具调用是否为只读操作。
+
+        判断逻辑（按优先级）：
+        1. wrapper.read_only == True → 只读
+        2. wrapper.read_only_check 存在 → 调用检查函数
+        3. wrapper.read_only_actions 不为 None → 检查 args 中的 action 字段
+        4. 否则 → 非只读
+        """
+        if wrapper.read_only:
+            return True
+        if wrapper.read_only_check is not None:
+            try:
+                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                return bool(wrapper.read_only_check(args))
+            except (json.JSONDecodeError, AttributeError, TypeError):
+                return False
+        if wrapper.read_only_actions is not None:
+            try:
+                args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                action = args.get("action", "")
+                return action in wrapper.read_only_actions
+            except (json.JSONDecodeError, AttributeError):
+                return False
+        return False
 
     @staticmethod
     def _extract_model_name(llm) -> str:
@@ -644,6 +688,45 @@ class Agent:
                         ))
                     continue
 
+            # ── 10a.7 talk 模式只读检查 ──
+            # talk 模式下，阻止所有非只读工具调用
+            if self._config.mode == AgentMode.TALK:
+                blocked = []
+                allowed = []
+                for call in resolved_calls:
+                    fn = call.get("function", {})
+                    tool_name = fn.get("name", "")
+                    tool_args = fn.get("arguments", "{}")
+                    wrapper = self._registry.get_tool(tool_name)
+                    if wrapper and self._is_read_only_call(wrapper, tool_args):
+                        allowed.append(call)
+                    else:
+                        blocked.append(call)
+
+                if blocked:
+                    for call in blocked:
+                        tc_id = call.get("id", "")
+                        fn = call.get("function", {})
+                        tn = fn.get("name", "")
+                        ta = fn.get("arguments", "{}")
+                        yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
+                        error_msg = (
+                            f"[talk 模式] 工具 {tn} 不可用：当前为只读模式，"
+                            f"仅允许只读操作。请用只读工具或指令完成需求。"
+                        )
+                        yield ToolResult(
+                            tool_name=tn, tool_call_id=tc_id,
+                            output=error_msg, is_error=True,
+                        )
+                        self._history.add(Message(
+                            role=MessageRole.TOOL, content=error_msg,
+                            tool_call_id=tc_id, name=tn,
+                        ))
+                    if not allowed:
+                        continue  # 全部被阻止，跳过确认和执行
+                    # 部分被阻止，只执行允许的
+                    resolved_calls = allowed
+
             # ── 10b. 顺序发出 ToolCallStart + 危险工具确认 ──
             confirmed = []
             for call in resolved_calls:
@@ -659,9 +742,10 @@ class Agent:
                     arguments=tool_args,
                 )
 
-                # 危险工具确认检查
+                # 危险工具确认检查（superwork 和 talk 模式跳过确认，因为talk模式以在上面检查拦截）
                 wrapper = self._registry.get_tool(tool_name)
-                if (self._config.confirm_dangerous
+                if (self._config.mode not in (AgentMode.SUPERWORK, AgentMode.TALK)
+                        and self._config.confirm_dangerous
                         and wrapper and wrapper.dangerous
                         and self._on_confirm):
                     raw_result = await self._on_confirm(tool_name, tool_args)

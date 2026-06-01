@@ -440,7 +440,7 @@ _ACTIONS = {
     "delete - 删除指定行范围\n"
     "restore - 从备份文件还原\n"
     "典型工作流（修改已有文件）：index → grep → read → replace → read（验证）"
-))
+), read_only_actions={"index", "read", "grep"})
 async def file(
     action: Literal["index", "read", "grep", "write", "append",
                     "replace", "insert", "delete", "restore"],

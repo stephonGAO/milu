@@ -37,7 +37,7 @@ from agent_framework.agent.events import (
     SessionLoaded,
 )
 from agent_framework.llm.providers import ModelRegistry
-from agent_framework.agent import Agent, AgentConfig, CompactConfig, ConversationHistory, Session
+from agent_framework.agent import Agent, AgentConfig, AgentMode, CompactConfig, ConversationHistory, Session
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
 from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
@@ -85,6 +85,7 @@ __all__ = [
     # Agent
     "Agent",
     "AgentConfig",
+    "AgentMode",
     "CompactConfig",
     "ConversationHistory",
     "Session",

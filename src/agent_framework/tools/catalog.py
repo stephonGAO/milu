@@ -34,6 +34,7 @@ def create_catalog_tools(registry: ToolRegistry) -> list:
             "列出所有可用但未激活的工具目录。返回工具名、描述和分类。"
             "用于了解有哪些外部工具可供使用。"
         ),
+        read_only=True,
     )
     async def list_catalog() -> str:
         """列出所有休眠工具，按 category 分组显示。"""
@@ -60,6 +61,7 @@ def create_catalog_tools(registry: ToolRegistry) -> list:
             "按关键词搜索可用工具。输入关键词，返回匹配的工具名和描述。"
             "用于查找特定功能的工具。"
         ),
+        read_only=True,
     )
     async def search_tools(query: str) -> str:
         """搜索休眠工具，返回匹配结果。"""
@@ -79,6 +81,7 @@ def create_catalog_tools(registry: ToolRegistry) -> list:
             "激活一个或多个工具，使其可以被调用。"
             "传入工具名列表。激活后的工具会出现在可用工具中。"
         ),
+        read_only=True,
     )
     async def activate_tools(tool_names: list[str]) -> str:
         """激活指定的休眠工具。"""

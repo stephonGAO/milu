@@ -20,6 +20,7 @@ def convert_mcp_tool(
     server_name: str,
     prefix: bool = True,
     is_dangerous: bool = False,
+    is_read_only: bool = False,
 ) -> ToolWrapper:
     """将一个 MCP Tool 转换为框架 ToolWrapper。
 
@@ -29,6 +30,7 @@ def convert_mcp_tool(
         server_name: 服务器名称（用于工具名前缀）
         prefix: 是否添加 "{server_name}__" 前缀
         is_dangerous: 是否标记为危险工具
+        is_read_only: 是否标记为只读工具（talk 模式可用）
 
     Returns:
         可在 ToolRegistry 中注册的 ToolWrapper 实例
@@ -52,6 +54,7 @@ def convert_mcp_tool(
         func=_call,
         is_async=True,
         dangerous=is_dangerous,
+        read_only=is_read_only,
     )
 
 

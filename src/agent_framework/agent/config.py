@@ -2,6 +2,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class AgentMode(str, Enum):
+    """Agent 操作模式"""
+    TALK = "talk"             # 只读模式：仅允许只读工具，不可修改/执行
+    AUTO = "auto"             # 标准模式：可读可操作，dangerous 工具需确认
+    SUPERWORK = "superwork"   # 全权限模式：跳过所有安全检查
 
 
 @dataclass
@@ -23,6 +31,7 @@ class AgentConfig:
     tool_call_limit: int = 100      # 单次 run() 中最大工具调用次数
     confirm_dangerous: bool = True  # 危险工具调用前需确认（预留接口）
     mcp_tools_active_by_default: bool = False  # MCP 工具默认激活（False=进入休眠池，需手动激活）
+    mode: AgentMode = AgentMode.AUTO           # 操作模式：talk（只读）/ auto（标准）/ superwork（全权限）
 
     # Session 会话配置
     session_enabled: bool = True           # 自动创建会话（对话日志持久化）

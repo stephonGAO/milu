@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from agent_framework.tools.schema import generate_schema_from_function
@@ -23,9 +23,14 @@ class ToolWrapper:
     dangerous: bool
     category: str = ""    # 工具分类（MCP 服务器名等，用于 Tool Catalog 分组显示）
     meta: bool = False    # 是否为元工具（元工具不可被停用）
+    read_only: bool = False              # 是否为只读工具（talk 模式可用）
+    read_only_actions: set[str] | None = None  # 混合工具的只读 action 集合（如 file 工具）
+    read_only_check: Callable[[dict], bool] | None = None  # 自定义只读检查（如 shell_command 白名单）
 
 
-def tool(name: str, description: str, dangerous: bool = False):
+def tool(name: str, description: str, dangerous: bool = False,
+         read_only: bool = False, read_only_actions: set[str] | None = None,
+         read_only_check: Callable[[dict], bool] | None = None):
     """装饰器：将函数标记为 Agent 可调用的工具。"""
     def decorator(func: Callable) -> Callable:
         parameters_schema = generate_schema_from_function(func)
@@ -37,6 +42,9 @@ def tool(name: str, description: str, dangerous: bool = False):
             func=func,
             is_async=is_async,
             dangerous=dangerous,
+            read_only=read_only,
+            read_only_actions=read_only_actions,
+            read_only_check=read_only_check,
         )
         # 相当于原方法里增加了一个_tool_wrapper变量，内部是包装后的整体。包装包里也有原方法，有所有信息。
         func._tool_wrapper = wrapper

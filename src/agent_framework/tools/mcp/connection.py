@@ -79,6 +79,7 @@ class MCPServerConnection:
             all_tools = [t for t in all_tools if t.name in allowed]
 
         dangerous_set = set(self._config.dangerous_tools)
+        read_only_set = set(self._config.read_only_tools)
         self._tools = []
         for mcp_tool in all_tools:
             wrapper = convert_mcp_tool(
@@ -87,6 +88,7 @@ class MCPServerConnection:
                 server_name=self._config.name,
                 prefix=self._config.prefix_tools,
                 is_dangerous=mcp_tool.name in dangerous_set,
+                is_read_only=mcp_tool.name in read_only_set,
             )
             self._tools.append(wrapper)
 

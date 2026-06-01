@@ -71,7 +71,7 @@ def _exec_code(code: str) -> str:
         return f"错误:\n{tb}"
 
 
-@tool(name="python_repl", description="执行 Python 代码片段并返回输出，支持标准库")
+@tool(name="python_repl", description="执行 Python 代码片段并返回输出，支持标准库", read_only=True)
 async def python_repl(code: str) -> str:
     """
     在沙箱中执行 Python 代码。支持 import 标准库、print 输出。

@@ -24,11 +24,12 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional
 
-from agent_framework.agent.config import AgentConfig
+from agent_framework.agent.config import AgentConfig, AgentMode
 from agent_framework.agent.events import AgentDone, AgentError, AgentEvent
 from agent_framework.agent.history import ConversationHistory
 from agent_framework.tools.decorator import tool
@@ -91,6 +92,7 @@ _DEFAULT_SUBAGENT_CONFIG = AgentConfig(
 def create_subagent_tools(
     llm: "BaseLLM",
     subagents: list[SubAgentConfig],
+    get_parent_mode: Optional[Callable[[], AgentMode]] = None,
 ) -> list:
     """创建子代理工具列表。
 
@@ -100,6 +102,7 @@ def create_subagent_tools(
 
     :param llm: 共享的 LLM 实例（BaseLLM 无状态，安全共享）
     :param subagents: 子代理配置列表
+    :param get_parent_mode: 获取父 Agent 当前模式的回调（用于模式继承）
     :return: 工具函数列表，可传给 Agent(tools=...)
 
     用法：
@@ -109,10 +112,14 @@ def create_subagent_tools(
         ])
         agent = Agent(llm=llm, tools=[*BUILTIN_TOOLS, *tools])
     """
-    return [_create_single_subagent_tool(llm, cfg) for cfg in subagents]
+    return [_create_single_subagent_tool(llm, cfg, get_parent_mode) for cfg in subagents]
 
 
-def _create_single_subagent_tool(llm: "BaseLLM", cfg: SubAgentConfig):
+def _create_single_subagent_tool(
+    llm: "BaseLLM",
+    cfg: SubAgentConfig,
+    get_parent_mode: Optional[Callable[[], AgentMode]] = None,
+):
     """为单个 SubAgentConfig 创建工具函数。
 
     利用闭包捕获 llm 和 cfg，每次调用创建全新的 Agent 实例。
@@ -135,7 +142,16 @@ def _create_single_subagent_tool(llm: "BaseLLM", cfg: SubAgentConfig):
 
         # 每次调用创建全新 Agent → 完全的历史隔离
         sub_config = cfg.config or _DEFAULT_SUBAGENT_CONFIG
+
+        # 继承父 Agent 的操作模式
+        if get_parent_mode is not None:
+            parent_mode = get_parent_mode()
+            sub_config = dataclasses.replace(sub_config, mode=parent_mode)
+        else:
+            sub_config = dataclasses.replace(sub_config)
+
         sub_config.session_enabled = False  # 子代理不创建独立 session，结果已在主 agent 日志中记录
+
         sub_history = ConversationHistory(
             max_turns=cfg.history_max_turns,
             max_tokens=cfg.history_max_tokens,

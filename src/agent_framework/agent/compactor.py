@@ -546,6 +546,7 @@ def create_compact_tool(agent: "Agent"):
             "当对话过长、上下文即将溢出、或需要整理当前进度时调用此工具。"
             "压缩后对话历史会被替换为一段摘要，之前的详细对话内容将丢失。"
         ),
+        read_only=True,
     )
     async def compact(focus: str = "") -> str:
         """

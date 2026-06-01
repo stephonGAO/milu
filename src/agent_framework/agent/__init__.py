@@ -1,6 +1,6 @@
 """Agent 核心模块"""
 from agent_framework.agent.agent import Agent
-from agent_framework.agent.config import AgentConfig, CompactConfig
+from agent_framework.agent.config import AgentConfig, AgentMode, CompactConfig
 from agent_framework.agent.history import ConversationHistory
 from agent_framework.agent.session import Session
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
@@ -31,6 +31,7 @@ from agent_framework.agent.exceptions import (
 __all__ = [
     "Agent",
     "AgentConfig",
+    "AgentMode",
     "CompactConfig",
     "ConversationHistory",
     "Session",
