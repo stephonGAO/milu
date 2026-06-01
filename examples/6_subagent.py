@@ -28,7 +28,8 @@ from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     web_search,
     http_request,
-    file,
+    file_read,
+    file_write,
     python_repl,
 )
 
@@ -81,7 +82,7 @@ async def main():
                     "你是一个专业的调研助手。你的任务是搜索和整理信息，"
                     "提供准确、全面的调研结果。请引用信息来源。"
                 ),
-                tools=[],
+                tools=[file_read],
                 config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
             ),
             SubAgentConfig(
@@ -95,7 +96,7 @@ async def main():
                     "可以编写清晰的代码、调试问题、创建示例文件。"
                     "操作文件时先用 index 了解结构，再精确操作。"
                 ),
-                tools=[file, python_repl],
+                tools=[file_read, file_write, python_repl],
                 config=AgentConfig(max_turns=8, timeout=60, total_timeout=120),
             ),
         ],

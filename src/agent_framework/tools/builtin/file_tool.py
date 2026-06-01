@@ -425,40 +425,69 @@ _ACTIONS = {
 }
 
 
-# ── 工具函数 ──────────────────────────────────────────────
+# ── 工具定义 ──────────────────────────────────────────────
 
 
-# file 工具的安全操作白名单
-_SAFE_FILE_ACTIONS = {"index", "read", "grep"}
-
-
-def _is_safe_file_action(args: dict) -> bool:
-    """检查 file 工具调用是否为安全操作（action 属于只读操作）。"""
-    return args.get("action", "") in _SAFE_FILE_ACTIONS
-
-
-@tool(name="file", description=(
-    "文件读写操作工具。通过 action 参数选择操作类型：\n"
+@tool(name="file_read", description=(
+    "文件读取与结构索引工具。通过 action 参数选择操作类型：\n"
     "index - 建立文件结构索引（总行数、目录、行号地图），不了解文件时先用此操作\n"
     "grep - 关键词/正则搜索，返回匹配行号和上下文\n"
-    "read - 读取全文或指定行范围（start-end），单次最多200行\n"
-    "write - 原子写入（全量覆盖），backup=True时自动备份原文件\n"
-    "append - 追加内容到文件末尾\n"
-    "replace - 局部替换：传start+end+content为行范围替换，传old+new为字符串精确替换\n"
-    "insert - 在指定行后插入内容（after_line=0为文件开头）\n"
-    "delete - 删除指定行范围\n"
-    "restore - 从备份文件还原\n"
-    "典型工作流（修改已有文件）：index → grep → read → replace → read（验证）"
-), is_safe=False, safe_check=_is_safe_file_action)
-async def file(
-    action: Literal["index", "read", "grep", "write", "append",
-                    "replace", "insert", "delete", "restore"],
+    "read - 读取全文或指定行范围（start-end），单次最多200行"
+), is_safe=True)
+async def file_read(
+    action: Literal["index", "read", "grep"],
     path: str,
     start: Optional[int] = None,
     end: Optional[int] = None,
     pattern: Optional[str] = None,
     context_lines: int = 2,
+) -> str:
+    """
+    文件读取与结构索引工具。
+
+    :param action: 操作类型
+    :param path: 文件路径
+    :param start: 起始行号（read 时使用，从1开始）
+    :param end: 结束行号（read 时使用）
+    :param pattern: 搜索关键词或正则表达式（grep 时使用）
+    :param context_lines: grep 时匹配行前后显示的上下文行数
+    """
+    handler = _ACTIONS.get(action)
+    if not handler or action not in ("index", "read", "grep"):
+        return json.dumps({
+            "success": False,
+            "error": f"未知 action: {action}",
+            "available": ["index", "read", "grep"],
+        }, ensure_ascii=False)
+
+    try:
+        result = handler(
+            path=path, start=start, end=end,
+            pattern=pattern, context_lines=context_lines,
+        )
+        return json.dumps(result, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"{action} 操作失败: {e}",
+        }, ensure_ascii=False)
+
+
+@tool(name="file_write", description=(
+    "文件修改与写入工具。通过 action 参数选择操作类型：\n"
+    "write - 原子写入（全量覆盖），backup=True时自动备份原文件\n"
+    "append - 追加内容到文件末尾\n"
+    "replace - 局部替换：传start+end+content为行范围替换，传old+new为字符串精确替换\n"
+    "insert - 在指定行后插入内容（after_line=0为文件开头）\n"
+    "delete - 删除指定行范围\n"
+    "restore - 从备份文件还原"
+), is_safe=False)
+async def file_write(
+    action: Literal["write", "append", "replace", "insert", "delete", "restore"],
+    path: str,
     content: Optional[str] = None,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
     old: Optional[str] = None,
     new: Optional[str] = None,
     after_line: Optional[int] = None,
@@ -466,15 +495,13 @@ async def file(
     count: int = 1,
 ) -> str:
     """
-    统一的文件读写操作工具。
+    文件修改与写入工具。
 
     :param action: 操作类型
     :param path: 文件路径（restore 时传备份文件路径）
-    :param start: 起始行号（read/replace/delete 时使用，从1开始）
-    :param end: 结束行号（read/replace/delete 时使用）
-    :param pattern: 搜索关键词或正则表达式（grep 时使用）
-    :param context_lines: grep 时匹配行前后显示的上下文行数
     :param content: 写入或替换的内容（write/append/replace行范围 时使用）
+    :param start: 起始行号（replace/delete 时使用，从1开始）
+    :param end: 结束行号（replace/delete 时使用）
     :param old: 替换源字符串（replace 字符串模式时使用）
     :param new: 替换目标字符串（replace 字符串模式时使用）
     :param after_line: 插入位置行号（insert 时使用，0=文件开头）
@@ -482,19 +509,18 @@ async def file(
     :param count: 字符串替换次数（1=仅第一处，-1=全部）
     """
     handler = _ACTIONS.get(action)
-    if not handler:
+    if not handler or action not in ("write", "append", "replace", "insert", "delete", "restore"):
         return json.dumps({
             "success": False,
             "error": f"未知 action: {action}",
-            "available": list(_ACTIONS.keys()),
+            "available": ["write", "append", "replace", "insert", "delete", "restore"],
         }, ensure_ascii=False)
 
     try:
         result = handler(
-            path=path, start=start, end=end,
-            pattern=pattern, context_lines=context_lines,
-            content=content, old=old, new=new,
-            after_line=after_line, backup=backup, count=count,
+            path=path, content=content, start=start, end=end,
+            old=old, new=new, after_line=after_line,
+            backup=backup, count=count,
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:

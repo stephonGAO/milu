@@ -33,7 +33,8 @@ from agent_framework.tools.builtin import (
     create_structured_output_tool,
     create_todo_write_tool,
     http_request,
-    file,
+    file_read,
+    file_write,
     python_repl,
 )
 
@@ -139,7 +140,7 @@ def build_agent() -> Agent:
                 prompt_dir=prompts_base / "researcher",
                 # 不传 DuckDuckGo web_search 工具（国内不可用），
                 # 依靠共享 LLM 的 Qwen 内置搜索（web_search=True）
-                tools=[http_request],
+                tools=[file_read, http_request],
                 config=AgentConfig(),
                 # 演示 skills 参数：编程方式直接传入 SkillConfig
                 skills=[
@@ -169,7 +170,7 @@ def build_agent() -> Agent:
                     "当需要编写、修改、测试代码或解决编程问题时委派此代理。"
                 ),
                 prompt_dir=prompts_base / "coder",
-                tools=[file, python_repl],
+                tools=[file_read, file_write, python_repl],
                 config=AgentConfig(),
             ),
             # ── skills 参数演示 ──
@@ -183,7 +184,7 @@ def build_agent() -> Agent:
                     "当需要审查、修改、优化代码时委派此代理。"
                 ),
                 prompt_dir=prompts_base / "reviewer",
-                tools=[file, python_repl],
+                tools=[file_read, python_repl],
                 config=AgentConfig(),
                 # 手动加载 code-review.md 技能文件，通过 skills 参数传入
                 skills=[
