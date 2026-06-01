@@ -4,14 +4,14 @@
     "command": "mcp-fetch-server",
     "args": [],
     "timeout": 60,
-    "read_only_tools": ["fetch"]
+    "safe_tools": ["fetch_html, fetch_markdown, fetch_txt, fetch_json"]
   },
   "mysql-mcp": {
       "command": "C:/Python313/python.exe",
       "args": [
         "D:/My_MCP/MysqlMCP/main.py"
       ],
-      "read_only_tools": [
+      "safe_tools": [
         "get_row_by_id",
         "get_rows_by_conditions",
         "get_row_by_key_value",
@@ -24,6 +24,6 @@
       "command": "D:/My_MCP/mcp-ssh.bat",
       "args": [],
       "env": {},
-      "read_only_tools": ["ssh-connect", "ssh-list", "ssh-disconnect"]
+      "safe_tools": ["ssh-connect", "ssh-list", "ssh-disconnect"]
   }
 }

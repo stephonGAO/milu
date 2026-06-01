@@ -428,6 +428,15 @@ _ACTIONS = {
 # ── 工具函数 ──────────────────────────────────────────────
 
 
+# file 工具的安全操作白名单
+_SAFE_FILE_ACTIONS = {"index", "read", "grep"}
+
+
+def _is_safe_file_action(args: dict) -> bool:
+    """检查 file 工具调用是否为安全操作（action 属于只读操作）。"""
+    return args.get("action", "") in _SAFE_FILE_ACTIONS
+
+
 @tool(name="file", description=(
     "文件读写操作工具。通过 action 参数选择操作类型：\n"
     "index - 建立文件结构索引（总行数、目录、行号地图），不了解文件时先用此操作\n"
@@ -440,7 +449,7 @@ _ACTIONS = {
     "delete - 删除指定行范围\n"
     "restore - 从备份文件还原\n"
     "典型工作流（修改已有文件）：index → grep → read → replace → read（验证）"
-), read_only_actions={"index", "read", "grep"})
+), is_safe=False, safe_check=_is_safe_file_action)
 async def file(
     action: Literal["index", "read", "grep", "write", "append",
                     "replace", "insert", "delete", "restore"],

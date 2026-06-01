@@ -78,7 +78,7 @@ class TestDatetimeTool:
         wrapper = datetime_tool._tool_wrapper
         assert wrapper.name == "datetime_tool"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is True
 
 
 class TestGetCurrentTime:

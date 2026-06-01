@@ -82,7 +82,6 @@ _DEFAULT_SUBAGENT_CONFIG = AgentConfig(
     timeout=120.0,
     total_timeout=600,
     tool_call_limit=50,
-    confirm_dangerous=False,
 )
 
 

@@ -63,7 +63,7 @@ async def test_chatgpt_tool_call():
         llm=llm,
         system_prompt="你是天气助手，使用 get_weather 工具查天气。回答简洁。",
         tools=[get_weather],
-        config=AgentConfig(max_turns=3, confirm_dangerous=False),
+        config=AgentConfig(max_turns=3),
     )
 
     async for event in agent.run("北京今天天气怎么样？"):
@@ -123,7 +123,7 @@ async def test_gemini_tool_call():
         llm=llm,
         system_prompt="你是计算助手，使用 calculate 工具计算数学表达式。回答简洁。",
         tools=[calculate],
-        config=AgentConfig(max_turns=3, confirm_dangerous=False),
+        config=AgentConfig(max_turns=3),
     )
 
     async for event in agent.run("计算 123 * 456 + 789"):
@@ -150,7 +150,7 @@ async def test_chatgpt_multi_turn():
     agent = Agent(
         llm=llm,
         system_prompt="你是一个简洁的助手，回答控制在30字以内。",
-        config=AgentConfig(max_turns=2, confirm_dangerous=False),
+        config=AgentConfig(max_turns=2),
     )
 
     questions = [

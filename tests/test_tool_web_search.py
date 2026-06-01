@@ -67,7 +67,7 @@ class TestWebSearch:
         wrapper = web_search._tool_wrapper
         assert wrapper.name == "web_search"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is True
 
     @pytest.mark.asyncio
     async def test_custom_search_api(self):

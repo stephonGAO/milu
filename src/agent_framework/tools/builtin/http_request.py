@@ -15,7 +15,7 @@ from agent_framework.tools.decorator import tool
 _MAX_RESPONSE_CHARS = 4096
 
 
-@tool(name="http_request", description="发送 HTTP 请求（GET/POST），返回响应状态码和内容", read_only=True)
+@tool(name="http_request", description="发送 HTTP 请求（GET/POST），返回响应状态码和内容")
 async def http_request(
     url: str,
     method: Literal["GET", "POST"] = "GET",

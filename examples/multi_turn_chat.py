@@ -91,12 +91,12 @@ def print_header():
 """)
 
 
-# ── 危险工具确认回调 ────────────────────────────────────
+# ── 不安全工具确认回调 ────────────────────────────────────
 
-async def confirm_dangerous(tool_name: str, args_str: str) -> ConfirmResponse:
-    """危险工具执行前请求用户确认，支持自定义消息"""
+async def confirm_unsafe(tool_name: str, args_str: str) -> ConfirmResponse:
+    """不安全工具执行前请求用户确认，支持自定义消息"""
     short_args = args_str[:100] + "..." if len(args_str) > 100 else args_str
-    print(f"\n  {c('red', '[DANGEROUS]')} {c('bold', tool_name)}({c('dim', short_args)})")
+    print(f"\n  {c('red', '[UNSAFE]')} {c('bold', tool_name)}({c('dim', short_args)})")
     print(f"  {c('dim', '输入 y 同意 / n 拒绝 / 或直接输入指示发给 Agent')}")
     try:
         resp = input(f"  {c('yellow', '> ')}").strip()
@@ -118,7 +118,7 @@ async def confirm_dangerous(tool_name: str, args_str: str) -> ConfirmResponse:
 
 def build_agent() -> Agent:
     """构建带全部内置工具和子代理的 Agent"""
-    llm = ModelRegistry.create("qwen", model="qwen3.7-max", web_search=True, enable_thinking=False)
+    llm = ModelRegistry.create("qwen", model="qwen-plus", web_search=True, enable_thinking=False)
 
     so_tool = create_structured_output_tool()
     todo_write, todo_read = create_todo_write_tool()
@@ -212,9 +212,9 @@ def build_agent() -> Agent:
         prompt_dir=prompts_base / "main",
         tools=all_tools,
         # history=history,
-        # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300, confirm_dangerous=True),
+        # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300),
         config=AgentConfig(),
-        on_confirm=confirm_dangerous,
+        on_confirm=confirm_unsafe,
     )
 
     return agent
@@ -412,8 +412,8 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         for tool_func in _builtin_factory_tools:
             w = tool_func._tool_wrapper
             if w.name in active_tools:
-                danger = c("red", " [D]") if w.dangerous else ""
-                print(f"  {c('yellow', w.name):<30} {w.description[:40]}{danger}")
+                safe = c("green", " [S]") if w.is_safe else ""
+                print(f"  {c('yellow', w.name):<30} {w.description[:40]}{safe}")
 
         # 元工具
         meta_names = {"list_catalog", "search_tools", "activate_tools", "load_skill"}
@@ -487,8 +487,8 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
             AgentMode.SUPERWORK: "red",
         }
         mode_desc = {
-            AgentMode.TALK: "只读模式（不可修改/执行）",
-            AgentMode.AUTO: "标准模式（dangerous 需确认）",
+            AgentMode.TALK: "只读模式（仅允许安全操作）",
+            AgentMode.AUTO: "标准模式（不安全操作需确认）",
             AgentMode.SUPERWORK: "全权限模式（无安全检查）",
         }
         print(f"\n{DIVIDER}")

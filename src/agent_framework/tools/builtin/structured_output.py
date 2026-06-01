@@ -90,7 +90,7 @@ def create_structured_output_tool(fix_llm: Optional[BaseLLM] = None):
         "解析和验证结构化输出。接收原始文本和 JSON Schema，"
         "自动清理 LLM 输出噪声（markdown 包裹、注释、尾部逗号），"
         "对照 schema 验证字段类型和必填项，验证失败时自动修复"
-    ), read_only=True)
+    ))
     async def _tool_func(
         raw: str,
         schema: dict,

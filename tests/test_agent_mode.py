@@ -1,6 +1,7 @@
 """测试 Agent 操作模式（talk / auto / superwork）"""
 import json
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from agent_framework.agent import Agent, AgentConfig
@@ -45,8 +46,8 @@ def _make_mock_llm(tool_name: str, tool_args: str = "{}",
     return llm
 
 
-def _make_read_only_tool():
-    @tool(name="read_data", description="只读数据", read_only=True)
+def _make_safe_tool():
+    @tool(name="read_data", description="安全数据", is_safe=True)
     async def read_data() -> str:
         return "data"
     return read_data
@@ -59,8 +60,8 @@ def _make_write_tool():
     return write_data
 
 
-def _make_dangerous_tool():
-    @tool(name="danger_op", description="危险操作", dangerous=True)
+def _make_unsafe_tool():
+    @tool(name="danger_op", description="危险操作")
     async def danger_op() -> str:
         return "executed"
     return danger_op
@@ -70,7 +71,7 @@ def _make_mixed_tool():
     @tool(
         name="file_op",
         description="混合工具",
-        read_only_actions={"read", "index"},
+        safe_check=lambda args: args.get("action", "") in {"read", "index"},
     )
     async def file_op(action: str = "read") -> str:
         return f"file:{action}"
@@ -102,7 +103,7 @@ class TestSetMode:
     def test_set_mode_string(self):
         llm = _make_mock_llm("read_data")
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool()],
+            llm=llm, tools=[_make_safe_tool()],
             config=AgentConfig(session_enabled=False),
         )
         assert agent.mode == AgentMode.AUTO
@@ -116,7 +117,7 @@ class TestSetMode:
     def test_set_mode_enum(self):
         llm = _make_mock_llm("read_data")
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool()],
+            llm=llm, tools=[_make_safe_tool()],
             config=AgentConfig(session_enabled=False),
         )
 
@@ -126,7 +127,7 @@ class TestSetMode:
     def test_set_mode_invalid(self):
         llm = _make_mock_llm("read_data")
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool()],
+            llm=llm, tools=[_make_safe_tool()],
             config=AgentConfig(session_enabled=False),
         )
 
@@ -140,7 +141,7 @@ class TestSetMode:
 class TestTalkMode:
     @pytest.mark.asyncio
     async def test_talk_blocks_write_tool(self):
-        """talk 模式应阻止非只读工具"""
+        """talk 模式应阻止非安全工具"""
         llm = _make_mock_llm("write_data")
         agent = Agent(
             llm=llm, tools=[_make_write_tool()],
@@ -157,11 +158,11 @@ class TestTalkMode:
         assert "talk 模式" in tool_results[0].output
 
     @pytest.mark.asyncio
-    async def test_talk_allows_read_only_tool(self):
-        """talk 模式应允许只读工具"""
+    async def test_talk_allows_safe_tool(self):
+        """talk 模式应允许安全工具"""
         llm = _make_mock_llm("read_data")
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool()],
+            llm=llm, tools=[_make_safe_tool()],
             config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
         )
 
@@ -178,8 +179,8 @@ class TestTalkMode:
         assert any(isinstance(e, AgentDone) for e in events)
 
     @pytest.mark.asyncio
-    async def test_talk_allows_read_action_on_mixed_tool(self):
-        """talk 模式应允许混合工具的只读 action"""
+    async def test_talk_allows_safe_action_on_mixed_tool(self):
+        """talk 模式应允许混合工具的 safe_check 通过 action"""
         args = json.dumps({"action": "read"})
         llm = _make_mock_llm("file_op", tool_args=args)
         agent = Agent(
@@ -197,7 +198,7 @@ class TestTalkMode:
         assert "file:read" in tool_results[0].output
 
     @pytest.mark.asyncio
-    async def test_talk_blocks_write_action_on_mixed_tool(self):
+    async def test_talk_blocks_unsafe_action_on_mixed_tool(self):
         """talk 模式应阻止混合工具的写 action"""
         args = json.dumps({"action": "write"})
         llm = _make_mock_llm("file_op", tool_args=args)
@@ -216,8 +217,8 @@ class TestTalkMode:
         assert "talk 模式" in tool_results[0].output
 
     @pytest.mark.asyncio
-    async def test_talk_blocks_dangerous_tool(self):
-        """talk 模式应阻止危险工具（即使有 on_confirm）"""
+    async def test_talk_blocks_unsafe_tool(self):
+        """talk 模式应阻止非安全工具（即使有 on_confirm）"""
         llm = _make_mock_llm("danger_op")
         confirm_called = False
 
@@ -227,7 +228,7 @@ class TestTalkMode:
             return True
 
         agent = Agent(
-            llm=llm, tools=[_make_dangerous_tool()],
+            llm=llm, tools=[_make_unsafe_tool()],
             config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
             on_confirm=mock_confirm,
         )
@@ -246,7 +247,7 @@ class TestTalkMode:
 
     @pytest.mark.asyncio
     async def test_talk_partial_block(self):
-        """talk 模式下混合批次：只读工具应执行，写入工具应被阻止"""
+        """talk 模式下混合批次：安全工具应执行，写入工具应被阻止"""
         call_count = 0
 
         async def mock_chat(*args, **kwargs):
@@ -276,7 +277,7 @@ class TestTalkMode:
         llm.chat = mock_chat
 
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool(), _make_write_tool()],
+            llm=llm, tools=[_make_safe_tool(), _make_write_tool()],
             config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
         )
 
@@ -299,8 +300,8 @@ class TestTalkMode:
 
 class TestSuperworkMode:
     @pytest.mark.asyncio
-    async def test_superwork_skips_dangerous_confirm(self):
-        """superwork 模式应跳过危险工具确认"""
+    async def test_superwork_skips_confirm(self):
+        """superwork 模式应跳过非安全工具确认"""
         llm = _make_mock_llm("danger_op")
         confirm_called = False
 
@@ -310,11 +311,10 @@ class TestSuperworkMode:
             return True
 
         agent = Agent(
-            llm=llm, tools=[_make_dangerous_tool()],
+            llm=llm, tools=[_make_unsafe_tool()],
             config=AgentConfig(
                 mode=AgentMode.SUPERWORK,
                 session_enabled=False,
-                confirm_dangerous=True,
             ),
             on_confirm=mock_confirm,
         )
@@ -333,13 +333,13 @@ class TestSuperworkMode:
         assert tool_results[0].output == "executed"
 
 
-# ── Auto 模式（默认行为不变）─────────────────────────────
+# ── Auto 模式 ──────────────────────────────────────────────
 
 
 class TestAutoMode:
     @pytest.mark.asyncio
-    async def test_auto_requires_dangerous_confirm(self):
-        """auto 模式下危险工具应触发确认"""
+    async def test_auto_unsafe_triggers_confirm(self):
+        """auto 模式下非安全工具应触发确认"""
         llm = _make_mock_llm("danger_op")
         confirm_called = False
 
@@ -349,11 +349,10 @@ class TestAutoMode:
             return True
 
         agent = Agent(
-            llm=llm, tools=[_make_dangerous_tool()],
+            llm=llm, tools=[_make_unsafe_tool()],
             config=AgentConfig(
                 mode=AgentMode.AUTO,
                 session_enabled=False,
-                confirm_dangerous=True,
             ),
             on_confirm=mock_confirm,
         )
@@ -394,7 +393,7 @@ class TestAutoMode:
         llm.chat = mock_chat
 
         agent = Agent(
-            llm=llm, tools=[_make_read_only_tool(), _make_write_tool()],
+            llm=llm, tools=[_make_safe_tool(), _make_write_tool()],
             config=AgentConfig(mode=AgentMode.AUTO, session_enabled=False),
         )
 
@@ -499,110 +498,86 @@ class TestSubAgentModeInheritance:
         assert write_tool_called is False
 
 
-# ── _is_read_only_call 辅助方法 ──────────────────────────
+# ── _is_safe_call 辅助方法 ────────────────────────────────
 
 
-class TestIsReadOnlyCall:
-    def test_read_only_true(self):
-        """read_only=True 的工具应判定为只读"""
-        wrapper = type('obj', (), {
-            'read_only': True,
-            'read_only_actions': None,
-            'read_only_check': None,
-        })()
-        assert Agent._is_read_only_call(wrapper, "{}") is True
+class TestIsSafeCall:
+    def test_is_safe_true(self):
+        """is_safe=True 的工具应判定为安全"""
+        wrapper = SimpleNamespace(is_safe=True, safe_check=None)
+        assert Agent._is_safe_call(wrapper, "{}") is True
 
-    def test_read_only_false(self):
-        """read_only=False 且无其他检查应判定为非只读"""
-        wrapper = type('obj', (), {
-            'read_only': False,
-            'read_only_actions': None,
-            'read_only_check': None,
-        })()
-        assert Agent._is_read_only_call(wrapper, "{}") is False
+    def test_not_safe(self):
+        """is_safe=False 且 safe_check=None 应判定为非安全"""
+        wrapper = SimpleNamespace(is_safe=False, safe_check=None)
+        assert Agent._is_safe_call(wrapper, "{}") is False
 
-    def test_read_only_actions_match(self):
-        """read_only_actions 中有对应 action 应判定为只读"""
-        wrapper = type('obj', (), {
-            'read_only': False,
-            'read_only_actions': {"read", "index"},
-            'read_only_check': None,
-        })()
-        args = json.dumps({"action": "read"})
-        assert Agent._is_read_only_call(wrapper, args) is True
-
-    def test_read_only_actions_no_match(self):
-        """read_only_actions 中无对应 action 应判定为非只读"""
-        wrapper = type('obj', (), {
-            'read_only': False,
-            'read_only_actions': {"read", "index"},
-            'read_only_check': None,
-        })()
-        args = json.dumps({"action": "write"})
-        assert Agent._is_read_only_call(wrapper, args) is False
-
-    def test_read_only_actions_invalid_json(self):
-        """无效 JSON 参数应判定为非只读"""
-        wrapper = type('obj', (), {
-            'read_only': False,
-            'read_only_actions': {"read"},
-            'read_only_check': None,
-        })()
-        assert Agent._is_read_only_call(wrapper, "invalid{") is False
-
-    def test_read_only_check_pass(self):
-        """read_only_check 返回 True 应判定为只读"""
-        from types import SimpleNamespace
+    def test_safe_check_pass(self):
+        """safe_check 返回 True 应判定为安全"""
         wrapper = SimpleNamespace(
-            read_only=False,
-            read_only_actions=None,
-            read_only_check=lambda args: args.get("cmd") == "ls",
+            is_safe=False,
+            safe_check=lambda args: args.get("cmd") == "ls",
         )
         args = json.dumps({"cmd": "ls"})
-        assert Agent._is_read_only_call(wrapper, args) is True
+        assert Agent._is_safe_call(wrapper, args) is True
 
-    def test_read_only_check_fail(self):
-        """read_only_check 返回 False 应判定为非只读"""
-        from types import SimpleNamespace
+    def test_safe_check_fail(self):
+        """safe_check 返回 False 应判定为非安全"""
         wrapper = SimpleNamespace(
-            read_only=False,
-            read_only_actions=None,
-            read_only_check=lambda args: args.get("cmd") == "ls",
+            is_safe=False,
+            safe_check=lambda args: args.get("cmd") == "ls",
         )
         args = json.dumps({"cmd": "rm"})
-        assert Agent._is_read_only_call(wrapper, args) is False
+        assert Agent._is_safe_call(wrapper, args) is False
+
+    def test_safe_check_invalid_json(self):
+        """无效 JSON 参数应判定为非安全"""
+        wrapper = SimpleNamespace(
+            is_safe=False,
+            safe_check=lambda args: True,
+        )
+        assert Agent._is_safe_call(wrapper, "invalid{") is False
+
+    def test_safe_check_exception(self):
+        """safe_check 抛出异常应判定为非安全"""
+        def bad_check(args):
+            raise RuntimeError("检查失败")
+
+        wrapper = SimpleNamespace(is_safe=False, safe_check=bad_check)
+        args = json.dumps({"cmd": "ls"})
+        assert Agent._is_safe_call(wrapper, args) is False
 
 
 # ── Shell 白名单 ─────────────────────────────────────────
 
 
-class TestShellReadOnly:
-    """测试 shell_command 的只读白名单检查"""
+class TestShellSafe:
+    """测试 shell_command 的安全白名单检查"""
 
-    def test_whitelist_commands_allowed(self):
-        """白名单中的命令应判定为只读"""
-        from agent_framework.tools.builtin.shell_command import _is_read_only_shell
+    def test_safe_commands_allowed(self):
+        """白名单中的命令应判定为安全"""
+        from agent_framework.tools.builtin.shell_command import _is_safe_shell
 
         allowed = ["ls", "cat file.txt", "grep pattern file", "curl http://example.com",
                    "git status", "git log", "ps aux", "df -h", "du -sh", "pwd",
                    "head -n 10 file", "tail -f log.txt", "wc -l file",
                    "find . -name '*.py'", "sort file", "uniq file"]
         for cmd in allowed:
-            assert _is_read_only_shell({"command": cmd}) is True, f"should allow: {cmd}"
+            assert _is_safe_shell({"command": cmd}) is True, f"should allow: {cmd}"
 
-    def test_non_whitelist_commands_blocked(self):
-        """不在白名单中的命令应判定为非只读"""
-        from agent_framework.tools.builtin.shell_command import _is_read_only_shell
+    def test_non_safe_commands_blocked(self):
+        """不在白名单中的命令应判定为非安全"""
+        from agent_framework.tools.builtin.shell_command import _is_safe_shell
 
         blocked = ["rm file", "cp src dst", "mv old new", "mkdir dir",
                    "chmod 755 file", "chown user file", "pip install pkg",
                    "npm install", "apt install pkg", "python script.py"]
         for cmd in blocked:
-            assert _is_read_only_shell({"command": cmd}) is False, f"should block: {cmd}"
+            assert _is_safe_shell({"command": cmd}) is False, f"should block: {cmd}"
 
     def test_redirect_blocked(self):
-        """包含重定向的命令应判定为非只读"""
-        from agent_framework.tools.builtin.shell_command import _is_read_only_shell
+        """包含重定向的命令应判定为非安全"""
+        from agent_framework.tools.builtin.shell_command import _is_safe_shell
 
         blocked = [
             "echo hello > file.txt",
@@ -610,28 +585,28 @@ class TestShellReadOnly:
             "ls | tee output.txt",
         ]
         for cmd in blocked:
-            assert _is_read_only_shell({"command": cmd}) is False, f"should block: {cmd}"
+            assert _is_safe_shell({"command": cmd}) is False, f"should block: {cmd}"
 
     def test_path_prefix_stripped(self):
         """带路径前缀的命令应正确提取基础命令名"""
-        from agent_framework.tools.builtin.shell_command import _is_read_only_shell
+        from agent_framework.tools.builtin.shell_command import _is_safe_shell
 
-        assert _is_read_only_shell({"command": "/usr/bin/ls -la"}) is True
-        assert _is_read_only_shell({"command": "/bin/cat file"}) is True
-        assert _is_read_only_shell({"command": "/usr/local/bin/git status"}) is True
+        assert _is_safe_shell({"command": "/usr/bin/ls -la"}) is True
+        assert _is_safe_shell({"command": "/bin/cat file"}) is True
+        assert _is_safe_shell({"command": "/usr/local/bin/git status"}) is True
 
     def test_empty_command(self):
-        """空命令应判定为非只读"""
-        from agent_framework.tools.builtin.shell_command import _is_read_only_shell
+        """空命令应判定为非安全"""
+        from agent_framework.tools.builtin.shell_command import _is_safe_shell
 
-        assert _is_read_only_shell({"command": ""}) is False
-        assert _is_read_only_shell({}) is False
+        assert _is_safe_shell({"command": ""}) is False
+        assert _is_safe_shell({}) is False
 
 
 # ── Python REPL ───────────────────────────────────────────
 
 
-class TestPythonReplReadOnly:
+class TestPythonReplSafe:
     """测试 python_repl 在 talk 模式下的行为"""
 
     @pytest.mark.asyncio
@@ -660,7 +635,7 @@ class TestShellCommandTalkMode:
     """测试 shell_command 在 talk 模式下的行为"""
 
     @pytest.mark.asyncio
-    async def test_talk_allows_whitelist_shell(self):
+    async def test_talk_allows_safe_shell(self):
         """talk 模式应允许白名单中的 shell 命令"""
         from agent_framework.tools.builtin.shell_command import shell_command
 
@@ -680,8 +655,8 @@ class TestShellCommandTalkMode:
         assert tool_results[0].is_error is False
 
     @pytest.mark.asyncio
-    async def test_talk_skips_dangerous_confirm_for_whitelist(self):
-        """talk 模式下白名单工具（即使 dangerous=True）不应触发确认"""
+    async def test_talk_skips_confirm_for_safe(self):
+        """talk 模式下安全工具不应触发确认"""
         from agent_framework.tools.builtin.shell_command import shell_command
 
         args = json.dumps({"command": "ls -la workspace/"})
@@ -698,7 +673,6 @@ class TestShellCommandTalkMode:
             config=AgentConfig(
                 mode=AgentMode.TALK,
                 session_enabled=False,
-                confirm_dangerous=True,
             ),
             on_confirm=mock_confirm,
         )
@@ -707,7 +681,7 @@ class TestShellCommandTalkMode:
         async for event in agent.run("查看目录"):
             events.append(event)
 
-        # talk 模式已验证只读，不应再弹确认
+        # talk 模式已验证安全，不应再弹确认
         assert confirm_called is False
 
         tool_results = [e for e in events if isinstance(e, ToolResult)]
@@ -715,7 +689,7 @@ class TestShellCommandTalkMode:
         assert tool_results[0].is_error is False
 
     @pytest.mark.asyncio
-    async def test_talk_blocks_non_whitelist_shell(self):
+    async def test_talk_blocks_non_safe_shell(self):
         """talk 模式应阻止非白名单的 shell 命令"""
         from agent_framework.tools.builtin.shell_command import shell_command
 
@@ -734,4 +708,3 @@ class TestShellCommandTalkMode:
         assert len(tool_results) == 1
         assert tool_results[0].is_error is True
         assert "talk 模式" in tool_results[0].output
-

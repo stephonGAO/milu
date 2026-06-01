@@ -317,29 +317,21 @@ class Agent:
     # -- 内部方法 ------------------------------------------------------------
 
     @staticmethod
-    def _is_read_only_call(wrapper, args_str: str) -> bool:
-        """判断一次工具调用是否为只读操作。
+    def _is_safe_call(wrapper, args_str: str) -> bool:
+        """判断一次工具调用是否为安全操作。
 
         判断逻辑（按优先级）：
-        1. wrapper.read_only == True → 只读
-        2. wrapper.read_only_check 存在 → 调用检查函数
-        3. wrapper.read_only_actions 不为 None → 检查 args 中的 action 字段
-        4. 否则 → 非只读
+        1. wrapper.is_safe == True → 安全
+        2. wrapper.safe_check 存在 → 调用检查函数
+        3. 否则 → 不安全
         """
-        if wrapper.read_only:
+        if wrapper.is_safe:
             return True
-        if wrapper.read_only_check is not None:
+        if wrapper.safe_check is not None:
             try:
                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
-                return bool(wrapper.read_only_check(args))
-            except (json.JSONDecodeError, AttributeError, TypeError):
-                return False
-        if wrapper.read_only_actions is not None:
-            try:
-                args = json.loads(args_str) if isinstance(args_str, str) else args_str
-                action = args.get("action", "")
-                return action in wrapper.read_only_actions
-            except (json.JSONDecodeError, AttributeError):
+                return bool(wrapper.safe_check(args))
+            except Exception:
                 return False
         return False
 
@@ -714,8 +706,8 @@ class Agent:
                         ))
                     continue
 
-            # ── 10a.7 talk 模式只读检查 ──
-            # talk 模式下，阻止所有非只读工具调用
+            # ── 10a.7 talk 模式安全检查 ──
+            # talk 模式下，阻止所有不安全工具调用
             if self._config.mode == AgentMode.TALK:
                 blocked = []
                 allowed = []
@@ -724,7 +716,7 @@ class Agent:
                     tool_name = fn.get("name", "")
                     tool_args = fn.get("arguments", "{}")
                     wrapper = self._registry.get_tool(tool_name)
-                    if wrapper and self._is_read_only_call(wrapper, tool_args):
+                    if wrapper and self._is_safe_call(wrapper, tool_args):
                         allowed.append(call)
                     else:
                         blocked.append(call)
@@ -738,7 +730,7 @@ class Agent:
                         yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
                         error_msg = (
                             f"[talk 模式] 工具 {tn} 不可用：当前为只读模式，"
-                            f"仅允许只读操作。请用只读工具或指令完成需求。"
+                            f"仅允许安全操作。请用安全工具或指令完成需求。"
                         )
                         yield ToolResult(
                             tool_name=tn, tool_call_id=tc_id,
@@ -753,7 +745,7 @@ class Agent:
                     # 部分被阻止，只执行允许的
                     resolved_calls = allowed
 
-            # ── 10b. 顺序发出 ToolCallStart + 危险工具确认 ──
+            # ── 10b. 顺序发出 ToolCallStart + 不安全工具确认 ──
             confirmed = []
             for call in resolved_calls:
                 tool_call_id = call.get("id", "")
@@ -768,11 +760,10 @@ class Agent:
                     arguments=tool_args,
                 )
 
-                # 危险工具确认检查（superwork 和 talk 模式跳过确认，因为talk模式以在上面检查拦截）
+                # 不安全工具确认检查（auto 模式下不安全工具需审批）
                 wrapper = self._registry.get_tool(tool_name)
-                if (self._config.mode not in (AgentMode.SUPERWORK, AgentMode.TALK)
-                        and self._config.confirm_dangerous
-                        and wrapper and wrapper.dangerous
+                if (self._config.mode == AgentMode.AUTO
+                        and not self._is_safe_call(wrapper, tool_args)
                         and self._on_confirm):
                     raw_result = await self._on_confirm(tool_name, tool_args)
 
@@ -797,7 +788,7 @@ class Agent:
                                 f"用户拒绝了工具 {tool_name} 的执行，并给出指示：{user_message}"
                             )
                         else:
-                            reject_msg = f"用户拒绝了危险工具 {tool_name} 的执行"
+                            reject_msg = f"用户拒绝了工具 {tool_name} 的执行"
                         yield ToolResult(
                             tool_name=tool_name,
                             tool_call_id=tool_call_id,

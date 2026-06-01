@@ -38,7 +38,7 @@ class TestMCPServerConfigConstruction:
         assert config.args == []
         assert config.env is None
         assert config.prefix_tools is True
-        assert config.dangerous_tools == []
+        assert config.safe_tools == []
         assert config.tool_filter is None
         assert config.connect_timeout == 30.0
 
@@ -46,12 +46,12 @@ class TestMCPServerConfigConstruction:
         config = MCPServerConfig.stdio(
             name="db", command="python",
             prefix_tools=False,
-            dangerous_tools=["delete_all"],
+            safe_tools=["query", "read"],
             tool_filter=["query", "read"],
             connect_timeout=60.0,
         )
         assert config.prefix_tools is False
-        assert config.dangerous_tools == ["delete_all"]
+        assert config.safe_tools == ["query", "read"]
         assert config.tool_filter == ["query", "read"]
         assert config.connect_timeout == 60.0
 

@@ -1,4 +1,4 @@
-"""测试危险工具确认机制"""
+"""测试非安全工具确认机制（AUTO 模式）"""
 import pytest
 from unittest.mock import AsyncMock
 from agent_framework.agent import Agent, AgentConfig
@@ -16,18 +16,18 @@ from agent_framework.tools import tool
 
 
 @pytest.fixture
-def dangerous_tool():
-    """标记为 dangerous=True 的工具"""
-    @tool(name="dangerous_op", description="危险操作", dangerous=True)
-    async def dangerous_op(cmd: str) -> str:
+def unsafe_tool():
+    """默认非安全工具（is_safe=False）"""
+    @tool(name="unsafe_op", description="非安全操作")
+    async def unsafe_op(cmd: str) -> str:
         return f"executed: {cmd}"
-    return dangerous_op
+    return unsafe_op
 
 
 @pytest.fixture
 def safe_tool():
-    """普通安全工具"""
-    @tool(name="safe_op", description="安全操作")
+    """安全工具（is_safe=True）"""
+    @tool(name="safe_op", description="安全操作", is_safe=True)
     async def safe_op(msg: str) -> str:
         return f"safe: {msg}"
     return safe_op
@@ -68,8 +68,8 @@ def _make_llm_with_tool_call(tool_name: str, args: dict | None = None):
 
 
 @pytest.mark.asyncio
-async def test_dangerous_tool_triggers_confirm(dangerous_tool):
-    """confirm_dangerous=True 时，危险工具应触发确认回调"""
+async def test_unsafe_tool_triggers_confirm(unsafe_tool):
+    """AUTO 模式 + 非安全工具 + on_confirm 回调 → 触发确认"""
     confirm_called = False
 
     async def on_confirm(tool_name, args_str):
@@ -77,17 +77,16 @@ async def test_dangerous_tool_triggers_confirm(dangerous_tool):
         confirm_called = True
         return True
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm -rf /"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm -rf /"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
     events = []
-    async for event in agent.run("执行危险操作"):
+    async for event in agent.run("执行非安全操作"):
         events.append(event)
 
     assert confirm_called, "确认回调应被调用"
@@ -95,17 +94,16 @@ async def test_dangerous_tool_triggers_confirm(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_approved_executes(dangerous_tool):
+async def test_confirm_approved_executes(unsafe_tool):
     """回调返回 True 时工具应正常执行"""
     async def on_confirm(tool_name, args_str):
         return True
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "ls"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -124,13 +122,13 @@ async def test_confirm_approved_executes(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_rejected_skips_execution(dangerous_tool):
+async def test_confirm_rejected_skips_execution(unsafe_tool):
     """回调返回 False 时工具不应执行，返回拒绝信息"""
     tool_executed = False
 
-    # 重新定义一个会记录是否被调用的危险工具
-    @tool(name="dangerous_op", description="危险操作", dangerous=True)
-    async def tracked_dangerous_op(cmd: str) -> str:
+    # 重新定义一个会记录是否被调用的非安全工具
+    @tool(name="unsafe_op", description="非安全操作")
+    async def tracked_unsafe_op(cmd: str) -> str:
         nonlocal tool_executed
         tool_executed = True
         return f"executed: {cmd}"
@@ -138,17 +136,16 @@ async def test_confirm_rejected_skips_execution(dangerous_tool):
     async def on_confirm(tool_name, args_str):
         return False  # 用户拒绝
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm -rf /"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm -rf /"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[tracked_dangerous_op],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[tracked_unsafe_op],
         on_confirm=on_confirm,
     )
 
     events = []
-    async for event in agent.run("执行危险操作"):
+    async for event in agent.run("执行非安全操作"):
         events.append(event)
 
     assert not tool_executed, "工具函数不应被执行"
@@ -164,8 +161,8 @@ async def test_confirm_rejected_skips_execution(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_non_dangerous_tool_no_confirm(safe_tool):
-    """非危险工具不应触发确认回调"""
+async def test_safe_tool_no_confirm(safe_tool):
+    """安全工具（is_safe=True）不应触发确认回调"""
     confirm_called = False
 
     async def on_confirm(tool_name, args_str):
@@ -178,7 +175,6 @@ async def test_non_dangerous_tool_no_confirm(safe_tool):
         llm=llm,
         system_prompt="你是助手",
         tools=[safe_tool],
-        config=AgentConfig(confirm_dangerous=True),
         on_confirm=on_confirm,
     )
 
@@ -186,7 +182,7 @@ async def test_non_dangerous_tool_no_confirm(safe_tool):
     async for event in agent.run("执行安全操作"):
         events.append(event)
 
-    assert not confirm_called, "非危险工具不应触发确认回调"
+    assert not confirm_called, "安全工具不应触发确认回调"
     assert not any(isinstance(e, ToolConfirmRequired) for e in events)
 
     results = [e for e in events if isinstance(e, ToolResult)]
@@ -195,45 +191,13 @@ async def test_non_dangerous_tool_no_confirm(safe_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_disabled_no_confirm(dangerous_tool):
-    """confirm_dangerous=False 时即使有回调也不触发"""
-    confirm_called = False
-
-    async def on_confirm(tool_name, args_str):
-        nonlocal confirm_called
-        confirm_called = True
-        return True
-
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+async def test_no_callback_executes_directly(unsafe_tool):
+    """on_confirm=None 时非安全工具也直接执行"""
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "ls"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=False),  # 关闭
-        on_confirm=on_confirm,
-    )
-
-    events = []
-    async for event in agent.run("执行"):
-        events.append(event)
-
-    assert not confirm_called, "confirm_dangerous=False 时不应触发回调"
-    assert not any(isinstance(e, ToolConfirmRequired) for e in events)
-
-    results = [e for e in events if isinstance(e, ToolResult)]
-    assert len(results) == 1
-    assert results[0].is_error is False  # 正常执行
-
-
-@pytest.mark.asyncio
-async def test_no_callback_executes_directly(dangerous_tool):
-    """on_confirm=None 时即使 confirm_dangerous=True 也直接执行"""
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
-    agent = Agent(
-        llm=llm,
-        system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=None,  # 没有回调
     )
 
@@ -250,17 +214,16 @@ async def test_no_callback_executes_directly(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_rejected_yields_correct_event(dangerous_tool):
+async def test_confirm_rejected_yields_correct_event(unsafe_tool):
     """拒绝时应 yield ToolConfirmRequired(approved=False)"""
     async def on_confirm(tool_name, args_str):
         return False
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm -rf /"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm -rf /"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -271,23 +234,22 @@ async def test_confirm_rejected_yields_correct_event(dangerous_tool):
     confirm_events = [e for e in events if isinstance(e, ToolConfirmRequired)]
     assert len(confirm_events) == 1
     ce = confirm_events[0]
-    assert ce.tool_name == "dangerous_op"
+    assert ce.tool_name == "unsafe_op"
     assert ce.approved is False
     assert "rm -rf" in ce.arguments
 
 
 @pytest.mark.asyncio
-async def test_confirm_rejected_history_updated(dangerous_tool):
+async def test_confirm_rejected_history_updated(unsafe_tool):
     """拒绝后应将拒绝信息写入对话历史，供 LLM 下一轮看到"""
     async def on_confirm(tool_name, args_str):
         return False
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -305,19 +267,18 @@ async def test_confirm_rejected_history_updated(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_response_approved(dangerous_tool):
+async def test_confirm_response_approved(unsafe_tool):
     """返回 ConfirmResponse(approved=True) 时工具正常执行"""
     from agent_framework.agent.events import ConfirmResponse
 
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=True)
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "ls"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -333,7 +294,7 @@ async def test_confirm_response_approved(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_response_rejected_with_message(dangerous_tool):
+async def test_confirm_response_rejected_with_message(unsafe_tool):
     """返回 ConfirmResponse(approved=False, message="...") 时自定义消息发回 LLM"""
     from agent_framework.agent.events import ConfirmResponse
 
@@ -342,12 +303,11 @@ async def test_confirm_response_rejected_with_message(dangerous_tool):
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=False, message=custom_msg)
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm -rf /"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm -rf /"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -370,7 +330,7 @@ async def test_confirm_response_rejected_with_message(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_response_custom_message_in_history(dangerous_tool):
+async def test_confirm_response_custom_message_in_history(unsafe_tool):
     """自定义消息应写入对话历史，供 LLM 下一轮看到"""
     from agent_framework.agent.events import ConfirmResponse
 
@@ -379,12 +339,11 @@ async def test_confirm_response_custom_message_in_history(dangerous_tool):
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=False, message=custom_msg)
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -399,19 +358,18 @@ async def test_confirm_response_custom_message_in_history(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_confirm_response_rejected_no_message(dangerous_tool):
+async def test_confirm_response_rejected_no_message(unsafe_tool):
     """ConfirmResponse(approved=False) 无消息时使用默认拒绝文案"""
     from agent_framework.agent.events import ConfirmResponse
 
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=False)
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -425,17 +383,16 @@ async def test_confirm_response_rejected_no_message(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_backward_compat_bool_true(dangerous_tool):
+async def test_backward_compat_bool_true(unsafe_tool):
     """向后兼容：回调返回 True 仍然正常工作"""
     async def on_confirm(tool_name, args_str):
         return True  # 旧式 bool 返回
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "ls"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "ls"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -449,17 +406,16 @@ async def test_backward_compat_bool_true(dangerous_tool):
 
 
 @pytest.mark.asyncio
-async def test_backward_compat_bool_false(dangerous_tool):
+async def test_backward_compat_bool_false(unsafe_tool):
     """向后兼容：回调返回 False 仍然使用默认拒绝文案"""
     async def on_confirm(tool_name, args_str):
         return False  # 旧式 bool 返回
 
-    llm = _make_llm_with_tool_call("dangerous_op", {"cmd": "rm"})
+    llm = _make_llm_with_tool_call("unsafe_op", {"cmd": "rm"})
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dangerous_tool],
-        config=AgentConfig(confirm_dangerous=True),
+        tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
 
@@ -470,4 +426,3 @@ async def test_backward_compat_bool_false(dangerous_tool):
     results = [e for e in events if isinstance(e, ToolResult)]
     assert results[0].is_error is True
     assert "拒绝" in results[0].output
-

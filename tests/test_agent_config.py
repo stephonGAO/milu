@@ -11,7 +11,6 @@ def test_default_config():
     assert config.total_timeout == 3600.0
     assert config.max_total_tokens is None
     assert config.tool_call_limit == 100
-    assert config.confirm_dangerous is True
     assert config.mcp_tools_active_by_default is False
 
 
@@ -23,14 +22,12 @@ def test_custom_config():
         total_timeout=180.0,
         max_total_tokens=10000,
         tool_call_limit=10,
-        confirm_dangerous=False,
     )
     assert config.max_turns == 5
     assert config.timeout == 60.0
     assert config.total_timeout == 180.0
     assert config.max_total_tokens == 10000
     assert config.tool_call_limit == 10
-    assert config.confirm_dangerous is False
 
 
 def test_compact_config_defaults():

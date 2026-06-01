@@ -7,8 +7,8 @@ from enum import Enum
 
 class AgentMode(str, Enum):
     """Agent 操作模式"""
-    TALK = "talk"             # 只读模式：仅允许只读工具，不可修改/执行
-    AUTO = "auto"             # 标准模式：可读可操作，dangerous 工具需确认
+    TALK = "talk"             # 只读模式：仅允许安全工具，不可修改/执行
+    AUTO = "auto"             # 标准模式：安全工具直接执行，不安全工具需审批
     SUPERWORK = "superwork"   # 全权限模式：跳过所有安全检查
 
 
@@ -29,7 +29,6 @@ class AgentConfig:
     total_timeout: float = 60 * 60 * 1   # 整个 run() 的总超时（秒）
     max_total_tokens: int | None = None   # 总 token 上限（None=不限制）
     tool_call_limit: int = 100      # 单次 run() 中最大工具调用次数
-    confirm_dangerous: bool = True  # 危险工具调用前需确认（预留接口）
     mcp_tools_active_by_default: bool = False  # MCP 工具默认激活（False=进入休眠池，需手动激活）
     mode: AgentMode = AgentMode.AUTO           # 操作模式：talk（只读）/ auto（标准）/ superwork（全权限）
 

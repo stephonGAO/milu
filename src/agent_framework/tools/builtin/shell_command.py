@@ -1,8 +1,8 @@
 """内置工具：Shell 命令执行
 
-执行系统 Shell 命令并返回输出。标记为 dangerous=True。
+执行系统 Shell 命令并返回输出。
 内置危险命令黑名单，拦截高风险操作。
-内置只读命令白名单，talk 模式下允许白名单中的命令。
+内置安全命令白名单，talk 模式下允许白名单中的命令。
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from agent_framework.tools.decorator import tool
 # 输出最大字符数
 _MAX_OUTPUT_CHARS = 8192
 
-# 只读命令白名单（取命令的第一个词，即基础命令名）
-_READ_ONLY_COMMANDS = {
+# 安全命令白名单（取命令的第一个词，即基础命令名）
+_SAFE_COMMANDS = {
     # 文件查看
     "ls", "ll", "dir", "cat", "head", "tail", "less", "more",
     "wc", "file", "stat", "du", "df", "tree", "nl",
@@ -41,8 +41,8 @@ _READ_ONLY_COMMANDS = {
 _WRITE_INDICATORS = re.compile(r">\s*\S|>>\s*\S|\|\s*tee\b|\|\s*sudo\b")
 
 
-def _is_read_only_shell(args: dict) -> bool:
-    """检查 shell 命令是否为只读操作（talk 模式白名单检查）。
+def _is_safe_shell(args: dict) -> bool:
+    """检查 shell 命令是否为安全操作（talk 模式白名单检查）。
 
     检查逻辑：
     1. 提取基础命令名（第一个词）
@@ -74,7 +74,7 @@ def _is_read_only_shell(args: dict) -> bool:
     if "\\" in base_cmd:
         base_cmd = base_cmd.rsplit("\\", 1)[-1]
 
-    return base_cmd in _READ_ONLY_COMMANDS
+    return base_cmd in _SAFE_COMMANDS
 
 # 危险命令黑名单（正则匹配，忽略大小写）
 _DANGEROUS_PATTERNS = [
@@ -105,8 +105,8 @@ def _is_dangerous_command(command: str) -> str | None:
 @tool(
     name="shell_command",
     description="执行 Shell 命令并返回 stdout/stderr 输出",
-    dangerous=True,
-    read_only_check=_is_read_only_shell,
+    is_safe=False,
+    safe_check=_is_safe_shell,
 )
 async def shell_command(command: str, timeout: int = 30) -> str:
     """

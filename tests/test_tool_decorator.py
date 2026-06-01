@@ -96,10 +96,33 @@ def test_sync_function():
     assert wrapper.is_async is False
 
 
-def test_dangerous_flag():
-    @tool(name="dangerous_tool", description="危险操作", dangerous=True)
-    async def dangerous_tool(path: str) -> str:
-        return "deleted"
+def test_is_safe_flag():
+    @tool(name="safe_tool", description="安全操作", is_safe=True)
+    async def safe_tool(path: str) -> str:
+        return "ok"
 
-    wrapper: ToolWrapper = dangerous_tool._tool_wrapper
-    assert wrapper.dangerous is True
+    wrapper: ToolWrapper = safe_tool._tool_wrapper
+    assert wrapper.is_safe is True
+
+
+def test_default_not_safe():
+    @tool(name="default_tool", description="默认不安全")
+    async def default_tool(path: str) -> str:
+        return "ok"
+
+    wrapper: ToolWrapper = default_tool._tool_wrapper
+    assert wrapper.is_safe is False
+
+
+def test_safe_check():
+    def check(args: dict) -> bool:
+        return args.get("action") == "read"
+
+    @tool(name="check_tool", description="带安全检查", safe_check=check)
+    async def check_tool(action: str) -> str:
+        return action
+
+    wrapper: ToolWrapper = check_tool._tool_wrapper
+    assert wrapper.safe_check is check
+    assert wrapper.safe_check({"action": "read"}) is True
+    assert wrapper.safe_check({"action": "delete"}) is False

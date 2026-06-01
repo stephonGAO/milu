@@ -14,7 +14,7 @@ def _make_mock_tool(name: str) -> ToolWrapper:
     return ToolWrapper(
         name=name, description=f"Tool {name}",
         parameters_schema={"type": "object", "properties": {}},
-        func=_noop, is_async=True, dangerous=False,
+        func=_noop, is_async=True,
     )
 
 

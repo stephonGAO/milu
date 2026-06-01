@@ -58,4 +58,4 @@ class TestPythonRepl:
         wrapper = python_repl._tool_wrapper
         assert wrapper.name == "python_repl"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is True

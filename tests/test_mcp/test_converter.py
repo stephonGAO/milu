@@ -20,7 +20,7 @@ class TestConvertMcpTool:
         assert wrapper.name == "fs__read_file"
         assert wrapper.description == "Read file contents"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is False
         assert wrapper.parameters_schema == mock_mcp_tool.inputSchema
 
     @pytest.mark.asyncio
@@ -34,14 +34,14 @@ class TestConvertMcpTool:
         assert wrapper.name == "read_file"
 
     @pytest.mark.asyncio
-    async def test_dangerous_flag(self, mock_mcp_tool, mock_session):
+    async def test_safe_flag(self, mock_mcp_tool, mock_session):
         wrapper = convert_mcp_tool(
             mcp_tool=mock_mcp_tool,
             session=mock_session,
             server_name="fs",
-            is_dangerous=True,
+            is_safe=True,
         )
-        assert wrapper.dangerous is True
+        assert wrapper.is_safe is True
 
     @pytest.mark.asyncio
     async def test_call_delegates_to_session(self, mock_mcp_tool, mock_session, mock_mcp_result):

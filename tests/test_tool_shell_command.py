@@ -71,7 +71,7 @@ class TestShellCommand:
         wrapper = shell_command._tool_wrapper
         assert wrapper.name == "shell_command"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is True  # 关键：标记为危险
+        assert wrapper.is_safe is False  # shell_command 默认不安全
 
 
 class TestDangerousCommandBlocklist:

@@ -121,7 +121,6 @@ class SkillRegistry:
             parameters_schema=_LOAD_SKILL_SCHEMA,
             func=self.load_skill,
             is_async=False,
-            dangerous=False,
             meta=True,
         )
 

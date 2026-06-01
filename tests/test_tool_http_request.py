@@ -125,4 +125,4 @@ class TestHttpRequest:
         wrapper = http_request._tool_wrapper
         assert wrapper.name == "http_request"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is True

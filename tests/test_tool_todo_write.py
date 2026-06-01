@@ -388,7 +388,7 @@ class TestTodoWriteTool:
         wrapper = todo_write._tool_wrapper
         assert wrapper.name == "todo_write"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is False
 
     @pytest.mark.asyncio
     async def test_read_tool_metadata(self):
@@ -397,6 +397,7 @@ class TestTodoWriteTool:
         wrapper = todo_read._tool_wrapper
         assert wrapper.name == "todo_read"
         assert wrapper.is_async is True
+        assert wrapper.is_safe is True
 
     @pytest.mark.asyncio
     async def test_write_invocation(self):

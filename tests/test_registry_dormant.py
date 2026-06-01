@@ -13,7 +13,6 @@ def _make_wrapper(name: str, description: str = "") -> ToolWrapper:
         parameters_schema={"type": "object", "properties": {}},
         func=_noop,
         is_async=True,
-        dangerous=False,
     )
 
 

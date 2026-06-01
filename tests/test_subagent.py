@@ -248,7 +248,6 @@ class TestSubagentExecution:
             max_turns=5,
             timeout=0.1,  # 100ms 超时
             total_timeout=0.5,
-            confirm_dangerous=False,
         )
         tools = create_subagent_tools(llm, [
             SubAgentConfig(

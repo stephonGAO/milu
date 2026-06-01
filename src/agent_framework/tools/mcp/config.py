@@ -37,8 +37,7 @@ class MCPServerConfig:
 
     # 选项
     prefix_tools: bool = True
-    dangerous_tools: list[str] = field(default_factory=list)
-    read_only_tools: list[str] = field(default_factory=list)
+    safe_tools: list[str] = field(default_factory=list)
     tool_filter: list[str] | None = None
     connect_timeout: float = 30.0
 
@@ -114,8 +113,7 @@ class MCPServerConfig:
             url=data.get("url"),
             headers=data.get("headers"),
             prefix_tools=data.get("prefix_tools", True),
-            dangerous_tools=data.get("dangerous_tools", []),
-            read_only_tools=data.get("read_only_tools", []),
+            safe_tools=data.get("safe_tools", []),
             tool_filter=data.get("tool_filter"),
             connect_timeout=float(data.get("timeout", 30.0)),
         )

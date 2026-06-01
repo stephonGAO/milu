@@ -78,17 +78,17 @@ class TestMCPServerConnection:
         assert tools[0].name == "read_file"
 
     @pytest.mark.asyncio
-    async def test_discover_tools_dangerous(self, mock_mcp_tool, mock_session):
-        """dangerous_tools 标记"""
+    async def test_discover_tools_safe(self, mock_mcp_tool, mock_session):
+        """safe_tools 标记"""
         config = MCPServerConfig.stdio(
             name="fs", command="echo",
-            dangerous_tools=["read_file"],
+            safe_tools=["read_file"],
         )
         conn = MCPServerConnection(config)
         conn._session = mock_session
 
         tools = await conn.discover_tools()
-        assert tools[0].dangerous is True
+        assert tools[0].is_safe is True
 
     @pytest.mark.asyncio
     async def test_discover_without_connect_raises(self):

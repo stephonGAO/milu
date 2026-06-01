@@ -61,7 +61,7 @@ def get_current_time(fmt: str | None = None) -> dict:
     return result
 
 
-@tool(name="datetime_tool", description="日期时间工具：获取当前时间、解析日期字符串、时间戳转换", read_only=True)
+@tool(name="datetime_tool", description="日期时间工具：获取当前时间、解析日期字符串、时间戳转换")
 async def datetime_tool(
     operation: Literal["now", "parse", "timestamp"],
     value: Optional[str] = None,

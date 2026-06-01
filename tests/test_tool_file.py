@@ -527,7 +527,7 @@ class TestFileToolMeta:
         wrapper = file._tool_wrapper
         assert wrapper.name == "file"
         assert wrapper.is_async is True
-        assert wrapper.dangerous is False
+        assert wrapper.is_safe is False  # file 工具不总是安全
 
     @pytest.mark.asyncio
     async def test_invalid_action(self):
