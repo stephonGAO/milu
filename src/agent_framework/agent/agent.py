@@ -552,8 +552,30 @@ class Agent:
                 )
                 return
             except Exception as e:
-                # 检测上下文过长错误，尝试应急压缩后重试
                 error_str = str(e).lower()
+
+                # ── 流式连接中断重试（网络抖动、服务端断连）──
+                _CONNECTION_ERROR_KEYWORDS = [
+                    "incomplete chunked", "peer closed", "connection reset",
+                    "broken pipe", "remote end closed", "connection aborted",
+                ]
+                is_conn_error = any(kw in error_str for kw in _CONNECTION_ERROR_KEYWORDS)
+                if is_conn_error:
+                    _retry_count = getattr(self, '_conn_retry_count', 0) + 1
+                    self._conn_retry_count = _retry_count
+                    if _retry_count <= 3:
+                        delay = min(2 ** _retry_count, 16)
+                        logger.warning(
+                            "流式连接中断（第 %d 次），%ds 后重试: %s",
+                            _retry_count, delay, e,
+                        )
+                        await asyncio.sleep(delay)
+                        continue  # 重试本轮 LLM 调用
+                    # 超过重试上限，放弃
+                    logger.error("流式连接中断超过重试上限: %s", e)
+                    del self._conn_retry_count
+
+                # ── 上下文过长 → 应急压缩后重试 ──
                 context_too_long_keywords = [
                     "context_length", "too_long", "token", "maximum",
                     "max_tokens", "reduce", "truncat",
@@ -576,6 +598,10 @@ class Agent:
                     # 压缩无效果，无法恢复，直接抛出
                     raise
                 raise
+
+            # 流式调用成功，重置连接重试计数器
+            if hasattr(self, '_conn_retry_count'):
+                del self._conn_retry_count
 
             # 7. 记录 assistant 消息到历史
             assistant_content = "".join(turn_text_parts) if turn_text_parts else None
