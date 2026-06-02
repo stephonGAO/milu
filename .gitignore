@@ -29,3 +29,6 @@ build/
 .sessions/
 .compact_outputs/
 .plan.json
+
+# Loadtest artifacts
+workspace/
