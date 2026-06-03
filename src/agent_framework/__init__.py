@@ -51,7 +51,14 @@ from agent_framework.skills.registry import SkillRegistry
 from agent_framework.prompts.builder import PromptBuilder
 from agent_framework.tools.mcp.config import MCPServerConfig
 from agent_framework.tools.decorator import tool, ToolWrapper
-from agent_framework.serving import AgentPool, AgentPoolConfig, PooledAgent
+from agent_framework.serving import (
+    AgentPool,
+    AgentPoolConfig,
+    PooledAgent,
+    AgentPoolError,
+    PoolBusyError,
+    PoolExhaustedError,
+)
 
 __all__ = [
     # Env
@@ -126,4 +133,7 @@ __all__ = [
     "AgentPool",
     "AgentPoolConfig",
     "PooledAgent",
+    "AgentPoolError",
+    "PoolBusyError",
+    "PoolExhaustedError",
 ]

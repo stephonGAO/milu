@@ -12,6 +12,20 @@
         async for evt in agent.run(user_input):
             yield evt
 """
-from .pool import AgentPool, AgentPoolConfig, PooledAgent
+from .pool import (
+    AgentPool,
+    AgentPoolConfig,
+    PooledAgent,
+    AgentPoolError,
+    PoolBusyError,
+    PoolExhaustedError,
+)
 
-__all__ = ["AgentPool", "AgentPoolConfig", "PooledAgent"]
+__all__ = [
+    "AgentPool",
+    "AgentPoolConfig",
+    "PooledAgent",
+    "AgentPoolError",
+    "PoolBusyError",
+    "PoolExhaustedError",
+]

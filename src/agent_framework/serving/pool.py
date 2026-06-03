@@ -102,7 +102,7 @@ import asyncio
 import logging
 import re
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Optional
@@ -112,6 +112,27 @@ from agent_framework.agent.config import AgentConfig
 from agent_framework.llm.providers.base import BaseLLM
 
 logger = logging.getLogger(__name__)
+
+
+# ── 异常（背压 / 拒绝策略）──────────────────────────────────
+
+
+class AgentPoolError(Exception):
+    """AgentPool 相关错误基类。"""
+
+
+class PoolBusyError(AgentPoolError):
+    """获取并发名额超时——全局并发已满（达到 max_concurrent_runs）。
+
+    上层服务建议据此返回 503/429，让客户端稍后重试，而不是无限静默等待。
+    """
+
+
+class PoolExhaustedError(AgentPoolError):
+    """池已满（达到 max_agents）且所有实例都在使用中，无法创建新实例。
+
+    上层服务建议据此返回 503。出现说明容量不足，应扩容或调大 max_agents。
+    """
 
 
 # ── 配置 ──────────────────────────────────────────────────
@@ -125,11 +146,14 @@ class AgentPoolConfig:
     :param idle_ttl_seconds: Agent 空闲 TTL（秒）。超时未用自动关闭。
     :param max_concurrent_runs: 全局并发 run() 上限。超出时 acquire() 阻塞。
     :param sweep_interval_seconds: 后台清理任务巡检间隔。
+    :param acquire_timeout: 等待并发名额的最长秒数。None=无限等待（默认，向后兼容）；
+        设为正数时，超时未拿到名额则抛 PoolBusyError（背压，避免静默卡死）。
     """
     max_agents: int = 200
     idle_ttl_seconds: float = 300.0
     max_concurrent_runs: int = 50
     sweep_interval_seconds: float = 60.0
+    acquire_timeout: float | None = None
 
 
 # ── LLM 工厂类型 ──
@@ -247,6 +271,9 @@ class AgentPool:
         # - evicted_lru:      累计 LRU 淘汰次数（池满 len(_entries) >= max_agents 时触发）
         # - evicted_idle:     累计空闲 TTL 清理次数（后台 sweep 任务每 60s 巡检一次）
         # - concurrent_waits: 累计进入 semaphore 的请求数（每个 acquire() 调用 +1）
+        # - rejected_busy:    累计因并发名额超时被拒（PoolBusyError）
+        # - rejected_full:    累计因池满且全忙被拒（PoolExhaustedError）
+        # - completed_runs:   累计完成的 run（acquire→release）次数
         #
         # 关键派生指标：hit_rate = reused / (reused + created)
         #   命中率越高越好，反映"per-user Agent 复用"的有效性
@@ -256,7 +283,16 @@ class AgentPool:
             "evicted_idle": 0,
             "reused": 0,
             "concurrent_waits": 0,
+            "rejected_busy": 0,
+            "rejected_full": 0,
+            "completed_runs": 0,
         }
+
+        # 实时量（瞬时值，非累计）
+        self._in_flight = 0    # 当前持有/占用名额、正在 run 的数量（含等待人工确认）
+        self._waiting = 0      # 当前正阻塞等待并发名额的数量
+        # 最近 run 时延样本（秒），用于估算 p50/p95
+        self._run_durations: "deque[float]" = deque(maxlen=1000)
 
     # ── 公开 API ──────────────────────────────────────────
 
@@ -280,16 +316,40 @@ class AgentPool:
         await self._close_all()
         logger.info("AgentPool 已停止")
 
+    @staticmethod
+    def _percentile(values: list[float], pct: float) -> float:
+        """最近样本的近似百分位（毫秒）。values 为秒，返回毫秒。"""
+        if not values:
+            return 0.0
+        s = sorted(values)
+        k = int(round((pct / 100.0) * (len(s) - 1)))
+        k = max(0, min(len(s) - 1, k))
+        return round(s[k] * 1000, 2)
+
     def get_stats(self) -> dict[str, Any]:
         """获取池统计信息（监控用）。"""
         total = self._stats["reused"] + self._stats["created"]
         hit_rate = self._stats["reused"] / total if total > 0 else 0.0
+        durations = list(self._run_durations)
+        mcp_connected = sum(
+            1 for e in self._entries.values()
+            if getattr(e.agent, "_mcp_manager", None) is not None
+        )
         return {
             **self._stats,
             "active_entries": len(self._entries),
             "max_agents": self._pool_config.max_agents,
             "max_concurrent_runs": self._pool_config.max_concurrent_runs,
             "hit_rate": round(hit_rate, 4),
+            # 实时负载
+            "in_flight": self._in_flight,            # 正在 run 的数量
+            "waiting": self._waiting,                # 正等待并发名额的数量
+            "available_slots": max(0, self._pool_config.max_concurrent_runs - self._in_flight),
+            "mcp_connected_agents": mcp_connected,   # 已连 MCP 的 Agent 数（内存大头）
+            # run 时延（最近样本）
+            "run_p50_ms": self._percentile(durations, 50),
+            "run_p95_ms": self._percentile(durations, 95),
+            "runs_sampled": len(durations),
         }
 
     @asynccontextmanager
@@ -327,21 +387,48 @@ class AgentPool:
         try:
             # 3. 同会话串行锁：放在 Semaphore 之前，排队请求不占全局并发名额
             async with entry.lock:
-                # 4. 全局并发限流
-                await self._semaphore.acquire()
-                self._stats["concurrent_waits"] += 1
+                # 4. 全局并发限流（可选超时 → PoolBusyError 背压）
+                await self._acquire_slot()
                 # 注入「确认等待守卫」：仅在持有 semaphore 期间生效，
                 # 使 Agent 在等待人工确认时临时释放并发许可（确认期间不占名额）。
                 entry.agent.set_confirm_wait_guard(self._release_slot_during_wait)
+                self._in_flight += 1
+                started = time.monotonic()
                 try:
                     entry.last_used = time.monotonic()
                     yield handle
                 finally:
+                    self._in_flight -= 1
+                    self._run_durations.append(time.monotonic() - started)
+                    self._stats["completed_runs"] += 1
                     entry.agent.set_confirm_wait_guard(None)
                     self._semaphore.release()
         finally:
             # 释放：active_count -1、刷新 last_used、更新 LRU 顺序
             await self._release(handle)
+
+    async def _acquire_slot(self) -> None:
+        """获取一个全局并发名额（带可选超时背压 + 等待量指标）。
+
+        acquire_timeout 为 None 时无限等待（向后兼容）；为正数时超时抛 PoolBusyError。
+        """
+        self._stats["concurrent_waits"] += 1
+        self._waiting += 1
+        try:
+            timeout = self._pool_config.acquire_timeout
+            if timeout is None:
+                await self._semaphore.acquire()
+            else:
+                try:
+                    await asyncio.wait_for(self._semaphore.acquire(), timeout)
+                except asyncio.TimeoutError:
+                    self._stats["rejected_busy"] += 1
+                    raise PoolBusyError(
+                        f"获取并发名额超时（>{timeout}s），全局并发已满"
+                        f"（max_concurrent_runs={self._pool_config.max_concurrent_runs}）"
+                    ) from None
+        finally:
+            self._waiting -= 1
 
     @asynccontextmanager
     async def _release_slot_during_wait(self) -> AsyncIterator[None]:
@@ -429,9 +516,15 @@ class AgentPool:
             if entry is not None:
                 return entry
 
-            # 3. 池满 → LRU 淘汰
+            # 3. 池满 → LRU 淘汰；若无可淘汰（全部在用）则明确拒绝，避免超额创建
             if len(self._entries) >= self._pool_config.max_agents:
-                await self._evict_lru()
+                evicted = await self._evict_lru()
+                if not evicted and len(self._entries) >= self._pool_config.max_agents:
+                    self._stats["rejected_full"] += 1
+                    raise PoolExhaustedError(
+                        f"池已满（{len(self._entries)}/{self._pool_config.max_agents}）"
+                        f"且所有实例都在使用中，无法创建新实例"
+                    )
 
             # 4. 创建
             llm = self._llm_factory(user_id, session_id)
@@ -455,18 +548,22 @@ class AgentPool:
         """刷新 LRU 顺序：移到末尾（最近使用）。"""
         self._entries.move_to_end(key)
 
-    async def _evict_lru(self) -> None:
-        """淘汰最久未用且当前未被占用的 Agent。"""
+    async def _evict_lru(self) -> bool:
+        """淘汰最久未用且当前未被占用的 Agent。
+
+        :return: 成功淘汰返回 True；所有实例都在使用中、无法淘汰返回 False。
+        """
         async with self._global_lock:
             # OrderedDict 默认迭代顺序是插入顺序（最久未用在前面）
             for key, entry in self._entries.items():
                 if entry.active_count == 0:
                     await self._close_entry(entry, key, reason="lru")
                     self._stats["evicted_lru"] += 1
-                    return
-            # 所有实例都在使用中：拒绝淘汰，强制后续 acquire 阻塞
+                    return True
+            # 所有实例都在使用中：无法淘汰（调用方据此决定拒绝新建）
             logger.warning("AgentPool: 所有 %d 个 Agent 都在使用中，无法淘汰",
                            len(self._entries))
+            return False
 
     async def _sweep_loop(self) -> None:
         """后台定期清理空闲超时的 Agent。"""
