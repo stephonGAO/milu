@@ -92,7 +92,7 @@ def print_header():
   内置工具: {', '.join(_all_names)}
   子代理:   researcher（调研助手）, coder（编程助手）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
-  技能:     自动扫描 skills/ 目录，LLM 按需调用 load_skill 加载
+  技能:     内置 translator / code-review / skill-creator，LLM 按需 load_skill 加载
   计划文件: 每个会话独立保存（.sessions/{{session_id}}/plan.json）
 
   命令:
@@ -229,6 +229,10 @@ def build_agent() -> Agent:
         llm=llm,
         prompt_dir=prompts_base / "main",
         tools=all_tools,
+        # 技能目录：使用随包分发的内置技能（translator / code-review / skill-creator），
+        # 元数据注入 system prompt，LLM 按需 load_skill 加载正文。
+        # 不传则只会自动扫描 CWD 的 ./skills（本仓库无此目录 → /skills 为空）。
+        skills_dir=str(templates_dir() / "skills"),
         # history=history,
         # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300),
         config=AgentConfig(),
