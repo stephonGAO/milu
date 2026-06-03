@@ -585,8 +585,12 @@ class Agent:
                                 if chunk.usage.prompt_tokens:
                                     self._history.update_prompt_tokens(chunk.usage.prompt_tokens)
 
-                            if chunk.finish_reason == "stop":
-                                break
+                            # 注意：不要在 finish_reason=="stop" 时立即 break。
+                            # OpenAI 兼容流在 finish_reason 之后还会发一个「仅含 usage、
+                            # choices 为空」的收尾 chunk（stream_options.include_usage=True）。
+                            # 提前 break 会丢掉这次调用的 token 用量。这里继续把流读完，
+                            # 流随后自然结束（[DONE]）；整体仍受外层 asyncio.timeout 兜底。
+                            # （tool_calls 收尾本就不 break，故 usage 一直能采到。）
                 except asyncio.TimeoutError:
                     yield AgentError(
                         error_type="call_timeout",
