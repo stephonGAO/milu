@@ -31,13 +31,41 @@ class TestSessionBasics:
         assert session.session_id == "test_001"
 
     def test_generate_id_format(self):
-        """generate_id 应返回 YYYYMMDD_HHMMSS_{4hex} 格式"""
+        """generate_id 应返回 YYYYMMDD_HHMMSS_{16hex} 格式"""
         sid = Session.generate_id()
         parts = sid.split("_")
         assert len(parts) == 3
-        assert len(parts[0]) == 8  # YYYYMMDD
-        assert len(parts[1]) == 6  # HHMMSS
-        assert len(parts[2]) == 4  # 4 hex chars
+        assert len(parts[0]) == 8   # YYYYMMDD
+        assert len(parts[1]) == 6   # HHMMSS
+        assert len(parts[2]) == 16  # 8 字节 = 16 hex（防碰撞）
+        int(parts[2], 16)           # 应为合法 16 进制
+
+    def test_generate_id_no_collision_under_burst(self):
+        """同一时刻批量生成大量 id 不应碰撞（64 bit 随机）。"""
+        ids = {Session.generate_id() for _ in range(20000)}
+        assert len(ids) == 20000, "generate_id 出现碰撞"
+
+    def test_append_jsonl_writes_are_complete_lines(self, tmp_dir):
+        """连续写入应产出 100 行完整、可解析的 JSONL（验证带锁 append 不破坏写入）。
+
+        注：框架本身是 async 单线程，同进程内写入由事件循环串行化、不会交错；
+        跨进程（多 worker）写同一文件的整行原子性由 _append_jsonl 的 flock 保证
+        （POSIX 生效），此处仅验证写入路径完整性与可恢复性。
+        """
+        session = Session("lock_test", tmp_dir)
+        for i in range(100):
+            session.log_message(_make_msg(MessageRole.USER, f"msg-{i}"))
+
+        lines = session.conversation_path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 100
+        for line in lines:
+            json.loads(line)  # 每行都是完整 JSON
+
+        # 重新加载应能还原全部消息
+        reloaded = Session("lock_test", tmp_dir).load_messages()
+        assert len(reloaded) == 100
+        assert reloaded[0].content == "msg-0"
+        assert reloaded[-1].content == "msg-99"
 
     def test_log_message_appends_jsonl(self, tmp_dir):
         """log_message 应追加到 JSONL 文件"""

@@ -22,6 +22,27 @@ from agent_framework.llm.base.message import Message, MessageRole
 logger = logging.getLogger(__name__)
 
 
+# ── 跨进程文件锁（写入健壮性）────────────────────────────────
+#
+# 多 worker 部署下，若同一会话日志被多个进程写入（未做粘性路由），裸 append
+# 可能交错损坏。这里提供独占文件锁：Linux/macOS 用 fcntl.flock，其它平台优雅降级。
+# Windows 单进程开发环境下为 no-op（单进程内写入本身是同步、不交错的）。
+try:
+    import fcntl  # POSIX
+
+    def _lock_file(f) -> None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+    def _unlock_file(f) -> None:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+except ImportError:  # 非 POSIX（如 Windows）：降级为 no-op
+    def _lock_file(f) -> None:  # noqa: D401
+        pass
+
+    def _unlock_file(f) -> None:
+        pass
+
+
 class Session:
     """会话管理器 — 对话日志持久化和元数据跟踪。
 
@@ -80,6 +101,29 @@ class Session:
 
     # ── 写入 ──────────────────────────────────────────────────
 
+    def _append_jsonl(self, record: dict) -> bool:
+        """以独占文件锁追加一条 JSONL 记录（跨进程写入安全）。
+
+        - 锁保证多 worker 写同一会话文件时整行不交错；
+        - 读端（load_messages/_scan_existing）已能跳过损坏/半截行，故无需读锁；
+        - flush + 关闭即落盘，保证崩溃后已写记录可恢复。
+
+        :return: 成功返回 True，IO 失败返回 False。
+        """
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        try:
+            with open(self.conversation_path, "a", encoding="utf-8") as f:
+                _lock_file(f)
+                try:
+                    f.write(line)
+                    f.flush()
+                finally:
+                    _unlock_file(f)
+        except OSError as e:
+            logger.warning("写入 JSONL 失败: %s", e)
+            return False
+        return True
+
     def log_message(self, message: Message) -> int:
         """追加一条消息到 JSONL。
 
@@ -108,11 +152,7 @@ class Session:
         if message.name:
             record["name"] = message.name
 
-        try:
-            with open(self.conversation_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except OSError as e:
-            logger.warning("写入 JSONL 失败: %s", e)
+        if not self._append_jsonl(record):
             return -1
 
         line_no = self._line_counter
@@ -152,11 +192,7 @@ class Session:
             "messages": serialized,
         }
 
-        try:
-            with open(self.conversation_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except OSError as e:
-            logger.warning("写入压缩事件失败: %s", e)
+        if not self._append_jsonl(record):
             return -1
 
         line_no = self._line_counter
@@ -306,10 +342,15 @@ class Session:
 
     @classmethod
     def generate_id(cls) -> str:
-        """生成会话 ID: YYYYMMDD_HHMMSS_{4hex}"""
+        """生成会话 ID: YYYYMMDD_HHMMSS_{16hex}
+
+        随机部分用 8 字节（64 bit）。原先仅 2 字节（16 bit），同一秒内自动
+        创建约 256 个会话即有 ~50% 概率碰撞（生日悖论）→ 不同会话写进同一目录、
+        JSONL 混写。64 bit 下即使每秒百万级会话，碰撞概率也可忽略。
+        """
         now = time.localtime()
         ts = time.strftime("%Y%m%d_%H%M%S", now)
-        rand = secrets.token_hex(2)
+        rand = secrets.token_hex(8)
         return f"{ts}_{rand}"
 
     @classmethod
