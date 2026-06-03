@@ -148,7 +148,11 @@ class _PoolEntry:
     user_id: str
     session_id: str
     last_used: float = field(default_factory=time.monotonic)
-    active_count: int = 0     # 当前正在被使用的协程数
+    active_count: int = 0     # 当前持有/排队该 entry 的协程数（>0 时不被淘汰）
+    # 同 (user_id, session_id) 的 run() 串行锁：
+    # 同一会话的并发请求会复用同一个 Agent 实例，若并发执行 run() 会污染
+    # 共享的 history / session / 流程标记。持有此锁可保证同会话请求顺序执行。
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     @property
     def key(self) -> tuple[str, str]:
@@ -296,31 +300,43 @@ class AgentPool:
         """获取（或创建）一个用户的 Agent 句柄。
 
         行为：
-        1. 通过 Semaphore 限制全局并发
-        2. 查找缓存；命中则复用，未命中则创建
-        3. 池满时按 LRU 淘汰最久未用的实例
-        4. 退出 with 时释放并发许可、刷新 last_used、释放句柄
+        1. 查找缓存；命中则复用，未命中则创建
+        2. 池满时按 LRU 淘汰最久未用的实例
+        3. 对同一 (user_id, session_id) 持 entry 锁串行执行（避免并发 run()
+           污染共享的 history / session）。锁在 Semaphore 之外获取，因此排队
+           等待同会话锁的请求不会占用全局并发名额
+        4. 通过 Semaphore 限制全局并发
+        5. 退出 with 时释放并发许可、刷新 last_used、释放句柄
 
         例：
             async with pool.acquire(uid, sid) as h:
                 async for evt in h.agent.run(text):
                     ...
+
+        注意：同一 (user_id, session_id) 的并发 acquire() 会串行执行而非并行，
+        这是有意为之——同会话共享一个 Agent，并发 run() 会相互污染。
         """
-        await self._semaphore.acquire()
-        self._stats["concurrent_waits"] += 1
+        # 1. 先取得 entry（创建期已由 _get_or_create 内的 per-key 锁串行化）
+        entry = await self._get_or_create(user_id, session_id)
+
+        # 2. active_count 立即 +1，保护 entry 在「排队等锁」期间不被淘汰。
+        #    紧跟 _get_or_create 之后、无 await 间隔，故不会与淘汰发生竞态。
+        entry.active_count += 1
+        handle = PooledAgent(entry=entry, _pool=self)
         try:
-            entry = await self._get_or_create(user_id, session_id)
-            entry.active_count += 1
-            entry.last_used = time.monotonic()
-            handle = PooledAgent(entry=entry, _pool=self)
-            try:
-                yield handle
-            finally:
-                # 必须在 semaphore.release() 之前完成释放
-                # （让其他等待者看到正确的 active_count）
-                await self._release(handle)
+            # 3. 同会话串行锁：放在 Semaphore 之前，排队请求不占全局并发名额
+            async with entry.lock:
+                # 4. 全局并发限流
+                await self._semaphore.acquire()
+                self._stats["concurrent_waits"] += 1
+                try:
+                    entry.last_used = time.monotonic()
+                    yield handle
+                finally:
+                    self._semaphore.release()
         finally:
-            self._semaphore.release()
+            # 释放：active_count -1、刷新 last_used、更新 LRU 顺序
+            await self._release(handle)
 
     async def _release(self, handle: PooledAgent) -> None:
         """PooledAgent 退出 with 时调用。"""
@@ -347,7 +363,12 @@ class AgentPool:
     def _default_agent_factory(
         self, user_id: str, session_id: str, llm: BaseLLM
     ) -> Agent:
-        """默认 Agent 工厂：注入 LLM + 共享 AgentConfig。"""
+        """默认 Agent 工厂：注入 LLM + AgentConfig 模板。
+
+        这里传入的是池级共享的 self._agent_config 模板，但 Agent.__init__ 会对其
+        做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置，
+        set_mode() 等运行时修改不会跨用户串扰。
+        """
         return Agent(
             llm=llm,
             config=self._agent_config,

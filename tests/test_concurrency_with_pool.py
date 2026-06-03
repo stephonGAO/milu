@@ -72,6 +72,60 @@ async def test_pool_isolates_concurrent_users_under_load(capsys):
 
 
 @pytest.mark.asyncio
+async def test_pool_same_key_concurrent_runs_serialized(capsys):
+    """P0-1：同一 (user, session) 的并发 run() 必须串行，history 不被污染。
+
+    同会话共享同一个 Agent 实例，若并发执行 run() 会交错写 history/session。
+    AgentPool 应通过 entry 锁把同 key 的请求串行化。
+    """
+    # 用带延迟的 echo LLM 制造交错窗口；并发计数在「被锁保护的临界区」内统计
+    # （不依赖 async generator 的 finally，后者会延迟到生成器关闭才执行，造成误判）
+    llm = _make_echo_llm(delay=0.02)
+
+    pool = AgentPool(
+        llm_factory=lambda u, s: llm,
+        # max_concurrent_runs 远大于并发数 → 确保串行来自 entry 锁而非全局限流
+        config=AgentPoolConfig(max_agents=10, max_concurrent_runs=10),
+    )
+    await pool.start()
+    try:
+        N = 8
+        active = 0
+        max_active = 0
+
+        async def one(i: int):
+            nonlocal active, max_active
+            async with pool.acquire("u1", "s1") as h:
+                # 临界区：被 entry 锁保护，同 key 应串行进入
+                active += 1
+                max_active = max(max_active, active)
+                try:
+                    async for _ in h.agent.run(f"msg-{i}"):
+                        pass
+                finally:
+                    active -= 1
+
+        await asyncio.gather(*[one(i) for i in range(N)])
+
+        # 串行性：同一 Agent 任意时刻只有 1 个 run 在执行
+        assert max_active == 1, f"同会话 run() 未串行化，峰值并发={max_active}"
+
+        # history 完整且无污染：恰好 N 条 user 消息，内容互异（无丢失/重复）
+        async with pool.acquire("u1", "s1") as h:
+            user_msgs = [
+                m.content for m in h.agent.history.all_messages
+                if m.role == MessageRole.USER
+            ]
+        assert len(user_msgs) == N, f"期望 {N} 条 user 消息，实际 {len(user_msgs)}"
+        assert len(set(user_msgs)) == N, f"user 消息有重复/丢失：{user_msgs}"
+
+        # 同 key 始终复用同一个 Agent
+        assert pool.get_stats()["created"] == 1
+    finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
 async def test_pool_same_user_serial_runs_share_history(capsys):
     """同一用户连续 run，history 应累积（不丢失上下文）。"""
     llm = _make_echo_llm()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import time
@@ -141,7 +142,11 @@ class Agent:
         prompt_variables: dict[str, str] | None = None,
     ):
         self._llm = llm
-        self._config = config or AgentConfig()
+        # 复制传入的 config，确保每个 Agent 持有独立的 AgentConfig 实例。
+        # 否则多个 Agent 共享同一可变配置时，set_mode() 会原地修改共享对象，
+        # 污染其他 Agent —— 多用户场景下这会造成 talk/superwork 模式跨用户串扰（越权风险）。
+        # AgentConfig 字段均为不可变标量，浅拷贝（dataclasses.replace）即可。
+        self._config = dataclasses.replace(config) if config is not None else AgentConfig()
         self._history = history or ConversationHistory(
             strategy="auto_compact",
             max_tokens=self._config.max_total_tokens,
