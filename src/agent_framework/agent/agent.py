@@ -8,7 +8,10 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import AsyncIterator, Awaitable, Callable, Union
+from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, Union
+
+if TYPE_CHECKING:
+    from agent_framework.tools.mcp.manager import MCPManager
 
 import os
 
@@ -144,6 +147,7 @@ class Agent:
         prompt_dir: "str | os.PathLike | None" = None,
         prompt_variables: dict[str, str] | None = None,
         session_id: str | None = None,
+        mcp_manager: "MCPManager | None" = None,
     ):
         self._llm = llm
         # 复制传入的 config，确保每个 Agent 持有独立的 AgentConfig 实例。
@@ -202,7 +206,16 @@ class Agent:
 
         # MCP 配置文件路径
         self._mcp_config_path = mcp_config_path
-        self._mcp_manager = None
+        # MCP 管理器与所有权：
+        # - 未注入（默认）：本 Agent 在 connect_mcp() 时自建并「拥有」manager，
+        #   disconnect 时断开。每个 Agent 一组 MCP 子进程（per-agent，进程独占）。
+        # - 注入共享 manager：多个 Agent 复用同一组已连接的 MCP 子进程（省内存），
+        #   本 Agent「不拥有」它——disconnect_mcp() 不会断开，生命周期由注入方统一管理。
+        self._mcp_manager: "MCPManager | None" = mcp_manager
+        self._owns_mcp = mcp_manager is None
+        if mcp_manager is not None:
+            # 共享 manager 应为「已连接」状态：直接注册其工具（不再拉起新进程）。
+            self._register_mcp_tools(mcp_manager.get_tools())
 
         # 流程约束状态标记
         self._work_started = False   # 非计划工具是否已执行
@@ -430,6 +443,11 @@ class Agent:
             ensure_dotenv_loaded()
             path = os.environ.get("MCP_CONFIG_PATH")
 
+        # 幂等 / 共享保护：已有 manager（注入的共享 manager，或本 Agent 已连接过）
+        # 则直接返回，绝不重复连接、绝不拉起第二组进程。
+        if self._mcp_manager is not None:
+            return
+
         configs = MCPServerConfig.load_file(path)  # path=None 时自动搜索
 
         if not configs:
@@ -437,21 +455,33 @@ class Agent:
 
         self._mcp_manager = MCPManager(configs)
         wrappers = await self._mcp_manager.connect_all()
-        for w in wrappers:
-            if self._config.mcp_tools_active_by_default:
-                self._registry.register_wrapper(w)  # 向后兼容模式
-            else:
-                # 注册到休眠池（register_dormant 自动从工具名提取 category）
-                self._registry.register_dormant(w)
+        self._register_mcp_tools(wrappers)
         logger.info(
             "MCP 工具已注册: %d 个（%s）",
             len(wrappers),
             "活跃" if self._config.mcp_tools_active_by_default else "休眠",
         )
 
+    def _register_mcp_tools(self, wrappers: list) -> None:
+        """把 MCP 工具按配置注册进工具表（活跃池或休眠池）。
+
+        被 connect_mcp()（自建 manager）与 __init__（注入共享 manager）共用。
+        """
+        for w in wrappers:
+            if self._config.mcp_tools_active_by_default:
+                self._registry.register_wrapper(w)  # 向后兼容模式：直接进活跃池
+            else:
+                # 注册到休眠池（register_dormant 自动从工具名提取 category）
+                self._registry.register_dormant(w)
+
     async def disconnect_mcp(self) -> None:
-        """断开所有 MCP 服务器连接。"""
-        if self._mcp_manager:
+        """断开 MCP 服务器连接。
+
+        仅断开本 Agent「拥有」的 manager；注入的共享 manager 不在此断开
+        （由注入方——如 AgentPool——统一管理生命周期），避免一个用户结束就
+        把其他用户共享的 MCP 进程关掉。
+        """
+        if self._mcp_manager and self._owns_mcp:
             await self._mcp_manager.disconnect_all()
             self._mcp_manager = None
 

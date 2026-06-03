@@ -148,12 +148,20 @@ class AgentPoolConfig:
     :param sweep_interval_seconds: 后台清理任务巡检间隔。
     :param acquire_timeout: 等待并发名额的最长秒数。None=无限等待（默认，向后兼容）；
         设为正数时，超时未拿到名额则抛 PoolBusyError（背压，避免静默卡死）。
+    :param shared_mcp: 是否启用「共享 MCP」。True 时整个池只连接一组 MCP 子进程，
+        由所有 per-user Agent 复用（省内存：MCP 不再随用户数线性增长）。
+        ⚠️ 共享 session = MCP server 端看不到 user_id，无法按用户隔离，
+        仅适合无状态 MCP 工具（抓取/搜索/查询等）。默认 False（per-agent，进程独占）。
+    :param mcp_config_path: 共享 MCP 的配置文件路径（shared_mcp=True 时用）。
+        None 时按 MCPServerConfig 默认搜索路径查找。
     """
     max_agents: int = 200
     idle_ttl_seconds: float = 300.0
     max_concurrent_runs: int = 50
     sweep_interval_seconds: float = 60.0
     acquire_timeout: float | None = None
+    shared_mcp: bool = False
+    mcp_config_path: str | None = None
 
 
 # ── LLM 工厂类型 ──
@@ -261,6 +269,10 @@ class AgentPool:
         self._entry_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
 
+        # 共享 MCP 管理器（shared_mcp=True 时在 start() 连接、stop() 断开）。
+        # 整个池只此一份，注入到每个 Agent，避免每用户各拉一组 MCP 子进程。
+        self._shared_mcp_manager: Any = None
+
         # 后台清理
         self._sweep_task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
@@ -296,15 +308,48 @@ class AgentPool:
 
     # ── 公开 API ──────────────────────────────────────────
 
+    @property
+    def shared_mcp_manager(self) -> Any:
+        """共享 MCP 管理器（未启用 shared_mcp 时为 None）。
+
+        自定义 agent_factory 可读取它并透传给 Agent(mcp_manager=...)，
+        让自建 Agent 也复用这组共享 MCP 进程。
+        """
+        return self._shared_mcp_manager
+
     async def start(self) -> None:
-        """启动后台清理任务。"""
+        """启动后台清理任务；启用 shared_mcp 时连接共享 MCP。"""
+        # 先建立共享 MCP（若启用）：整个池只连一次
+        if self._pool_config.shared_mcp and self._shared_mcp_manager is None:
+            await self._connect_shared_mcp()
+
         if self._sweep_task is None:
             self._stop_event.clear()
             self._sweep_task = asyncio.create_task(self._sweep_loop())
             logger.info("AgentPool 已启动: %s", self._pool_config)
 
+    async def _connect_shared_mcp(self) -> None:
+        """连接整个池共享的一组 MCP 子进程（失败不致命，降级为无 MCP）。"""
+        from agent_framework.tools.mcp.config import MCPServerConfig
+        from agent_framework.tools.mcp.manager import MCPManager
+
+        configs = MCPServerConfig.load_file(self._pool_config.mcp_config_path)
+        if not configs:
+            logger.info("AgentPool: 未找到 MCP 配置，跳过共享 MCP")
+            return
+        try:
+            manager = MCPManager(configs)
+            await manager.connect_all()
+            self._shared_mcp_manager = manager
+            logger.info("AgentPool: 共享 MCP 已连接，%d 个工具可复用",
+                        len(manager.get_tools()))
+        except Exception as e:
+            # 共享 MCP 连接失败不阻断池启动，退化为「无 MCP」
+            logger.error("AgentPool: 共享 MCP 连接失败，将无 MCP 运行: %s", e)
+            self._shared_mcp_manager = None
+
     async def stop(self) -> None:
-        """停止后台任务并清理所有 Agent。"""
+        """停止后台任务、清理所有 Agent，并断开共享 MCP。"""
         if self._sweep_task:
             self._stop_event.set()
             try:
@@ -314,6 +359,15 @@ class AgentPool:
             self._sweep_task = None
 
         await self._close_all()
+
+        # 断开共享 MCP（整个池只此一处断开）
+        if self._shared_mcp_manager is not None:
+            try:
+                await self._shared_mcp_manager.disconnect_all()
+            except Exception as e:
+                logger.warning("AgentPool: 断开共享 MCP 失败: %s", e)
+            self._shared_mcp_manager = None
+
         logger.info("AgentPool 已停止")
 
     @staticmethod
@@ -488,13 +542,16 @@ class AgentPool:
           set_mode() 等运行时修改不会跨用户串扰。
         - session_id 由 (user_id, session_id) 确定性派生，使历史在淘汰/重启后可恢复。
 
-        注：自定义 agent_factory 若也想要历史可恢复，应自行把派生的 session_id
-        透传给 Agent(session_id=...)。
+        注：自定义 agent_factory 若也想要历史可恢复 / 复用共享 MCP，应自行把
+        派生的 session_id 透传给 Agent(session_id=...)，并把 self.shared_mcp_manager
+        透传给 Agent(mcp_manager=...)。
         """
         return Agent(
             llm=llm,
             config=self._agent_config,
             session_id=self._derive_session_id(user_id, session_id),
+            # 启用 shared_mcp 时注入共享 manager；否则为 None（per-agent 默认行为）
+            mcp_manager=self._shared_mcp_manager,
         )
 
     async def _get_or_create(

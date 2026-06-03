@@ -114,7 +114,10 @@ agent = Agent(
 
 - **粘性路由**：按 `user_id` 做一致性哈希（如 nginx `ip_hash`），让同一用户恒定落到同一 worker。同会话由进程内 `AgentPool` 的 entry 锁串行，**无需分布式锁**。
 - **会话持久化**：`AgentConfig(session_enabled=True)` 时历史按 `(user, session)` 落盘，淘汰/重启后自动恢复；多 worker 故障转移可叠加共享存储（NFS/EFS）。
-- **MCP 是内存大头**：每个 Agent 自带 MCP 子进程（约 15–50MB）。重度 MCP 场景需评估并发上限或横向扩展。
+- **MCP 是内存大头**：默认每个 Agent 自带 MCP 子进程（约 15–50MB）。高并发下建议开启**共享 MCP**——整池只连一组 MCP 进程、由所有 Agent 复用，内存不再随用户数增长：
+  - 默认 factory：`AgentPoolConfig(shared_mcp=True, mcp_config_path=...)`；
+  - 自定义 factory：自建一个已连接的 `MCPManager`，透传 `Agent(mcp_manager=...)`（见 `examples/multi_user_chat.py`）。
+  - ⚠️ 共享 = MCP server 端看不到 user_id、无法按用户隔离，**仅适合无状态 MCP 工具**（抓取/搜索/查询）；有服务端「每用户状态」的 MCP 仍应用默认的 per-agent 模式。
 - **服务端确认**：高并发下避免交互式逐工具确认（会拖累吞吐）；如需确认，`AgentPool` 已保证等待确认期间不占用全局并发名额。
 
 ## 示例

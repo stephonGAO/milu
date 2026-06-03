@@ -86,7 +86,7 @@ def _read_plan_items(agent) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def make_agent_factory(llm):
+def make_agent_factory(llm, shared_mcp_manager=None):
     """返回一个 agent_factory：每次新建 Agent 时由 AgentPool 调用。
 
     这里把 multi_turn_chat.py:build_agent() 的逻辑原样搬过来，
@@ -95,6 +95,11 @@ def make_agent_factory(llm):
     注意：子代理工具必须在 agent_factory 内部创建（不能用闭包外共享），
     因为 get_parent_mode=lambda: agent.mode 需要引用「正在创建的」agent 自身。
     跨用户共享同一组 subagent_tools 会让所有用户的 mode 锁定为第一个用户。
+
+    :param shared_mcp_manager: 共享的、已连接的 MCPManager（可为 None）。注入后，
+        每个 per-user Agent 复用同一组 MCP 子进程，MCP 内存不再随用户数线性增长。
+        （这是 P1-5「共享 MCP」的手动用法；若用默认 factory，则直接
+        AgentPoolConfig(shared_mcp=True) 即可。）
     """
     prompts_base = templates_dir() / "prompts"
     skills_dir = templates_dir() / "skills"
@@ -162,6 +167,8 @@ def make_agent_factory(llm):
             tools=[*BUILTIN_TOOLS, so_tool],
             config=AgentConfig(session_enabled=True, session_dir="./.sessions"),
             on_confirm=lambda tool, args: confirm_unsafe(user_id, tool, args),
+            # 复用整池共享的一组 MCP 子进程（省内存）；None 时各 Agent 自建
+            mcp_manager=shared_mcp_manager,
         )
         # 子代理工具必须在 Agent 创建后绑定（get_parent_mode 闭包要拿 agent）
         for tool in _build_subagent_tools(agent):
@@ -213,9 +220,25 @@ async def confirm_unsafe(user_id: str, tool_name: str, args_str: str) -> Confirm
 
 @asynccontextmanager
 async def lifespan(app):
-    """启动时创建 Pool + 共享 LLM，关闭时优雅停机。"""
+    """启动时创建 Pool + 共享 LLM + 共享 MCP，关闭时优雅停机。"""
     llm = ModelRegistry.create("qwen", model="qwen-plus", web_search=True, enable_thinking=False)
-    agent_factory = make_agent_factory(llm)
+
+    # 共享 MCP：整池只连一组 MCP 子进程，由所有 per-user Agent 复用（省内存）。
+    # 连接失败不致命，降级为无 MCP 运行。
+    shared_mcp = None
+    try:
+        from agent_framework.tools.mcp.config import MCPServerConfig
+        from agent_framework.tools.mcp.manager import MCPManager
+        mcp_configs = MCPServerConfig.load_file(None)  # 自动搜索 config/mcp_servers.json
+        if mcp_configs:
+            shared_mcp = MCPManager(mcp_configs)
+            await shared_mcp.connect_all()
+            logger.info("共享 MCP 已连接：%d 个工具", len(shared_mcp.get_tools()))
+    except Exception as e:
+        logger.warning("共享 MCP 连接失败，将无 MCP 运行：%s", e)
+        shared_mcp = None
+
+    agent_factory = make_agent_factory(llm, shared_mcp_manager=shared_mcp)
     pool = AgentPool(
         llm_factory=lambda uid, sid: llm,
         agent_factory=agent_factory,
@@ -231,12 +254,16 @@ async def lifespan(app):
     app.state.llm = llm
     logger.info("AgentPool 已就绪: %s", pool.get_stats())
 
-    # 启动时为每个 Agent 连接 MCP（共享同一 LLM 子进程是安全的）
-    # 注意：实际 MCP 连接延后到首次 acquire（per-user 隔离）
     try:
         yield
     finally:
         await pool.stop()
+        # 共享 MCP 由本 lifespan 拥有，需在此显式断开（Agent 不会断开共享 manager）
+        if shared_mcp is not None:
+            try:
+                await shared_mcp.disconnect_all()
+            except Exception:
+                pass
         logger.info("AgentPool 已关闭")
 
 
@@ -545,24 +572,8 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
 # 6. Agent 事件流（带流式检测客户端断开 + ToolConfirmRequired 触发弹窗）
 # ─────────────────────────────────────────────────────────────────────────────
 
-# MCP 连接是 lazy 的：每个 user 第一次 acquire 时由第一个到达的请求触发连接。
-# 用 per-user 锁防并发：同一 user 多请求同时到达时只连接一次。
-_mcp_locks: dict[str, asyncio.Lock] = {}
-
-
-def _lock_for_user(user_id: str) -> asyncio.Lock:
-    if user_id not in _mcp_locks:
-        _mcp_locks[user_id] = asyncio.Lock()
-    return _mcp_locks[user_id]
-
-
-async def _ensure_mcp(agent) -> None:
-    """若该 Agent 尚未连接 MCP，则连接（同一 user 多次调用只连一次）。"""
-    if agent._mcp_manager is not None:
-        return
-    async with _lock_for_user(agent.session.session_id if agent.session else "default"):
-        if agent._mcp_manager is None:
-            await agent.connect_mcp()
+# MCP 现在是「整池共享」的：在 lifespan 启动时连接一次、注入每个 Agent，
+# 因此不再需要 per-user 的 lazy 连接逻辑（原 _ensure_mcp / _mcp_locks 已删除）。
 
 
 async def _stream_agent(
@@ -574,7 +585,6 @@ async def _stream_agent(
     try:
         async with pool.acquire(user_id, session_id) as handle:
             agent = handle.agent
-            await _ensure_mcp(agent)
             try:
                 async for evt in agent.run(user_input):
                     if await request.is_disconnected():
@@ -653,7 +663,6 @@ async def chat(
             pool: AgentPool = request.app.state.pool
             try:
                 async with pool.acquire(x_user_id, x_session_id) as h:
-                    await _ensure_mcp(h.agent)
                     async for sse in _exec_command(h.agent, user_input):
                         if await request.is_disconnected():
                             return
