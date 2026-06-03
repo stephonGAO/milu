@@ -29,7 +29,6 @@ from agent_framework.tools.builtin.structured_output import (
     create_structured_output_tool,
 )
 from agent_framework.tools.builtin.todo_write import (
-    TodoManager,
     create_todo_write_tool,
 )
 
@@ -57,7 +56,6 @@ __all__ = [
     "shell_command",
     "structured_output",
     "create_structured_output_tool",
-    "TodoManager",
     "create_todo_write_tool",
     "BUILTIN_TOOLS",
 ]

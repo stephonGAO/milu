@@ -32,6 +32,7 @@ from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.llm.providers.base import BaseLLM
 from agent_framework.tools.registry import ToolRegistry
+from agent_framework.tools.builtin.todo_write import _current_session_dir as _current_todo_session_dir
 
 logger = logging.getLogger(__name__)
 
@@ -186,10 +187,7 @@ class Agent:
         self._work_started = False   # 非计划工具是否已执行
         self._plan_created = False   # todo_write 是否已被成功调用
 
-        # ── 自动发现 TodoManager（通过工具标记）──
-        self._todo_manager = self._find_todo_manager()
-        if self._todo_manager and self._session:
-            self._rebind_todo_manager()
+        # v2: TodoManager 已删除，session_dir 在 run() 入口通过 ContextVar 注入
 
         # ── 技能（Skills）初始化 ──
         from agent_framework.skills.registry import SkillRegistry
@@ -273,8 +271,8 @@ class Agent:
         self._history.clear()
         self._work_started = False
         self._plan_created = False
-        if self._todo_manager:
-            self._todo_manager.clear()
+        # v2: TodoManager 已删除，plan 状态由 session/plan.json 承载
+        # reset() 不需要清空 plan 文件（plan 跨 reset 保留）
 
     def save_session(self) -> None:
         """保存当前会话元数据到 session.json。"""
@@ -296,7 +294,6 @@ class Agent:
         self._history.attach_session(self._session)
         self._work_started = False
         self._plan_created = False
-        self._rebind_todo_manager()
 
     def load_session(self, session_id: str) -> int:
         """加载历史会话，恢复对话。返回消息数量。"""
@@ -311,7 +308,6 @@ class Agent:
         self._history.load_from_session(self._session)
         self._work_started = False
         self._plan_created = False
-        self._rebind_todo_manager()
         return self._session.message_count
 
     # -- 内部方法 ------------------------------------------------------------
@@ -379,19 +375,6 @@ class Agent:
         self._history.set_system(
             Message(role=MessageRole.SYSTEM, content="".join(parts))
         )
-
-    def _find_todo_manager(self):
-        """从已注册工具中查找 TodoManager（通过 _todo_manager 标记）。"""
-        for name in self._registry.list_tools():
-            wrapper = self._registry.get_tool(name)
-            if wrapper and hasattr(wrapper.func, '_todo_manager'):
-                return wrapper.func._todo_manager
-        return None
-
-    def _rebind_todo_manager(self):
-        """将 TodoManager 的 plan 文件绑定到当前 session 目录。"""
-        if self._todo_manager and self._session:
-            self._todo_manager.set_plan_file(self._session.dir_path / "plan.json")
 
     # -- MCP 生命周期 --------------------------------------------------------
 
@@ -462,234 +445,213 @@ class Agent:
         Yields:
             AgentEvent 子类实例
         """
-        # 将用户输入加入历史
-        self._history.add(Message(role=MessageRole.USER, content=user_input))
+        # v2: 注入 todo 工具的 session_dir 到 ContextVar（asyncio 任务级隔离）
+        plan_token = None
+        if self._session is not None:
+            plan_token = _current_todo_session_dir.set(self._session.dir_path)
+        try:
+            self._history.add(Message(role=MessageRole.USER, content=user_input))
 
-        total_usage = TokenUsage()
-        turn_count = 0
-        total_tool_calls = 0
-        start_time = time.monotonic()
-        final_text = ""
+            total_usage = TokenUsage()
+            turn_count = 0
+            total_tool_calls = 0
+            start_time = time.monotonic()
+            final_text = ""
 
-        self._work_started = False
-        # self._plan_created = False #如果之前创建过任务，但对话中断后又继续，agent就认为没有创建过就不能再使用工具更新了。
+            self._work_started = False
+            # self._plan_created = False #如果之前创建过任务，但对话中断后又继续，agent就认为没有创建过就不能再使用工具更新了。
 
-        while True:
-            turn_count += 1
+            while True:
+                turn_count += 1
 
-            # 1. 检查总超时
-            elapsed = time.monotonic() - start_time
-            if elapsed >= self._config.total_timeout:
-                yield AgentError(
-                    error_type="total_timeout",
-                    message=f"总超时 {self._config.total_timeout}s",
-                )
-                return
-
-            # 1.5 每轮重建 system prompt（反映技能目录等动态状态）
-            self._build_system_prompt()
-
-            # 1.6 自动压缩（如果启用）
-            if self._history.compact_enabled:
-                original_count = len(self._history._messages)
-                original_messages = self._history._messages
-                compacted = await self._history.auto_compact()
-                if compacted is not original_messages:
-                    yield HistoryCompacted(
-                        strategy="auto",
-                        original_count=original_count,
-                        compacted_count=len(compacted),
+                # 1. 检查总超时
+                elapsed = time.monotonic() - start_time
+                if elapsed >= self._config.total_timeout:
+                    yield AgentError(
+                        error_type="total_timeout",
+                        message=f"总超时 {self._config.total_timeout}s",
                     )
+                    return
 
-            # 2. 获取截断后的历史消息
-            messages = self._history.get_messages()
+                # 1.5 每轮重建 system prompt（反映技能目录等动态状态）
+                self._build_system_prompt()
 
-            # 3. 获取工具 schema
-            tool_schemas = self._registry.get_schemas()
-            if tool_schemas:
-                llm_kwargs["tools"] = tool_schemas
-
-            # 4. 流式调用 LLM
-            tool_call_buffer: list[dict] = []
-            turn_text_parts: list[str] = []
-
-            try:
-                async with asyncio.timeout(self._config.timeout):
-                    async for chunk in self._llm.chat(messages, **llm_kwargs):
-                        # 5. 产出文本/思考事件
-                        if chunk.content:
-                            turn_text_parts.append(chunk.content)
-                            yield TextDelta(text=chunk.content)
-
-                        if chunk.reasoning_content:
-                            yield ReasoningDelta(text=chunk.reasoning_content)
-
-                        # 6. 合并工具调用片段
-                        if chunk.tool_calls:
-                            _merge_tool_calls(tool_call_buffer, chunk.tool_calls)
-
-                        # 累积 usage
-                        if chunk.usage:
-                            _merge_usage(total_usage, chunk.usage)
-                            # 更新压缩器的 token 跟踪
-                            if chunk.usage.prompt_tokens:
-                                self._history.update_prompt_tokens(chunk.usage.prompt_tokens)
-
-                        if chunk.finish_reason == "stop":
-                            break
-            except asyncio.TimeoutError:
-                yield AgentError(
-                    error_type="call_timeout",
-                    message=f"单次调用超时 {self._config.timeout}s",
-                )
-                return
-            except Exception as e:
-                error_str = str(e).lower()
-
-                # ── 流式连接中断重试（网络抖动、服务端断连）──
-                _CONNECTION_ERROR_KEYWORDS = [
-                    "incomplete chunked", "peer closed", "connection reset",
-                    "broken pipe", "remote end closed", "connection aborted",
-                ]
-                is_conn_error = any(kw in error_str for kw in _CONNECTION_ERROR_KEYWORDS)
-                if is_conn_error:
-                    _retry_count = getattr(self, '_conn_retry_count', 0) + 1
-                    self._conn_retry_count = _retry_count
-                    if _retry_count <= 3:
-                        delay = min(2 ** _retry_count, 16)
-                        logger.warning(
-                            "流式连接中断（第 %d 次），%ds 后重试: %s",
-                            _retry_count, delay, e,
-                        )
-                        await asyncio.sleep(delay)
-                        continue  # 重试本轮 LLM 调用
-                    # 超过重试上限，放弃
-                    logger.error("流式连接中断超过重试上限: %s", e)
-                    del self._conn_retry_count
-
-                # ── 上下文过长 → 应急压缩后重试 ──
-                context_too_long_keywords = [
-                    "context_length", "too_long", "token", "maximum",
-                    "max_tokens", "reduce", "truncat",
-                ]
-                is_context_error = any(
-                    kw in error_str for kw in context_too_long_keywords
-                )
-                if is_context_error and self._history.compact_enabled:
-                    logger.info("检测到上下文过长错误，触发应急压缩: %s", e)
+                # 1.6 自动压缩（如果启用）
+                if self._history.compact_enabled:
                     original_count = len(self._history._messages)
                     original_messages = self._history._messages
-                    compacted = await self._history.reactive_compact()
+                    compacted = await self._history.auto_compact()
                     if compacted is not original_messages:
                         yield HistoryCompacted(
-                            strategy="reactive",
+                            strategy="auto",
                             original_count=original_count,
                             compacted_count=len(compacted),
                         )
-                        continue  # 压缩成功，重试本轮
-                    # 压缩无效果，无法恢复，直接抛出
-                    raise
-                raise
 
-            # 流式调用成功，重置连接重试计数器
-            if hasattr(self, '_conn_retry_count'):
-                del self._conn_retry_count
+                # 2. 获取截断后的历史消息
+                messages = self._history.get_messages()
 
-            # 7. 记录 assistant 消息到历史
-            assistant_content = "".join(turn_text_parts) if turn_text_parts else None
+                # 3. 获取工具 schema
+                tool_schemas = self._registry.get_schemas()
+                if tool_schemas:
+                    llm_kwargs["tools"] = tool_schemas
 
-            # 清理 buffer：移除内部字段，转为标准格式
-            resolved_calls = []
-            for item in tool_call_buffer:
-                resolved_calls.append({
-                    "id": item["id"],
-                    "type": "function",
-                    "function": {
-                        "name": item["function"]["name"],
-                        "arguments": item["function"]["arguments"],
-                    },
-                })
+                # 4. 流式调用 LLM
+                tool_call_buffer: list[dict] = []
+                turn_text_parts: list[str] = []
 
-            assistant_msg = Message(
-                role=MessageRole.ASSISTANT,
-                content=assistant_content,
-                tool_calls=resolved_calls if resolved_calls else None,
-            )
-            self._history.add(assistant_msg)
-            final_text = assistant_content or final_text
+                try:
+                    async with asyncio.timeout(self._config.timeout):
+                        async for chunk in self._llm.chat(messages, **llm_kwargs):
+                            # 5. 产出文本/思考事件
+                            if chunk.content:
+                                turn_text_parts.append(chunk.content)
+                                yield TextDelta(text=chunk.content)
 
-            # 8. 无工具调用 → 结束
-            if not resolved_calls:
-                self.save_session()
-                yield AgentDone(
-                    final_text=final_text,
-                    total_usage=total_usage,
-                    turn_count=turn_count,
-                )
-                return
+                            if chunk.reasoning_content:
+                                yield ReasoningDelta(text=chunk.reasoning_content)
 
-            # 9. 检查最大轮次
-            if turn_count >= self._config.max_turns:
-                yield AgentError(
-                    error_type="max_turns",
-                    message=f"超出最大轮次 {self._config.max_turns}",
-                )
-                return
+                            # 6. 合并工具调用片段
+                            if chunk.tool_calls:
+                                _merge_tool_calls(tool_call_buffer, chunk.tool_calls)
 
-            # 10. 执行工具调用
-            # ── 10a. 检查工具调用次数上限（提前检查整批）──
-            batch_size = len(resolved_calls)
-            if total_tool_calls + batch_size > self._config.tool_call_limit:
-                yield AgentError(
-                    error_type="tool_limit",
-                    message=f"超出工具调用上限 {self._config.tool_call_limit}",
-                )
-                return
-            total_tool_calls += batch_size
+                            # 累积 usage
+                            if chunk.usage:
+                                _merge_usage(total_usage, chunk.usage)
+                                # 更新压缩器的 token 跟踪
+                                if chunk.usage.prompt_tokens:
+                                    self._history.update_prompt_tokens(chunk.usage.prompt_tokens)
 
-            # ── 10a.5 计划工具冲突检查（在危险工具确认之前）──
-            # 如果计划工具与其他工具混在同一批，立即拒绝，不进入确认流程
-            batch_names = {
-                c.get("function", {}).get("name", "")
-                for c in resolved_calls
-            }
-            has_plan = bool(batch_names & _PLAN_TOOLS)
-            # 元工具（发现/加载）与计划工具同批不视为冲突
-            has_non_plan = bool(batch_names - _PLAN_TOOLS - _META_TOOLS)
-
-            if has_plan and has_non_plan:
-                plan_names = ", ".join(batch_names & _PLAN_TOOLS)
-                other_names = ", ".join(batch_names - _PLAN_TOOLS)
-                error_msg = (
-                    f"错误：计划工具（{plan_names}）不能与其他工具（{other_names}）"
-                    f"在同一批调用中同时执行。"
-                    f"请先单独调用计划工具完成计划更新，"
-                    f"然后在下一轮对话中再调用其他工具。"
-                )
-                for call in resolved_calls:
-                    tc_id = call.get("id", "")
-                    tn = call.get("function", {}).get("name", "")
-                    ta = call.get("function", {}).get("arguments", "{}")
-                    yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
-                    yield ToolResult(
-                        tool_name=tn, tool_call_id=tc_id,
-                        output=error_msg, is_error=True,
+                            if chunk.finish_reason == "stop":
+                                break
+                except asyncio.TimeoutError:
+                    yield AgentError(
+                        error_type="call_timeout",
+                        message=f"单次调用超时 {self._config.timeout}s",
                     )
-                    self._history.add(Message(
-                        role=MessageRole.TOOL, content=error_msg,
-                        tool_call_id=tc_id, name=tn,
-                    ))
-                continue  # 跳过确认循环和 asyncio.gather，直接进入下一轮
+                    return
+                except Exception as e:
+                    error_str = str(e).lower()
 
-            # ── 10a.6 跨轮次执行顺序守卫 ──
-            # 如果已经执行过非计划工具，禁止再创建计划
-            if self._work_started and not self._plan_created:
-                late_plan = batch_names & _PLAN_TOOLS
-                if late_plan:
-                    plan_names = ", ".join(late_plan)
+                    # ── 流式连接中断重试（网络抖动、服务端断连）──
+                    _CONNECTION_ERROR_KEYWORDS = [
+                        "incomplete chunked", "peer closed", "connection reset",
+                        "broken pipe", "remote end closed", "connection aborted",
+                    ]
+                    is_conn_error = any(kw in error_str for kw in _CONNECTION_ERROR_KEYWORDS)
+                    if is_conn_error:
+                        _retry_count = getattr(self, '_conn_retry_count', 0) + 1
+                        self._conn_retry_count = _retry_count
+                        if _retry_count <= 3:
+                            delay = min(2 ** _retry_count, 16)
+                            logger.warning(
+                                "流式连接中断（第 %d 次），%ds 后重试: %s",
+                                _retry_count, delay, e,
+                            )
+                            await asyncio.sleep(delay)
+                            continue  # 重试本轮 LLM 调用
+                        # 超过重试上限，放弃
+                        logger.error("流式连接中断超过重试上限: %s", e)
+                        del self._conn_retry_count
+
+                    # ── 上下文过长 → 应急压缩后重试 ──
+                    context_too_long_keywords = [
+                        "context_length", "too_long", "token", "maximum",
+                        "max_tokens", "reduce", "truncat",
+                    ]
+                    is_context_error = any(
+                        kw in error_str for kw in context_too_long_keywords
+                    )
+                    if is_context_error and self._history.compact_enabled:
+                        logger.info("检测到上下文过长错误，触发应急压缩: %s", e)
+                        original_count = len(self._history._messages)
+                        original_messages = self._history._messages
+                        compacted = await self._history.reactive_compact()
+                        if compacted is not original_messages:
+                            yield HistoryCompacted(
+                                strategy="reactive",
+                                original_count=original_count,
+                                compacted_count=len(compacted),
+                            )
+                            continue  # 压缩成功，重试本轮
+                        # 压缩无效果，无法恢复，直接抛出
+                        raise
+                    raise
+
+                # 流式调用成功，重置连接重试计数器
+                if hasattr(self, '_conn_retry_count'):
+                    del self._conn_retry_count
+
+                # 7. 记录 assistant 消息到历史
+                assistant_content = "".join(turn_text_parts) if turn_text_parts else None
+
+                # 清理 buffer：移除内部字段，转为标准格式
+                resolved_calls = []
+                for item in tool_call_buffer:
+                    resolved_calls.append({
+                        "id": item["id"],
+                        "type": "function",
+                        "function": {
+                            "name": item["function"]["name"],
+                            "arguments": item["function"]["arguments"],
+                        },
+                    })
+
+                assistant_msg = Message(
+                    role=MessageRole.ASSISTANT,
+                    content=assistant_content,
+                    tool_calls=resolved_calls if resolved_calls else None,
+                )
+                self._history.add(assistant_msg)
+                final_text = assistant_content or final_text
+
+                # 8. 无工具调用 → 结束
+                if not resolved_calls:
+                    self.save_session()
+                    yield AgentDone(
+                        final_text=final_text,
+                        total_usage=total_usage,
+                        turn_count=turn_count,
+                    )
+                    return
+
+                # 9. 检查最大轮次
+                if turn_count >= self._config.max_turns:
+                    yield AgentError(
+                        error_type="max_turns",
+                        message=f"超出最大轮次 {self._config.max_turns}",
+                    )
+                    return
+
+                # 10. 执行工具调用
+                # ── 10a. 检查工具调用次数上限（提前检查整批）──
+                batch_size = len(resolved_calls)
+                if total_tool_calls + batch_size > self._config.tool_call_limit:
+                    yield AgentError(
+                        error_type="tool_limit",
+                        message=f"超出工具调用上限 {self._config.tool_call_limit}",
+                    )
+                    return
+                total_tool_calls += batch_size
+
+                # ── 10a.5 计划工具冲突检查（在危险工具确认之前）──
+                # 如果计划工具与其他工具混在同一批，立即拒绝，不进入确认流程
+                batch_names = {
+                    c.get("function", {}).get("name", "")
+                    for c in resolved_calls
+                }
+                has_plan = bool(batch_names & _PLAN_TOOLS)
+                # 元工具（发现/加载）与计划工具同批不视为冲突
+                has_non_plan = bool(batch_names - _PLAN_TOOLS - _META_TOOLS)
+
+                if has_plan and has_non_plan:
+                    plan_names = ", ".join(batch_names & _PLAN_TOOLS)
+                    other_names = ", ".join(batch_names - _PLAN_TOOLS)
                     error_msg = (
-                        f"流程约束：已经开始执行任务后不能再创建计划（{plan_names}）。"
-                        f"请直接继续完成工作，无需补做计划。"
+                        f"错误：计划工具（{plan_names}）不能与其他工具（{other_names}）"
+                        f"在同一批调用中同时执行。"
+                        f"请先单独调用计划工具完成计划更新，"
+                        f"然后在下一轮对话中再调用其他工具。"
                     )
                     for call in resolved_calls:
                         tc_id = call.get("id", "")
@@ -704,174 +666,201 @@ class Agent:
                             role=MessageRole.TOOL, content=error_msg,
                             tool_call_id=tc_id, name=tn,
                         ))
-                    continue
+                    continue  # 跳过确认循环和 asyncio.gather，直接进入下一轮
 
-            # ── 10a.7 talk 模式安全检查 ──
-            # talk 模式下，阻止所有不安全工具调用
-            if self._config.mode == AgentMode.TALK:
-                blocked = []
-                allowed = []
+                # ── 10a.6 跨轮次执行顺序守卫 ──
+                # 如果已经执行过非计划工具，禁止再创建计划
+                if self._work_started and not self._plan_created:
+                    late_plan = batch_names & _PLAN_TOOLS
+                    if late_plan:
+                        plan_names = ", ".join(late_plan)
+                        error_msg = (
+                            f"流程约束：已经开始执行任务后不能再创建计划（{plan_names}）。"
+                            f"请直接继续完成工作，无需补做计划。"
+                        )
+                        for call in resolved_calls:
+                            tc_id = call.get("id", "")
+                            tn = call.get("function", {}).get("name", "")
+                            ta = call.get("function", {}).get("arguments", "{}")
+                            yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
+                            yield ToolResult(
+                                tool_name=tn, tool_call_id=tc_id,
+                                output=error_msg, is_error=True,
+                            )
+                            self._history.add(Message(
+                                role=MessageRole.TOOL, content=error_msg,
+                                tool_call_id=tc_id, name=tn,
+                            ))
+                        continue
+
+                # ── 10a.7 talk 模式安全检查 ──
+                # talk 模式下，阻止所有不安全工具调用
+                if self._config.mode == AgentMode.TALK:
+                    blocked = []
+                    allowed = []
+                    for call in resolved_calls:
+                        fn = call.get("function", {})
+                        tool_name = fn.get("name", "")
+                        tool_args = fn.get("arguments", "{}")
+                        wrapper = self._registry.get_tool(tool_name)
+                        if wrapper and self._is_safe_call(wrapper, tool_args):
+                            allowed.append(call)
+                        else:
+                            blocked.append(call)
+
+                    if blocked:
+                        for call in blocked:
+                            tc_id = call.get("id", "")
+                            fn = call.get("function", {})
+                            tn = fn.get("name", "")
+                            ta = fn.get("arguments", "{}")
+                            yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
+                            error_msg = (
+                                f"[talk 模式] 工具 {tn} 不可用：当前为只读模式，"
+                                f"仅允许安全操作。请用安全工具或指令完成需求。"
+                            )
+                            yield ToolResult(
+                                tool_name=tn, tool_call_id=tc_id,
+                                output=error_msg, is_error=True,
+                            )
+                            self._history.add(Message(
+                                role=MessageRole.TOOL, content=error_msg,
+                                tool_call_id=tc_id, name=tn,
+                            ))
+                        if not allowed:
+                            continue  # 全部被阻止，跳过确认和执行
+                        # 部分被阻止，只执行允许的
+                        resolved_calls = allowed
+
+                # ── 10b. 顺序发出 ToolCallStart + 不安全工具确认 ──
+                confirmed = []
                 for call in resolved_calls:
+                    tool_call_id = call.get("id", "")
                     fn = call.get("function", {})
                     tool_name = fn.get("name", "")
                     tool_args = fn.get("arguments", "{}")
-                    wrapper = self._registry.get_tool(tool_name)
-                    if wrapper and self._is_safe_call(wrapper, tool_args):
-                        allowed.append(call)
-                    else:
-                        blocked.append(call)
 
-                if blocked:
-                    for call in blocked:
-                        tc_id = call.get("id", "")
-                        fn = call.get("function", {})
-                        tn = fn.get("name", "")
-                        ta = fn.get("arguments", "{}")
-                        yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
-                        error_msg = (
-                            f"[talk 模式] 工具 {tn} 不可用：当前为只读模式，"
-                            f"仅允许安全操作。请用安全工具或指令完成需求。"
-                        )
-                        yield ToolResult(
-                            tool_name=tn, tool_call_id=tc_id,
-                            output=error_msg, is_error=True,
-                        )
-                        self._history.add(Message(
-                            role=MessageRole.TOOL, content=error_msg,
-                            tool_call_id=tc_id, name=tn,
-                        ))
-                    if not allowed:
-                        continue  # 全部被阻止，跳过确认和执行
-                    # 部分被阻止，只执行允许的
-                    resolved_calls = allowed
-
-            # ── 10b. 顺序发出 ToolCallStart + 不安全工具确认 ──
-            confirmed = []
-            for call in resolved_calls:
-                tool_call_id = call.get("id", "")
-                fn = call.get("function", {})
-                tool_name = fn.get("name", "")
-                tool_args = fn.get("arguments", "{}")
-
-                # 产出 ToolCallStart 事件
-                yield ToolCallStart(
-                    tool_name=tool_name,
-                    tool_call_id=tool_call_id,
-                    arguments=tool_args,
-                )
-
-                # 不安全工具确认检查（auto 模式下不安全工具需审批）
-                wrapper = self._registry.get_tool(tool_name)
-                if (self._config.mode == AgentMode.AUTO
-                        and not self._is_safe_call(wrapper, tool_args)
-                        and self._on_confirm):
-                    raw_result = await self._on_confirm(tool_name, tool_args)
-
-                    # 兼容 bool 和 ConfirmResponse 两种返回
-                    if isinstance(raw_result, ConfirmResponse):
-                        approved = raw_result.approved
-                        user_message = raw_result.message
-                    else:
-                        approved = bool(raw_result)
-                        user_message = ""
-
-                    yield ToolConfirmRequired(
+                    # 产出 ToolCallStart 事件
+                    yield ToolCallStart(
                         tool_name=tool_name,
                         tool_call_id=tool_call_id,
                         arguments=tool_args,
-                        approved=approved,
-                        message=user_message,
                     )
-                    if not approved:
-                        if user_message:
-                            reject_msg = (
-                                f"用户拒绝了工具 {tool_name} 的执行，并给出指示：{user_message}"
-                            )
+
+                    # 不安全工具确认检查（auto 模式下不安全工具需审批）
+                    wrapper = self._registry.get_tool(tool_name)
+                    if (self._config.mode == AgentMode.AUTO
+                            and not self._is_safe_call(wrapper, tool_args)
+                            and self._on_confirm):
+                        raw_result = await self._on_confirm(tool_name, tool_args)
+
+                        # 兼容 bool 和 ConfirmResponse 两种返回
+                        if isinstance(raw_result, ConfirmResponse):
+                            approved = raw_result.approved
+                            user_message = raw_result.message
                         else:
-                            reject_msg = f"用户拒绝了工具 {tool_name} 的执行"
+                            approved = bool(raw_result)
+                            user_message = ""
+
+                        yield ToolConfirmRequired(
+                            tool_name=tool_name,
+                            tool_call_id=tool_call_id,
+                            arguments=tool_args,
+                            approved=approved,
+                            message=user_message,
+                        )
+                        if not approved:
+                            if user_message:
+                                reject_msg = (
+                                    f"用户拒绝了工具 {tool_name} 的执行，并给出指示：{user_message}"
+                                )
+                            else:
+                                reject_msg = f"用户拒绝了工具 {tool_name} 的执行"
+                            yield ToolResult(
+                                tool_name=tool_name,
+                                tool_call_id=tool_call_id,
+                                output=reject_msg,
+                                is_error=True,
+                            )
+                            self._history.add(Message(
+                                role=MessageRole.TOOL,
+                                content=reject_msg,
+                                tool_call_id=tool_call_id,
+                                name=tool_name,
+                            ))
+                            continue
+
+                    confirmed.append({
+                        "call": call,
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "wrapper": wrapper,
+                    })
+
+                # ── 10c. 并发执行所有已确认的工具 ──
+                if confirmed:
+                    async def _execute_one(item):
+                        return item, result
+
+                    results = await asyncio.gather(
+                        *[_execute_one(item) for item in confirmed]
+                    )
+
+                    # ── 10d. 顺序处理结果：转发事件、产出 ToolResult ──
+                    for item, exec_result, per_call_events in results:
+                        tool_name = item["tool_name"]
+                        tool_call_id = item["tool_call_id"]
+                        wrapper = item["wrapper"]
+
+                        # 子代理事件
+                        if wrapper and getattr(wrapper, '_is_subagent', False):
+                            sub_final_text = ""
+                            sub_turn_count = 0
+                            sub_total_usage = TokenUsage()
+                            sub_is_error = False
+
+                            for sevt in per_call_events:
+                                yield SubAgentEvent(subagent_name=tool_name, event=sevt)
+                                if isinstance(sevt, AgentDone):
+                                    sub_final_text = sevt.final_text
+                                    sub_turn_count = sevt.turn_count
+                                    sub_total_usage = sevt.total_usage
+                                elif isinstance(sevt, AgentError):
+                                    sub_is_error = True
+                                    sub_final_text = sevt.message
+
+                            yield SubAgentDone(
+                                subagent_name=tool_name,
+                                final_text=sub_final_text,
+                                turn_count=sub_turn_count,
+                                total_usage=sub_total_usage,
+                                is_error=sub_is_error,
+                            )
+
+                        # 产出 ToolResult 事件
                         yield ToolResult(
                             tool_name=tool_name,
                             tool_call_id=tool_call_id,
-                            output=reject_msg,
-                            is_error=True,
+                            output=exec_result.output,
+                            is_error=exec_result.is_error,
                         )
+
+                        # 标记流程约束状态
+                        if tool_name == "todo_write" and not exec_result.is_error:
+                            self._plan_created = True
+                        if tool_name not in _PLAN_TOOLS and tool_name not in _META_TOOLS:
+                            self._work_started = True
+
+                        # 将工具结果加入历史
                         self._history.add(Message(
                             role=MessageRole.TOOL,
-                            content=reject_msg,
+                            content=exec_result.output,
                             tool_call_id=tool_call_id,
                             name=tool_name,
                         ))
-                        continue
 
-                confirmed.append({
-                    "call": call,
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "wrapper": wrapper,
-                })
+                # 11. 继续循环，LLM 将看到工具结果
 
-            # ── 10c. 并发执行所有已确认的工具 ──
-            if confirmed:
-                async def _execute_one(item):
-                    result = await self._executor.execute(item["call"])
-                    return item, result
-
-                results = await asyncio.gather(
-                    *[_execute_one(item) for item in confirmed]
-                )
-
-                # ── 10d. 顺序处理结果：转发事件、产出 ToolResult ──
-                for item, exec_result in results:
-                    tool_name = item["tool_name"]
-                    tool_call_id = item["tool_call_id"]
-                    wrapper = item["wrapper"]
-
-                    # 子代理事件转发
-                    if wrapper and getattr(wrapper, '_is_subagent', False):
-                        sub_events = getattr(wrapper, '_subagent_events', [])
-                        sub_final_text = ""
-                        sub_turn_count = 0
-                        sub_total_usage = TokenUsage()
-                        sub_is_error = False
-
-                        for sevt in sub_events:
-                            yield SubAgentEvent(subagent_name=tool_name, event=sevt)
-                            if isinstance(sevt, AgentDone):
-                                sub_final_text = sevt.final_text
-                                sub_turn_count = sevt.turn_count
-                                sub_total_usage = sevt.total_usage
-                            elif isinstance(sevt, AgentError):
-                                sub_is_error = True
-                                sub_final_text = sevt.message
-
-                        yield SubAgentDone(
-                            subagent_name=tool_name,
-                            final_text=sub_final_text,
-                            turn_count=sub_turn_count,
-                            total_usage=sub_total_usage,
-                            is_error=sub_is_error,
-                        )
-
-                    # 产出 ToolResult 事件
-                    yield ToolResult(
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                        output=exec_result.output,
-                        is_error=exec_result.is_error,
-                    )
-
-                    # 标记流程约束状态
-                    if tool_name == "todo_write" and not exec_result.is_error:
-                        self._plan_created = True
-                    if tool_name not in _PLAN_TOOLS and tool_name not in _META_TOOLS:
-                        self._work_started = True
-
-                    # 将工具结果加入历史
-                    self._history.add(Message(
-                        role=MessageRole.TOOL,
-                        content=exec_result.output,
-                        tool_call_id=tool_call_id,
-                        name=tool_name,
-                    ))
-
-            # 11. 继续循环，LLM 将看到工具结果
+        finally:
+            if plan_token is not None:
+                _current_todo_session_dir.reset(plan_token)
