@@ -8,7 +8,6 @@ v2 变更：
 from __future__ import annotations
 
 import contextvars
-import dataclasses
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Optional
@@ -51,8 +50,9 @@ class SubAgentConfig:
     :param description: 工具描述，出现在父 LLM 的 tool schema 中
     :param system_prompt: 子代理的系统提示（可选，可与 prompt_dir 组合使用）
     :param tools: 子代理可用的工具列表（@tool 装饰的函数）
-    :param config: 子代理的 AgentConfig（None 时使用默认值：
-        max_turns=50, timeout=120, total_timeout=600, confirm_dangerous=False）
+    :param config: 子代理的 AgentConfig 运行限额（None 时使用默认值：
+        max_turns=50, timeout=120, total_timeout=600, tool_call_limit=50）。
+        注：操作模式由父 Agent 继承（非此处配置），session 固定关闭。
     :param history_max_turns: 子代理对话历史最大轮数
     :param history_max_tokens: 子代理对话历史 token 上限（None 为不限）
     :param llm_kwargs: 传递给子代理 LLM 的额外参数（如 web_search=True, enable_thinking=True）
@@ -146,20 +146,17 @@ def _create_single_subagent_tool(
             )
         events.clear()
 
-        # 每次调用创建全新 Agent → 完全的历史隔离
+        # 每次调用创建全新 Agent → 完全的历史隔离。
+        # config 仅含运行限额（Agent.__init__ 会做防御性拷贝，此处直接传引用即可）。
         sub_config = cfg.config or _DEFAULT_SUBAGENT_CONFIG
 
-        # 继承父 Agent 的操作模式：显式回调优先，否则读 ContextVar（Agent.run 已注入）
+        # 继承父 Agent 的操作模式：显式回调优先，否则读 ContextVar（Agent.run 已注入）。
+        # mode 现为 Agent 直接参数，不再寄居于 config。
         parent_mode = (
             get_parent_mode() if get_parent_mode is not None
             else _current_parent_mode.get()
         )
-        if parent_mode is not None:
-            sub_config = dataclasses.replace(sub_config, mode=parent_mode)
-        else:
-            sub_config = dataclasses.replace(sub_config)
-
-        sub_config.session_enabled = False  # 子代理不创建独立 session，结果已在主 agent 日志中记录
+        sub_mode = parent_mode if parent_mode is not None else AgentMode.AUTO
 
         sub_history = ConversationHistory(
             max_turns=cfg.history_max_turns,
@@ -172,7 +169,9 @@ def _create_single_subagent_tool(
             tools=cfg.tools if cfg.tools else None,
             history=sub_history,
             config=sub_config,
-            register_catalog=False,  # 子代理不注册mcp元工具，避免误导
+            mode=sub_mode,            # 继承父 Agent 操作模式
+            session_enabled=False,    # 子代理不创建独立 session，结果已在主 agent 日志中记录
+            register_catalog=False,   # 子代理不注册 mcp 元工具，避免误导
             skills=cfg.skills,
             skills_dir=cfg.skills_dir,
             register_skills=bool(cfg.skills or cfg.skills_dir),

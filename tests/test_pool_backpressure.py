@@ -49,7 +49,7 @@ async def test_acquire_timeout_raises_pool_busy():
     pool = AgentPool(
         llm_factory=lambda u, s: llm,
         config=AgentPoolConfig(max_agents=10, max_concurrent_runs=1, acquire_timeout=0.2),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -83,7 +83,7 @@ async def test_pool_exhausted_when_full_and_busy():
     pool = AgentPool(
         llm_factory=lambda u, s: llm,
         config=AgentPoolConfig(max_agents=1, max_concurrent_runs=10),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -116,7 +116,7 @@ async def test_no_timeout_blocks_then_succeeds():
     pool = AgentPool(
         llm_factory=lambda u, s: llm,
         config=AgentPoolConfig(max_agents=10, max_concurrent_runs=1),  # 无 acquire_timeout
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -161,7 +161,7 @@ async def test_observability_fields_present():
     pool = AgentPool(
         llm_factory=lambda u, s: llm,
         config=AgentPoolConfig(max_agents=10, max_concurrent_runs=5),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:

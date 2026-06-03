@@ -560,11 +560,9 @@ class TestTodoWriteAgentIntegration:
             llm=llm,
             system_prompt="你是助手",
             tools=[todo_write_fn, todo_read_fn],
-            config=AgentConfig(
-                max_turns=5,
-                session_dir=str(tmp_path),
-                session_enabled=True,
-            ),
+            config=AgentConfig(max_turns=5),
+            session_dir=str(tmp_path),
+            session_enabled=True,
         )
 
         events = []
@@ -602,11 +600,9 @@ class TestTodoWriteAgentIntegration:
             llm=AsyncMock(chat=dummy_chat),
             system_prompt="init",
             tools=[todo_write_fn, todo_read_fn],
-            config=AgentConfig(
-                max_turns=5,
-                session_dir=str(tmp_path),
-                session_enabled=True,
-            ),
+            config=AgentConfig(max_turns=5),
+            session_dir=str(tmp_path),
+            session_enabled=True,
         )
 
         # 预先在 session_dir 写入计划（模拟之前的会话）

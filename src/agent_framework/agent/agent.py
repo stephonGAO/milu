@@ -148,13 +148,30 @@ class Agent:
         prompt_variables: dict[str, str] | None = None,
         session_id: str | None = None,
         mcp_manager: "MCPManager | None" = None,
+        # ── Agent 能力参数（原属 AgentConfig，现为 Agent 直接参数）──
+        mode: "AgentMode | str" = AgentMode.AUTO,           # 操作模式：talk/auto/superwork
+        session_enabled: bool = True,                       # 是否自动创建会话（对话日志持久化）
+        session_dir: "str | os.PathLike | None" = None,     # None→用户级 ~/.agent_framework/sessions
+        mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
     ):
         self._llm = llm
-        # 复制传入的 config，确保每个 Agent 持有独立的 AgentConfig 实例。
-        # 否则多个 Agent 共享同一可变配置时，set_mode() 会原地修改共享对象，
-        # 污染其他 Agent —— 多用户场景下这会造成 talk/superwork 模式跨用户串扰（越权风险）。
-        # AgentConfig 字段均为不可变标量，浅拷贝（dataclasses.replace）即可。
+        # 复制传入的 config，保证每个 Agent 持有独立 AgentConfig 实例（防御性隔离，
+        # 避免调用方复用/事后修改同一 config 影响多个 Agent）。AgentConfig 现仅含不可变
+        # 运行限额标量、运行期不再被原地修改，浅拷贝（dataclasses.replace）即可。
         self._config = dataclasses.replace(config) if config is not None else AgentConfig()
+
+        # Agent 能力参数（实例级）：mode 运行期可变（set_mode），不再寄居于共享 config，
+        # 因此天然无跨用户串扰风险（旧设计正是为此才要拷贝 config.mode）。
+        self._mode = AgentMode(mode) if isinstance(mode, str) else mode
+        self._session_enabled = session_enabled
+        self._mcp_tools_active_by_default = mcp_tools_active_by_default
+        # session 根目录：None → 用户级默认（与 CWD 解耦）；否则用传入路径
+        if session_dir is None:
+            from agent_framework.resources import default_session_dir
+            self._session_dir = default_session_dir()
+        else:
+            self._session_dir = Path(session_dir)
+
         self._history = history or ConversationHistory(
             strategy="auto_compact",
             max_tokens=self._config.max_total_tokens,
@@ -163,9 +180,9 @@ class Agent:
 
         # ── 会话持久化 ──
         self._session = None
-        if self._config.session_enabled:
+        if self._session_enabled:
             from agent_framework.agent.session import Session
-            base_dir = Path(self._config.session_dir or ".sessions")
+            base_dir = self._session_dir
             model = self._extract_model_name(llm)
             # session_id 为 None → 生成随机 id（一次性会话）；
             # 显式传入 → 使用确定性 id，便于淘汰/重启/多 worker 共享存储后
@@ -303,14 +320,14 @@ class Agent:
         """
         if isinstance(mode, str):
             mode = AgentMode(mode)
-        old = self._config.mode
-        self._config.mode = mode
+        old = self._mode
+        self._mode = mode
         logger.info("Agent 模式切换: %s → %s", old.value, mode.value)
 
     @property
     def mode(self) -> AgentMode:
         """当前操作模式。"""
-        return self._config.mode
+        return self._mode
 
     def set_confirm_wait_guard(
         self, guard: "Callable[[], contextlib.AbstractAsyncContextManager] | None"
@@ -344,7 +361,7 @@ class Agent:
         if self._session:
             self._session.save_metadata()
 
-        base_dir = self._session.base_dir if self._session else Path(self._config.session_dir or ".sessions")
+        base_dir = self._session.base_dir if self._session else self._session_dir
         model = self._extract_model_name(self._llm)
 
         self._session = SessionClass(SessionClass.generate_id(), base_dir, model=model)
@@ -361,7 +378,7 @@ class Agent:
         if self._session:
             self._session.save_metadata()
 
-        base_dir = self._session.base_dir if self._session else Path(self._config.session_dir or ".sessions")
+        base_dir = self._session.base_dir if self._session else self._session_dir
         self._session = SessionClass.load_session(session_id, base_dir)
         self._history.load_from_session(self._session)
         self._work_started = False
@@ -471,7 +488,7 @@ class Agent:
         logger.info(
             "MCP 工具已注册: %d 个（%s）",
             len(wrappers),
-            "活跃" if self._config.mcp_tools_active_by_default else "休眠",
+            "活跃" if self._mcp_tools_active_by_default else "休眠",
         )
 
     def _register_mcp_tools(self, wrappers: list) -> None:
@@ -480,7 +497,7 @@ class Agent:
         被 connect_mcp()（自建 manager）与 __init__（注入共享 manager）共用。
         """
         for w in wrappers:
-            if self._config.mcp_tools_active_by_default:
+            if self._mcp_tools_active_by_default:
                 self._registry.register_wrapper(w)  # 向后兼容模式：直接进活跃池
             else:
                 # 注册到休眠池（register_dormant 自动从工具名提取 category）
@@ -780,7 +797,7 @@ class Agent:
 
                 # ── 10a.7 talk 模式安全检查 ──
                 # talk 模式下，阻止所有不安全工具调用
-                if self._config.mode == AgentMode.TALK:
+                if self._mode == AgentMode.TALK:
                     blocked = []
                     allowed = []
                     for call in resolved_calls:
@@ -834,7 +851,7 @@ class Agent:
 
                     # 不安全工具确认检查（auto 模式下不安全工具需审批）
                     wrapper = self._registry.get_tool(tool_name)
-                    if (self._config.mode == AgentMode.AUTO
+                    if (self._mode == AgentMode.AUTO
                             and not self._is_safe_call(wrapper, tool_args)
                             and self._on_confirm):
                         # 等待人工确认期间，通过守卫释放外部并发许可（无注入时为 no-op），

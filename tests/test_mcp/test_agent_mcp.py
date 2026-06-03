@@ -245,7 +245,7 @@ class TestAgentMCPIntegration:
                 llm=llm,
                 system_prompt="test",
                 mcp_config_path=config_path,
-                config=AgentConfig(mcp_tools_active_by_default=True),
+                mcp_tools_active_by_default=True,
             )
             await agent.connect_mcp()
 

@@ -58,13 +58,9 @@ async def lifespan(app):
             idle_ttl_seconds=300,
             sweep_interval_seconds=60,
         ),
-        agent_config=AgentConfig(
-            max_turns=50,
-            timeout=120,
-            mode="auto",
-            session_enabled=True,
-            session_dir="./.sessions",
-        ),
+        # AgentConfig 现仅含运行限额；mode/session 等能力参数通过 agent_kwargs 透传
+        agent_config=AgentConfig(max_turns=50, timeout=120),
+        agent_kwargs={"mode": "auto", "session_enabled": True, "session_dir": "./.sessions"},
     )
     await pool.start()
     app.state.pool = pool

@@ -86,8 +86,12 @@ def _make_mixed_tool():
 
 class TestAgentMode:
     def test_default_mode_is_auto(self):
-        config = AgentConfig()
-        assert config.mode == AgentMode.AUTO
+        agent = Agent(
+            llm=_make_mock_llm("read_data"),
+            session_enabled=False,
+            register_catalog=False, register_skills=False,
+        )
+        assert agent.mode == AgentMode.AUTO
 
     def test_mode_from_string(self):
         assert AgentMode("talk") == AgentMode.TALK
@@ -107,7 +111,7 @@ class TestSetMode:
         llm = _make_mock_llm("read_data")
         agent = Agent(
             llm=llm, tools=[_make_safe_tool()],
-            config=AgentConfig(session_enabled=False),
+            session_enabled=False,
         )
         assert agent.mode == AgentMode.AUTO
 
@@ -121,7 +125,7 @@ class TestSetMode:
         llm = _make_mock_llm("read_data")
         agent = Agent(
             llm=llm, tools=[_make_safe_tool()],
-            config=AgentConfig(session_enabled=False),
+            session_enabled=False,
         )
 
         agent.set_mode(AgentMode.TALK)
@@ -131,7 +135,7 @@ class TestSetMode:
         llm = _make_mock_llm("read_data")
         agent = Agent(
             llm=llm, tools=[_make_safe_tool()],
-            config=AgentConfig(session_enabled=False),
+            session_enabled=False,
         )
 
         with pytest.raises(ValueError):
@@ -148,7 +152,7 @@ class TestTalkMode:
         llm = _make_mock_llm("write_data")
         agent = Agent(
             llm=llm, tools=[_make_write_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -166,7 +170,7 @@ class TestTalkMode:
         llm = _make_mock_llm("read_data")
         agent = Agent(
             llm=llm, tools=[_make_safe_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -188,7 +192,7 @@ class TestTalkMode:
         llm = _make_mock_llm("file_op", tool_args=args)
         agent = Agent(
             llm=llm, tools=[_make_mixed_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -207,7 +211,7 @@ class TestTalkMode:
         llm = _make_mock_llm("file_op", tool_args=args)
         agent = Agent(
             llm=llm, tools=[_make_mixed_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -232,7 +236,7 @@ class TestTalkMode:
 
         agent = Agent(
             llm=llm, tools=[_make_unsafe_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
             on_confirm=mock_confirm,
         )
 
@@ -281,7 +285,7 @@ class TestTalkMode:
 
         agent = Agent(
             llm=llm, tools=[_make_safe_tool(), _make_write_tool()],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -315,10 +319,8 @@ class TestSuperworkMode:
 
         agent = Agent(
             llm=llm, tools=[_make_unsafe_tool()],
-            config=AgentConfig(
-                mode=AgentMode.SUPERWORK,
-                session_enabled=False,
-            ),
+            mode=AgentMode.SUPERWORK,
+            session_enabled=False,
             on_confirm=mock_confirm,
         )
 
@@ -353,10 +355,8 @@ class TestAutoMode:
 
         agent = Agent(
             llm=llm, tools=[_make_unsafe_tool()],
-            config=AgentConfig(
-                mode=AgentMode.AUTO,
-                session_enabled=False,
-            ),
+            mode=AgentMode.AUTO,
+            session_enabled=False,
             on_confirm=mock_confirm,
         )
 
@@ -397,7 +397,7 @@ class TestAutoMode:
 
         agent = Agent(
             llm=llm, tools=[_make_safe_tool(), _make_write_tool()],
-            config=AgentConfig(mode=AgentMode.AUTO, session_enabled=False),
+            mode=AgentMode.AUTO, session_enabled=False,
         )
 
         events = []
@@ -455,7 +455,7 @@ class TestSubAgentModeInheritance:
                 name="test_sub",
                 description="测试子代理",
                 tools=[sub_write],
-                config=AgentConfig(session_enabled=False),
+                config=AgentConfig(),
             )],
             get_parent_mode=lambda: AgentMode.TALK,
         )
@@ -486,10 +486,8 @@ class TestSubAgentModeInheritance:
         agent = Agent(
             llm=parent_llm,
             tools=subagent_tools,
-            config=AgentConfig(
-                mode=AgentMode.TALK,
-                session_enabled=False,
-            ),
+            mode=AgentMode.TALK,
+            session_enabled=False,
         )
 
         events = []
@@ -545,7 +543,7 @@ class TestSubAgentModeInheritance:
                 name="test_sub2",
                 description="测试子代理",
                 tools=[sub_write],
-                config=AgentConfig(session_enabled=False),
+                config=AgentConfig(),
             )],
         )
 
@@ -574,10 +572,8 @@ class TestSubAgentModeInheritance:
         agent = Agent(
             llm=parent_llm,
             tools=subagent_tools,
-            config=AgentConfig(
-                mode=AgentMode.TALK,
-                session_enabled=False,
-            ),
+            mode=AgentMode.TALK,
+            session_enabled=False,
         )
 
         async for _ in agent.run("委派任务"):
@@ -707,7 +703,7 @@ class TestPythonReplSafe:
         llm = _make_mock_llm("python_repl", tool_args=args)
         agent = Agent(
             llm=llm, tools=[python_repl],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -732,7 +728,7 @@ class TestShellCommandTalkMode:
         llm = _make_mock_llm("shell_command", tool_args=args)
         agent = Agent(
             llm=llm, tools=[shell_command],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []
@@ -759,10 +755,8 @@ class TestShellCommandTalkMode:
 
         agent = Agent(
             llm=llm, tools=[shell_command],
-            config=AgentConfig(
-                mode=AgentMode.TALK,
-                session_enabled=False,
-            ),
+            mode=AgentMode.TALK,
+            session_enabled=False,
             on_confirm=mock_confirm,
         )
 
@@ -786,7 +780,7 @@ class TestShellCommandTalkMode:
         llm = _make_mock_llm("shell_command", tool_args=args)
         agent = Agent(
             llm=llm, tools=[shell_command],
-            config=AgentConfig(mode=AgentMode.TALK, session_enabled=False),
+            mode=AgentMode.TALK, session_enabled=False,
         )
 
         events = []

@@ -170,21 +170,17 @@ async def test_two_agents_concurrent_writes_isolated(tmp_path: Path):
         llm=llm_a,
         system_prompt="A",
         tools=[todo_write, todo_read],
-        config=AgentConfig(
-            session_dir=str(tmp_path / "A"),
-            session_enabled=True,
-            max_turns=5,
-        ),
+        config=AgentConfig(max_turns=5),
+        session_dir=str(tmp_path / "A"),
+        session_enabled=True,
     )
     agent_b = Agent(
         llm=llm_b,
         system_prompt="B",
         tools=[todo_write, todo_read],
-        config=AgentConfig(
-            session_dir=str(tmp_path / "B"),
-            session_enabled=True,
-            max_turns=5,
-        ),
+        config=AgentConfig(max_turns=5),
+        session_dir=str(tmp_path / "B"),
+        session_enabled=True,
     )
 
     # 两个 Agent 应有完全独立的 session 目录

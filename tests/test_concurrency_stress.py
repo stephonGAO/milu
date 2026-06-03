@@ -89,7 +89,7 @@ async def test_shared_agent_concurrent_runs_history_cross_contamination(capsys):
     严格隔离版本见 tests/test_concurrency_with_pool.py。
     """
     llm = _make_echo_llm("ok")
-    agent = Agent(llm=llm, system_prompt="sys", config=AgentConfig(session_enabled=False))
+    agent = Agent(llm=llm, system_prompt="sys", session_enabled=False)
 
     async def user_run(user_id: str, text: str):
         events = []
@@ -155,9 +155,9 @@ async def test_subagent_concurrent_events_cross_contamination(capsys):
         return llm
 
     parent_a = Agent(llm=_make_parent_llm("a"), system_prompt="parent-a", tools=[sub_tool],
-                     config=AgentConfig(session_enabled=False))
+                     session_enabled=False)
     parent_b = Agent(llm=_make_parent_llm("b"), system_prompt="parent-b", tools=[sub_tool],
-                     config=AgentConfig(session_enabled=False))
+                     session_enabled=False)
 
     # 单次跑，看 baseline (parent_a)
     base_events = []
@@ -223,7 +223,7 @@ async def test_session_jsonl_concurrent_writes_corruption(tmp_path: Path, capsys
             llm=shared_llm,
             system_prompt="sys",
             history=None,
-            config=AgentConfig(session_enabled=False),
+            session_enabled=False,
         )
         # 强制共享 Session
         agent._session = sess
@@ -265,7 +265,7 @@ async def test_agent_busy_does_not_block_concurrent_runs(capsys):
     修复后行为不变（每用户独立 Agent），本测试只确认 bug 的具体表现。
     """
     llm = _make_echo_llm("ok", delay=0.05)
-    agent = Agent(llm=llm, config=AgentConfig(session_enabled=False))
+    agent = Agent(llm=llm, session_enabled=False)
 
     enter_count = 0
 
@@ -294,7 +294,7 @@ async def test_agent_busy_does_not_block_concurrent_runs(capsys):
 
     llm2 = AsyncMock()
     llm2.chat = chat
-    agent2 = Agent(llm=llm2, tools=[slow], config=AgentConfig(session_enabled=False))
+    agent2 = Agent(llm=llm2, tools=[slow], session_enabled=False)
 
     async def one_run(i):
         async for _ in agent2.run(f"r-{i}"):

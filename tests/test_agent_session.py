@@ -39,28 +39,31 @@ class TestAgentSessionCreation:
 
     def test_session_created_by_default(self, tmp_dir):
         """默认启用 session"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
         assert agent.session is not None
         assert isinstance(agent.session, Session)
         assert agent.session.dir_path.exists()
 
     def test_session_disabled(self, tmp_dir):
         """session_enabled=False 时不创建"""
-        config = AgentConfig(session_enabled=False, session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_enabled=False, session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
         assert agent.session is None
 
     def test_session_dir_created(self, tmp_dir):
         """会话目录被正确创建"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
         assert agent.session.dir_path.parent == tmp_dir
 
 
@@ -72,10 +75,11 @@ class TestAgentSessionLogging:
     @pytest.mark.asyncio
     async def test_messages_logged_during_run(self, tmp_dir):
         """run() 过程中 user 和 assistant 消息被记录"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm("你好！")
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         events = []
         async for event in agent.run("你好"):
@@ -99,20 +103,22 @@ class TestAgentSessionLifecycle:
 
     def test_save_session(self, tmp_dir):
         """save_session 写入 session.json"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         agent.save_session()
         assert agent.session.metadata_path.exists()
 
     def test_new_session(self, tmp_dir):
         """new_session 保存旧会话并创建新的"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         old_id = agent.session.session_id
         agent.new_session()
@@ -129,10 +135,11 @@ class TestAgentSessionLifecycle:
     @pytest.mark.asyncio
     async def test_load_session(self, tmp_dir):
         """load_session 恢复历史消息"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm("回复")
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         # 先有一些对话
         async for _ in agent.run("问题1"):
@@ -157,10 +164,11 @@ class TestAgentSessionLifecycle:
 
     def test_load_session_nonexistent(self, tmp_dir):
         """加载不存在的会话"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         # 加载不存在的 ID 不应崩溃（目录会被创建）
         count = agent.load_session("nonexistent_id")
@@ -174,10 +182,11 @@ class TestHistorySessionIntegration:
 
     def test_attach_and_detach_session(self, tmp_dir):
         """attach/detach session"""
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
+        _sess = dict(session_enabled=False)
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         session = Session("manual", tmp_dir)
         agent.history.attach_session(session)
@@ -188,10 +197,11 @@ class TestHistorySessionIntegration:
 
     def test_replace_all_does_not_log(self, tmp_dir):
         """replace_all 不写入 JSONL（append-only 审计日志）"""
-        config = AgentConfig(session_dir=str(tmp_dir))
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         # 添加一些消息
         agent.history.add(Message(role=MessageRole.USER, content="hello"))
@@ -213,10 +223,11 @@ class TestHistorySessionIntegration:
         session.log_message(Message(role=MessageRole.ASSISTANT, content="a1"))
         session.log_message(Message(role=MessageRole.USER, content="q2"))
 
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
+        _sess = dict(session_enabled=False)
         llm = _make_llm()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      skills_dir="/tmp/_nonexistent_", **_sess)
 
         agent.history.load_from_session(session)
         assert len(agent.history.all_messages) == 3

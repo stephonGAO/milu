@@ -29,10 +29,10 @@ def _make_llm(response_text: str = "回复"):
 
 def _make_agent(llm, compact_config=None, **kwargs):
     """创建带压缩配置的 Agent"""
-    config = AgentConfig(session_enabled=False, **kwargs)
+    config = AgentConfig(**kwargs)
     history = ConversationHistory(llm=llm, compact_config=compact_config)
     return Agent(llm=llm, system_prompt="test", config=config,
-                 history=history, skills_dir="/tmp/_nonexistent_")
+                 session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
 
 
 # ── 初始化测试 ────────────────────────────────────────────
@@ -72,10 +72,10 @@ class TestCompactorInit:
     def test_compactor_receives_session(self):
         """Compactor 接收 session 引用"""
         llm = _make_llm()
-        config = AgentConfig(session_enabled=True, session_dir=".sessions_test")
+        config = AgentConfig()
         history = ConversationHistory(llm=llm)
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_dir=".sessions_test", history=history, skills_dir="/tmp/_nonexistent_")
         if agent._history._compactor:
             assert agent._history._compactor._session is agent.session
 
@@ -107,9 +107,9 @@ class TestCompactorInit:
         llm.capabilities.max_context_window = 131072
 
         history = ConversationHistory(llm=llm)
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
         c = agent._history._compactor
         # 131072 // 1500 = 87, // 2 = 43, min(43, 30) = 30
         assert c._old_round_threshold == 30
@@ -128,9 +128,9 @@ class TestCompactorInit:
         llm.capabilities.max_context_window = 32768
 
         history = ConversationHistory(llm=llm)
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
         c = agent._history._compactor
         # 32768 // 1500 = 21, // 2 = 10, max(5, min(10, 30)) = 10
         assert c._old_round_threshold == 10
@@ -168,9 +168,9 @@ class TestAutoCompactIntegration:
 
         cc = CompactConfig(trigger_ratio=0.5)
         history = ConversationHistory(llm=llm, compact_config=cc)
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
 
         # 预填充历史（模拟之前的高 token 使用）
         agent._history.update_prompt_tokens(7000)  # 7000/8192 > 0.5
@@ -251,9 +251,9 @@ class TestReactiveCompactIntegration:
 
         cc = CompactConfig(trigger_ratio=0.99)
         history = ConversationHistory(llm=llm, compact_config=cc)
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
 
         events = []
         async for event in agent.run("消息"):
@@ -332,9 +332,9 @@ class TestHistoryState:
 
         cc = CompactConfig(trigger_ratio=0.5)
         history = ConversationHistory(llm=llm, compact_config=cc)
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      history=history, skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, history=history, skills_dir="/tmp/_nonexistent_")
 
         agent._history.update_prompt_tokens(7000)
 

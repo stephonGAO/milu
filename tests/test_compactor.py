@@ -612,9 +612,9 @@ class TestCreateCompactTool:
         """应成功创建 compact 工具"""
         from agent_framework.agent import Agent
         llm = _make_llm()
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, skills_dir="/tmp/_nonexistent_")
         compact_tool = create_compact_tool(agent)
         assert compact_tool is not None
         assert compact_tool._tool_wrapper.meta is True
@@ -624,9 +624,9 @@ class TestCreateCompactTool:
         """compact 工具执行应替换历史"""
         from agent_framework.agent import Agent
         llm = _make_llm("工具摘要")
-        config = AgentConfig(session_enabled=False)
+        config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      skills_dir="/tmp/_nonexistent_")
+                      session_enabled=False, skills_dir="/tmp/_nonexistent_")
 
         agent.history.add(_make_user("msg 1"))
         agent.history.add(_make_assistant("msg 2"))

@@ -18,7 +18,7 @@ from agent_framework.llm.base.response import StreamChunk, TokenUsage
 def _agent(llm):
     return Agent(
         llm=llm,
-        config=AgentConfig(session_enabled=False),
+        session_enabled=False,
         register_catalog=False,
         register_skills=False,
     )
@@ -78,7 +78,7 @@ async def test_usage_summed_across_tool_turns():
     async def noop() -> str:
         return "ok"
 
-    agent = Agent(llm=llm, tools=[noop], config=AgentConfig(session_enabled=False),
+    agent = Agent(llm=llm, tools=[noop], session_enabled=False,
                   register_catalog=False, register_skills=False)
 
     done = None

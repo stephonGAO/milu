@@ -197,13 +197,13 @@ async def test_subagent_concurrent_runs_events_isolated():
         llm=_ParentLLM("A"),
         system_prompt="A",
         tools=[sub_tool],
-        config=AgentConfig(session_enabled=False, max_turns=5),
+        config=AgentConfig(max_turns=5), session_enabled=False,
     )
     parent_b = Agent(
         llm=_ParentLLM("B"),
         system_prompt="B",
         tools=[sub_tool],
-        config=AgentConfig(session_enabled=False, max_turns=5),
+        config=AgentConfig(max_turns=5), session_enabled=False,
     )
 
     # 并发跑两个父 Agent

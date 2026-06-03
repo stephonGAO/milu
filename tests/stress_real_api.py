@@ -62,9 +62,9 @@ def _make_factory(session_dir: str):
         return Agent(
             llm=llm,
             system_prompt=SYSTEM_PROMPT,
-            config=AgentConfig(
-                session_enabled=True, session_dir=session_dir, max_turns=2
-            ),
+            config=AgentConfig(max_turns=2),
+            session_enabled=True,
+            session_dir=session_dir,
             session_id=_sid(user_id, session_id),
             register_catalog=False,
             register_skills=False,

@@ -112,7 +112,7 @@ async def test_pool_concurrent_runs_isolated(llm_factory):
     pool = AgentPool(llm_factory=llm_factory,
                      config=AgentPoolConfig(max_agents=20, max_concurrent_runs=10),
                      # 只验证内存隔离，不依赖持久化；关闭 session 保持 hermetic
-                     agent_config=AgentConfig(session_enabled=False))
+                     agent_kwargs={"session_enabled": False})
     await pool.start()
     try:
         async def user_run(user_id: str, text: str):

@@ -65,7 +65,7 @@ async def test_pool_isolates_concurrent_users_under_load(capsys):
         llm_factory=factory,
         config=AgentPoolConfig(max_agents=50, max_concurrent_runs=20),
         # 只验证内存隔离，不依赖持久化；关闭 session 保持 hermetic
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -117,7 +117,7 @@ async def test_pool_same_key_concurrent_runs_serialized(capsys):
         # max_concurrent_runs 远大于并发数 → 确保串行来自 entry 锁而非全局限流
         config=AgentPoolConfig(max_agents=10, max_concurrent_runs=10),
         # 本测试只验证串行化，不依赖持久化；关闭 session 避免读写 CWD 落盘
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -168,7 +168,7 @@ async def test_pool_same_user_serial_runs_share_history(capsys):
         llm_factory=factory,
         config=AgentPoolConfig(max_agents=10),
         # 验证同一缓存实例内 history 累积，不依赖磁盘；关闭 session 保持 hermetic
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -199,16 +199,16 @@ async def test_pool_same_user_serial_runs_share_history(capsys):
 @pytest.mark.asyncio
 async def test_agent_restores_history_from_session(tmp_path):
     """P1-3：显式 session_id + 已有日志 → 新建 Agent 应从磁盘恢复历史。"""
-    cfg = AgentConfig(session_enabled=True, session_dir=str(tmp_path))
+    sess_dir = str(tmp_path)
     llm = _make_echo_llm(0.0)
 
-    a1 = Agent(llm=llm, config=cfg, session_id="u1__s1",
+    a1 = Agent(llm=llm, session_dir=sess_dir, session_id="u1__s1",
                register_catalog=False, register_skills=False)
     async for _ in a1.run("hello-1"):
         pass
 
     # 用相同 session_id 新建 Agent（模拟淘汰/重启后重建）
-    a2 = Agent(llm=llm, config=cfg, session_id="u1__s1",
+    a2 = Agent(llm=llm, session_dir=sess_dir, session_id="u1__s1",
                register_catalog=False, register_skills=False)
     user_msgs = [m.content for m in a2.history.all_messages
                  if m.role == MessageRole.USER]
@@ -222,7 +222,7 @@ async def test_pool_restores_history_after_eviction(tmp_path):
     pool = AgentPool(
         llm_factory=lambda u, s: llm,
         config=AgentPoolConfig(max_agents=1),
-        agent_config=AgentConfig(session_enabled=True, session_dir=str(tmp_path)),
+        agent_kwargs={"session_enabled": True, "session_dir": str(tmp_path)},
     )
     await pool.start()
     try:
@@ -272,9 +272,9 @@ async def test_confirm_wait_does_not_hold_concurrency_slot():
                 llm=_make_tool_call_llm("danger", {"x": "1"}),
                 tools=[danger],
                 on_confirm=on_confirm_a,
-                config=AgentConfig(session_enabled=False),  # AUTO 模式（默认）
+                session_enabled=False,  # AUTO 模式（默认）
             )
-        return Agent(llm=echo_llm, config=AgentConfig(session_enabled=False))
+        return Agent(llm=echo_llm, session_enabled=False)
 
     pool = AgentPool(
         llm_factory=lambda u, s: echo_llm,

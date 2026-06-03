@@ -23,17 +23,16 @@ class CompactConfig:
 
 @dataclass
 class AgentConfig:
-    """Agent 运行配置"""
+    """Agent 运行限额配置（纯调参，运行期不被原地修改）。
+
+    注意：以下「能力/身份」参数已上移为 Agent.__init__ 的直接参数，不再属于 AgentConfig：
+      - mode（操作模式 talk/auto/superwork）
+      - session_enabled / session_dir（会话持久化）
+      - mcp_tools_active_by_default（MCP 工具是否默认激活）
+    它们更属于 Agent 实例能力，且 mode 运行期可变；放回实例字段后天然无跨用户串扰风险。
+    """
     max_turns: int = 100            # 最大循环轮次（防无限循环）
     timeout: float = 300.0         # 单次 LLM 调用超时（秒）
     total_timeout: float = 60 * 60 * 1   # 整个 run() 的总超时（秒）
     max_total_tokens: int | None = None   # 总 token 上限（None=不限制）
     tool_call_limit: int = 100      # 单次 run() 中最大工具调用次数
-    mcp_tools_active_by_default: bool = False  # MCP 工具默认激活（False=进入休眠池，需手动激活）
-    mode: AgentMode = AgentMode.AUTO           # 操作模式：talk（只读）/ auto（标准）/ superwork（全权限）
-
-    # Session 会话配置
-    session_enabled: bool = True           # 自动创建会话（对话日志持久化）
-    # 会话目录。None 时默认 "./.sessions"（相对当前工作目录 CWD）。
-    # ⚠️ 作为库被集成时，CWD 取决于宿主应用，建议显式传入绝对路径以避免写入意外位置。
-    session_dir: str | None = None

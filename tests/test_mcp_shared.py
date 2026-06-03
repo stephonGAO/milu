@@ -57,13 +57,14 @@ def _echo_llm():
     return llm
 
 
-def _agent(mgr=None, **cfg_kwargs):
+def _agent(mgr=None, **agent_kwargs):
     return Agent(
         llm=_echo_llm(),
-        config=AgentConfig(session_enabled=False, **cfg_kwargs),
+        session_enabled=False,
         mcp_manager=mgr,
         register_catalog=False,
         register_skills=False,
+        **agent_kwargs,  # 如 mcp_tools_active_by_default=True（现为 Agent 参数）
     )
 
 
@@ -134,7 +135,7 @@ async def test_pool_shared_mcp_single_manager(monkeypatch):
     pool = AgentPool(
         llm_factory=lambda u, s: _echo_llm(),
         config=AgentPoolConfig(shared_mcp=True),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -162,7 +163,7 @@ async def test_pool_shared_mcp_disabled_by_default():
     pool = AgentPool(
         llm_factory=lambda u, s: _echo_llm(),
         config=AgentPoolConfig(),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()
     try:
@@ -194,7 +195,7 @@ async def test_pool_shared_mcp_connect_failure_degrades(monkeypatch):
     pool = AgentPool(
         llm_factory=lambda u, s: _echo_llm(),
         config=AgentPoolConfig(shared_mcp=True),
-        agent_config=AgentConfig(session_enabled=False),
+        agent_kwargs={"session_enabled": False},
     )
     await pool.start()  # 不应抛异常
     try:

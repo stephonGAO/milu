@@ -165,7 +165,9 @@ def make_agent_factory(llm, shared_mcp_manager=None):
             llm=llm_for_user,
             prompt_dir=prompts_base / "main",
             tools=[*BUILTIN_TOOLS, so_tool],
-            config=AgentConfig(session_enabled=True, session_dir="./.sessions"),
+            # mode/session 等能力参数现为 Agent 直接参数（原属 AgentConfig）
+            session_enabled=True,
+            session_dir="./.sessions",
             on_confirm=lambda tool, args: confirm_unsafe(user_id, tool, args),
             # 复用整池共享的一组 MCP 子进程（省内存）；None 时各 Agent 自建
             mcp_manager=shared_mcp_manager,

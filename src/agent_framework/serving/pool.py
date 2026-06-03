@@ -77,17 +77,18 @@
 #   - 否则 → 横向扩展（多机 + 负载均衡）
 #
 # 【per-user Agent 的 per-user 配置】
-# AgentConfig（mode / max_turns / session_enabled 等）也是实例级共享字段。
-# AgentPool 通过 agent_factory 回调支持按 user_id 注入不同配置：
+# mode / session_enabled / session_dir 等「能力参数」现为 Agent 直接参数；
+# max_turns 等「运行限额」仍在 AgentConfig。两种按 user_id 注入方式：
 #
+# 1) 自定义 agent_factory（最灵活，可按 user 差异化）：
 #   def my_factory(user_id, session_id, llm):
 #       if user_id.startswith("vip_"):
-#           cfg = AgentConfig(mode="deep", max_turns=100)
-#       else:
-#           cfg = AgentConfig(mode="fast", max_turns=20)
-#       return Agent(llm=llm, config=cfg)
-#
+#           return Agent(llm=llm, mode="superwork", config=AgentConfig(max_turns=100))
+#       return Agent(llm=llm, mode="auto", config=AgentConfig(max_turns=20))
 #   pool = AgentPool(llm_factory=..., agent_factory=my_factory)
+#
+# 2) 默认工厂 + agent_kwargs（简单场景，把能力参数透传给默认工厂构造的 Agent）：
+#   pool = AgentPool(llm_factory=..., agent_kwargs={"mode": "auto", "session_enabled": False})
 #
 # 【AgentPool 的 4 个硬不变量】（任何代码改动都必须维持）
 #   1. 每个 (user_id, session_id) 组合最多 1 个 Agent 实例
@@ -247,20 +248,26 @@ class AgentPool:
         agent_factory: Optional[AgentFactory] = None,
         config: Optional[AgentPoolConfig] = None,
         agent_config: Optional[AgentConfig] = None,
+        agent_kwargs: Optional[dict] = None,
     ):
         """
         :param llm_factory: 必填。接收 (user_id, session_id) 返回 BaseLLM 实例。
             共享同一 LLM 实例是安全的（AsyncOpenAI 协程安全），
             所以工厂通常直接返回预先创建的实例。
         :param agent_factory: 可选。接收 (user_id, session_id, llm) 返回 Agent。
-            不传则用默认工厂（注入 llm + agent_config）。
+            不传则用默认工厂（注入 llm + agent_config + agent_kwargs）。
         :param config: 池配置。
-        :param agent_config: 给默认 agent_factory 使用的 AgentConfig。
+        :param agent_config: 给默认 agent_factory 使用的 AgentConfig（运行限额）。
+        :param agent_kwargs: 给默认 agent_factory 透传的 Agent 能力参数字典，如
+            {"mode": "auto", "session_enabled": False, "session_dir": "...",
+             "tools": [...], "mcp_tools_active_by_default": True}。
+            默认工厂已显式控制 session_id 与 mcp_manager，勿在此重复传入。
         """
         self._llm_factory = llm_factory
         self._agent_factory = agent_factory or self._default_agent_factory
         self._pool_config = config or AgentPoolConfig()
         self._agent_config = agent_config or AgentConfig()
+        self._agent_kwargs = agent_kwargs or {}
 
         # 状态 — 单一 OrderedDict 兼顾"查找"与"LRU 顺序"
         # move_to_end(key) = 标记最近使用；popitem(last=False) = 弹最久未用
@@ -552,6 +559,8 @@ class AgentPool:
             session_id=self._derive_session_id(user_id, session_id),
             # 启用 shared_mcp 时注入共享 manager；否则为 None（per-agent 默认行为）
             mcp_manager=self._shared_mcp_manager,
+            # 透传能力参数（mode / session_enabled / session_dir / tools 等）
+            **self._agent_kwargs,
         )
 
     async def _get_or_create(
