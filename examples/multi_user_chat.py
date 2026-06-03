@@ -46,7 +46,6 @@ from agent_framework.serving import AgentPool, AgentPoolConfig
 from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
-    create_todo_write_tool,
     file_read,
     file_write,
     http_request,
@@ -82,7 +81,6 @@ def make_agent_factory(llm):
     prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
     skills_dir = Path(__file__).resolve().parent.parent / "skills"
     so_tool = create_structured_output_tool()
-    todo_write, todo_read = create_todo_write_tool()
 
     def _build_subagent_tools(agent):
         return create_subagent_tools(
@@ -143,7 +141,7 @@ def make_agent_factory(llm):
         agent = Agent(
             llm=llm_for_user,
             prompt_dir=prompts_base / "main",
-            tools=[*BUILTIN_TOOLS, so_tool, todo_write, todo_read],
+            tools=[*BUILTIN_TOOLS, so_tool],
             config=AgentConfig(session_enabled=True, session_dir="./.sessions"),
             on_confirm=lambda tool, args: confirm_unsafe(user_id, tool, args),
         )
@@ -292,7 +290,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
             active_tools = agent.tools.list_tools()
             dormant_tools = agent.tools.list_dormant_tools()
             lines = [f"=== 活跃工具（共 {len(active_tools)} 个）==="]
-            builtin_factory = [*BUILTIN_TOOLS, create_structured_output_tool(), *create_todo_write_tool()]
+            builtin_factory = [*BUILTIN_TOOLS, create_structured_output_tool()]
             builtin_names = {w._tool_wrapper.name for w in builtin_factory}
             for tool_func in builtin_factory:
                 w = tool_func._tool_wrapper

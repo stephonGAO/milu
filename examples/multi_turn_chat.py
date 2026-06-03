@@ -31,7 +31,6 @@ from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
-    create_todo_write_tool,
     http_request,
     file_read,
     file_write,
@@ -67,9 +66,8 @@ def print_header():
     print(f"\n{BANNER}")
     print(c("bold", c("cyan", "  多轮对话 Agent — 交互式聊天")))
     print(BANNER)
-    # 构造完整的内置工具名列表（create_todo_write_tool 返回元组）
-    _todo_tools = create_todo_write_tool()
-    _all_names = [t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool(), *_todo_tools]]
+    # 构造完整的内置工具名列表（todo 工具已包含在 BUILTIN_TOOLS 中）
+    _all_names = [t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool()]]
     print(f"""
   内置工具: {', '.join(_all_names)}
   子代理:   researcher（调研助手）, coder（编程助手）
@@ -122,7 +120,6 @@ def build_agent() -> Agent:
     llm = ModelRegistry.create("qwen", model="qwen-plus", web_search=True, enable_thinking=False)
 
     so_tool = create_structured_output_tool()
-    todo_write, todo_read = create_todo_write_tool()
 
     # 提示词目录路径（相对于项目根目录）
     prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
@@ -200,7 +197,7 @@ def build_agent() -> Agent:
         get_parent_mode=lambda: agent.mode,
     )
 
-    all_tools = [*BUILTIN_TOOLS, so_tool, todo_write, todo_read, *subagent_tools]
+    all_tools = [*BUILTIN_TOOLS, so_tool, *subagent_tools]
 
     # history = ConversationHistory(
     #     strategy="auto_compact",
@@ -408,7 +405,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         print(DIVIDER)
 
         # 内置工具
-        _builtin_factory_tools = [*BUILTIN_TOOLS, create_structured_output_tool(), *create_todo_write_tool()]
+        _builtin_factory_tools = [*BUILTIN_TOOLS, create_structured_output_tool()]
         builtin_names = {w._tool_wrapper.name for w in _builtin_factory_tools}
         for tool_func in _builtin_factory_tools:
             w = tool_func._tool_wrapper

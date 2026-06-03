@@ -106,7 +106,7 @@ def _render(items: list[dict[str, Any]]) -> str:
     description=(
         "管理当前会话的任务计划。每次调用都是完整重写整个计划"
         "（而非增量修改），请传入完整的任务列表。"
-        "**主动调用时机**：开始多步骤任务时立即建立计划；"
+        "**主动调用时机**：开始复杂多步骤任务时强烈建议建立计划；"
         "完成一项后刷新状态（pending → in_progress → completed）；"
         "发现需要调整计划时整体重写。"
         "计划会自动保存到当前 session 目录的 plan.json。"
@@ -142,7 +142,7 @@ async def todo_write(items: list[dict]) -> str:
         "  - 开始执行下一步操作前，确认还剩什么待办\n"
         "  - 完成一项任务后，刷新整体进度\n"
         "  - 不确定当前 plan 状态、或感觉已偏离原计划\n"
-        "  - 切换任务前，确认是否有未完成的相关条目\n"
+        "  - 完成全部任务后记得更新计划状态！\n"
         "返回包含所有任务的状态清单（pending / in_progress / completed）。"
     ),
 )
@@ -157,18 +157,3 @@ async def todo_read() -> str:
         logger.warning("读取 plan.json 失败: %s", e)
         return "暂无会话计划。"
     return _render(data.get("items", []))
-
-
-# ── 公开工厂（破坏性变更）──────────────────────────────
-
-def create_todo_write_tool() -> tuple:
-    """创建 todo_write + todo_read 两个工具函数。
-
-    v2 版本签名变化 — 不再接受 manager/plan_file 参数：
-      - 状态由 Agent 注入的 session_dir + ContextVar 承载
-      - session_dir 由 Agent.run() 入口设置到模块级 ContextVar
-
-    Returns:
-        (todo_write, todo_read) 两个工具函数的元组
-    """
-    return todo_write, todo_read

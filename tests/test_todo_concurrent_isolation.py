@@ -13,7 +13,6 @@ from agent_framework.agent import Agent, AgentConfig
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 from agent_framework.tools.builtin.todo_write import (
-    create_todo_write_tool,
     todo_read,
     todo_write,
 )
@@ -116,26 +115,14 @@ class _TodoWriteLLM(BaseLLM):
 # ── 测试 ────────────────────────────────────────────────
 
 def test_todo_write_no_closure_state():
-    """todo_write 工具函数无 TodoManager 闭包"""
-    cw, cr = create_todo_write_tool()
-    cw_closure = inspect.getclosurevars(cw)
-    cr_closure = inspect.getclosurevars(cr)
-    # 检查非局部变量和全局变量中不能有 TodoManager 相关
-    # Python 3.13+: getclosurevars 返回 .nonlocals（更早版本字段名为 .cells）
-    cw_nonlocals = cw_closure.nonlocals
-    cr_nonlocals = cr_closure.nonlocals
-    assert "mgr" not in cw_nonlocals
-    assert "mgr" not in cr_nonlocals
-    assert "manager" not in cw_nonlocals
-    assert "manager" not in cr_nonlocals
-
-
-def test_create_todo_write_tool_no_args():
-    """v2 工厂函数不接受任何参数"""
-    result = create_todo_write_tool()
-    assert len(result) == 2
-    assert result[0]._tool_wrapper.name == "todo_write"
-    assert result[1]._tool_wrapper.name == "todo_read"
+    """todo_write / todo_read 工具函数无闭包状态（状态由 ContextVar 承载）"""
+    cw_closure = inspect.getclosurevars(todo_write)
+    cr_closure = inspect.getclosurevars(todo_read)
+    # 工具函数不依赖任何外部 manager/plan_file
+    assert "mgr" not in cw_closure.nonlocals
+    assert "mgr" not in cr_closure.nonlocals
+    assert "manager" not in cw_closure.nonlocals
+    assert "manager" not in cr_closure.nonlocals
 
 
 @pytest.mark.asyncio
@@ -182,7 +169,7 @@ async def test_two_agents_concurrent_writes_isolated(tmp_path: Path):
     agent_a = Agent(
         llm=llm_a,
         system_prompt="A",
-        tools=list(create_todo_write_tool()),
+        tools=[todo_write, todo_read],
         config=AgentConfig(
             session_dir=str(tmp_path / "A"),
             session_enabled=True,
@@ -192,7 +179,7 @@ async def test_two_agents_concurrent_writes_isolated(tmp_path: Path):
     agent_b = Agent(
         llm=llm_b,
         system_prompt="B",
-        tools=list(create_todo_write_tool()),
+        tools=[todo_write, todo_read],
         config=AgentConfig(
             session_dir=str(tmp_path / "B"),
             session_enabled=True,

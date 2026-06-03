@@ -39,7 +39,7 @@ from agent_framework.agent.events import (
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig, AgentMode, CompactConfig, ConversationHistory, Session
 from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
-from agent_framework.tools.builtin.todo_write import create_todo_write_tool
+from agent_framework.tools.builtin.todo_write import todo_read, todo_write
 from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
 from agent_framework.prompts.builder import PromptBuilder
@@ -94,7 +94,8 @@ __all__ = [
     "SubAgentConfig",
     "create_subagent_tools",
     # Todo
-    "create_todo_write_tool",
+    "todo_read",
+    "todo_write",
     # Providers
     "ModelRegistry",
     # MCP

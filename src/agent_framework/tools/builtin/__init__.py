@@ -28,13 +28,12 @@ from agent_framework.tools.builtin.structured_output import (
     structured_output,
     create_structured_output_tool,
 )
-from agent_framework.tools.builtin.todo_write import (
-    create_todo_write_tool,
-)
+from agent_framework.tools.builtin.todo_write import todo_read, todo_write
 
 # 所有内置工具列表，可直接传给 Agent(tools=BUILTIN_TOOLS)
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
-# 注意：todo_write 需要通过 create_todo_write_tool() 创建后单独添加
+# 注意：todo 工具（todo_write / todo_read）依赖 Agent.run() 注入的 ContextVar（session_dir），
+#       在非 Agent 上下文中手动调用会抛 RuntimeError；正常通过 Agent 使用时无影响
 BUILTIN_TOOLS = [
     datetime_tool,
     http_request,
@@ -43,6 +42,8 @@ BUILTIN_TOOLS = [
     python_repl,
     web_search,
     shell_command,
+    todo_read,
+    todo_write,
 ]
 
 __all__ = [
@@ -56,6 +57,7 @@ __all__ = [
     "shell_command",
     "structured_output",
     "create_structured_output_tool",
-    "create_todo_write_tool",
+    "todo_read",
+    "todo_write",
     "BUILTIN_TOOLS",
 ]

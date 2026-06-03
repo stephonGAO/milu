@@ -1,9 +1,7 @@
 """测试内置工具 todo_write - 会话计划管理（无状态版本）
 
-新 API:
 - todo_write(items) / todo_read() 是模块级 @tool 装饰的函数
 - 状态完全由 plan.json 文件承载，路径从 _current_session_dir ContextVar 获取
-- create_todo_write_tool() 返回同一对模块级函数（无闭包）
 """
 import json
 
@@ -13,7 +11,6 @@ from agent_framework.tools.builtin.todo_write import (
     _current_session_dir,
     _MAX_PLAN_ITEMS,
     _render,
-    create_todo_write_tool,
     todo_read,
     todo_write,
 )
@@ -248,36 +245,17 @@ class TestTodoWriteValidation:
 
 
 class TestTodoWriteTool:
-    """create_todo_write_tool 工厂与包装函数"""
-
-    def test_factory_returns_tuple(self):
-        """工厂返回 2 元组"""
-        result = create_todo_write_tool()
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    def test_factory_returns_module_level_functions(self):
-        """工厂返回的就是模块级 todo_write / todo_read"""
-        cw, cr = create_todo_write_tool()
-        assert cw is todo_write
-        assert cr is todo_read
-
-    def test_factory_takes_no_args(self):
-        """v2 工厂不接受任何参数"""
-        result = create_todo_write_tool()
-        assert result is not None
+    """todo_write / todo_read 工具元数据"""
 
     def test_write_tool_metadata(self):
         """todo_write 工具元数据"""
-        cw, _ = create_todo_write_tool()
-        wrapper = cw._tool_wrapper
+        wrapper = todo_write._tool_wrapper
         assert wrapper.name == "todo_write"
         assert wrapper.is_async is True
 
     def test_read_tool_metadata(self):
         """todo_read 工具元数据"""
-        _, cr = create_todo_write_tool()
-        wrapper = cr._tool_wrapper
+        wrapper = todo_read._tool_wrapper
         assert wrapper.name == "todo_read"
         assert wrapper.is_async is True
 
@@ -487,7 +465,7 @@ class TestTodoWriteAgentIntegration:
         from agent_framework.agent.events import ToolResult
         from agent_framework.llm.base.response import StreamChunk
 
-        todo_write_fn, todo_read_fn = create_todo_write_tool()
+        todo_write_fn, todo_read_fn = todo_write, todo_read
         call_count = 0
 
         async def mock_chat(*a, **kw):
@@ -552,7 +530,7 @@ class TestTodoWriteAgentIntegration:
         from agent_framework.agent.events import ToolResult
         from agent_framework.llm.base.response import StreamChunk
 
-        todo_write_fn, todo_read_fn = create_todo_write_tool()
+        todo_write_fn, todo_read_fn = todo_write, todo_read
 
         # 先用一次模拟 LLM 构造 Agent，让它生成自己的 session_dir
         async def dummy_chat(*a, **kw):
