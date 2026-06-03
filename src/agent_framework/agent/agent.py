@@ -141,6 +141,7 @@ class Agent:
         register_skills: bool = True,
         prompt_dir: "str | os.PathLike | None" = None,
         prompt_variables: dict[str, str] | None = None,
+        session_id: str | None = None,
     ):
         self._llm = llm
         # 复制传入的 config，确保每个 Agent 持有独立的 AgentConfig 实例。
@@ -160,10 +161,16 @@ class Agent:
             from agent_framework.agent.session import Session
             base_dir = Path(self._config.session_dir or ".sessions")
             model = self._extract_model_name(llm)
-            self._session = Session(
-                Session.generate_id(), base_dir, model=model,
-            )
-            self._history.attach_session(self._session)
+            # session_id 为 None → 生成随机 id（一次性会话）；
+            # 显式传入 → 使用确定性 id，便于淘汰/重启/多 worker 共享存储后
+            # 按 (user, session) 定位并恢复历史。
+            sid = session_id or Session.generate_id()
+            self._session = Session(sid, base_dir, model=model)
+            # 若该 session 已有历史日志（重建/恢复场景），加载之；否则挂载空会话。
+            if self._session.conversation_path.exists():
+                self._history.load_from_session(self._session)
+            else:
+                self._history.attach_session(self._session)
 
         self._registry = ToolRegistry()
         if tools:

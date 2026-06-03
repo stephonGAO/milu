@@ -110,7 +110,9 @@ async def test_pool_lru_eviction(llm_factory):
 async def test_pool_concurrent_runs_isolated(llm_factory):
     """核心场景：N 个用户并发 run，history 互不串味。"""
     pool = AgentPool(llm_factory=llm_factory,
-                     config=AgentPoolConfig(max_agents=20, max_concurrent_runs=10))
+                     config=AgentPoolConfig(max_agents=20, max_concurrent_runs=10),
+                     # 只验证内存隔离，不依赖持久化；关闭 session 保持 hermetic
+                     agent_config=AgentConfig(session_enabled=False))
     await pool.start()
     try:
         async def user_run(user_id: str, text: str):

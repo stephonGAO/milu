@@ -100,6 +100,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -378,18 +379,35 @@ class AgentPool:
 
     # ── 内部 ──────────────────────────────────────────
 
+    @staticmethod
+    def _derive_session_id(user_id: str, session_id: str) -> str:
+        """从 (user_id, session_id) 生成确定性、文件系统安全的 Session 目录名。
+
+        确定性命名使得：
+        - 实例被 LRU/idle 淘汰或进程重启后，按同一 (user, session) 重建的 Agent
+          能从磁盘恢复历史（而非随机 id 产生孤儿日志）；
+        - 多 worker 共享会话存储 + 按 user_id 粘性路由时，历史可跨进程定位。
+        """
+        raw = f"{user_id}__{session_id}"
+        return re.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:128]
+
     def _default_agent_factory(
         self, user_id: str, session_id: str, llm: BaseLLM
     ) -> Agent:
-        """默认 Agent 工厂：注入 LLM + AgentConfig 模板。
+        """默认 Agent 工厂：注入 LLM + AgentConfig 模板 + 确定性 session_id。
 
-        这里传入的是池级共享的 self._agent_config 模板，但 Agent.__init__ 会对其
-        做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置，
-        set_mode() 等运行时修改不会跨用户串扰。
+        - 传入的是池级共享的 self._agent_config 模板，但 Agent.__init__ 会对其
+          做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置，
+          set_mode() 等运行时修改不会跨用户串扰。
+        - session_id 由 (user_id, session_id) 确定性派生，使历史在淘汰/重启后可恢复。
+
+        注：自定义 agent_factory 若也想要历史可恢复，应自行把派生的 session_id
+        透传给 Agent(session_id=...)。
         """
         return Agent(
             llm=llm,
             config=self._agent_config,
+            session_id=self._derive_session_id(user_id, session_id),
         )
 
     async def _get_or_create(

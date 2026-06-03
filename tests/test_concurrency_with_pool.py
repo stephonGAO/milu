@@ -64,6 +64,8 @@ async def test_pool_isolates_concurrent_users_under_load(capsys):
     pool = AgentPool(
         llm_factory=factory,
         config=AgentPoolConfig(max_agents=50, max_concurrent_runs=20),
+        # 只验证内存隔离，不依赖持久化；关闭 session 保持 hermetic
+        agent_config=AgentConfig(session_enabled=False),
     )
     await pool.start()
     try:
@@ -114,6 +116,8 @@ async def test_pool_same_key_concurrent_runs_serialized(capsys):
         llm_factory=lambda u, s: llm,
         # max_concurrent_runs 远大于并发数 → 确保串行来自 entry 锁而非全局限流
         config=AgentPoolConfig(max_agents=10, max_concurrent_runs=10),
+        # 本测试只验证串行化，不依赖持久化；关闭 session 避免读写 CWD 落盘
+        agent_config=AgentConfig(session_enabled=False),
     )
     await pool.start()
     try:
@@ -163,6 +167,8 @@ async def test_pool_same_user_serial_runs_share_history(capsys):
     pool = AgentPool(
         llm_factory=factory,
         config=AgentPoolConfig(max_agents=10),
+        # 验证同一缓存实例内 history 累积，不依赖磁盘；关闭 session 保持 hermetic
+        agent_config=AgentConfig(session_enabled=False),
     )
     await pool.start()
     try:
@@ -186,6 +192,55 @@ async def test_pool_same_user_serial_runs_share_history(capsys):
 
         assert pool.get_stats()["created"] == 1
         assert pool.get_stats()["reused"] == 3
+    finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
+async def test_agent_restores_history_from_session(tmp_path):
+    """P1-3：显式 session_id + 已有日志 → 新建 Agent 应从磁盘恢复历史。"""
+    cfg = AgentConfig(session_enabled=True, session_dir=str(tmp_path))
+    llm = _make_echo_llm(0.0)
+
+    a1 = Agent(llm=llm, config=cfg, session_id="u1__s1",
+               register_catalog=False, register_skills=False)
+    async for _ in a1.run("hello-1"):
+        pass
+
+    # 用相同 session_id 新建 Agent（模拟淘汰/重启后重建）
+    a2 = Agent(llm=llm, config=cfg, session_id="u1__s1",
+               register_catalog=False, register_skills=False)
+    user_msgs = [m.content for m in a2.history.all_messages
+                 if m.role == MessageRole.USER]
+    assert "hello-1" in user_msgs, f"历史未恢复：{user_msgs}"
+
+
+@pytest.mark.asyncio
+async def test_pool_restores_history_after_eviction(tmp_path):
+    """P1-3：LRU 淘汰后，按同一 (user, session) 重新 acquire 应恢复历史。"""
+    llm = _make_echo_llm(0.0)
+    pool = AgentPool(
+        llm_factory=lambda u, s: llm,
+        config=AgentPoolConfig(max_agents=1),
+        agent_config=AgentConfig(session_enabled=True, session_dir=str(tmp_path)),
+    )
+    await pool.start()
+    try:
+        async with pool.acquire("u1", "s1") as h:
+            async for _ in h.agent.run("remember-this"):
+                pass
+
+        # max_agents=1 → acquire 另一个 key 触发对 u1/s1 的 LRU 淘汰
+        async with pool.acquire("u2", "s2") as h:
+            async for _ in h.agent.run("other"):
+                pass
+        assert pool.get_stats()["evicted_lru"] == 1
+
+        # 重新 acquire u1/s1 → 新建 Agent，应从磁盘恢复历史
+        async with pool.acquire("u1", "s1") as h:
+            user_msgs = [m.content for m in h.agent.history.all_messages
+                         if m.role == MessageRole.USER]
+            assert "remember-this" in user_msgs, f"淘汰后历史未恢复：{user_msgs}"
     finally:
         await pool.stop()
 
