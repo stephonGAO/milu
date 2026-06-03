@@ -668,6 +668,11 @@ class AgentPool:
 
         # pop 返回 None 说明已被其他路径关闭（无副作用）
         if self._entries.pop(key, None) is not None:
+            # 同步移除 per-key 创建锁，避免 _entry_locks 随历史 (user, session)
+            # 数量无限增长（长期运行的内存泄漏）。与 _entries.pop 紧邻、其间无 await：
+            # 此刻 key 已不在 _entries，而创建锁仅在「缓存未命中」分支（要求 key 不在
+            # _entries 时）才会被持有，二者互斥，故丢弃此锁不破坏「同 key 创建串行」不变量。
+            self._entry_locks.pop(key, None)
             logger.info("AgentPool: 淘汰 Agent (user=%s, session=%s, reason=%s)",
                         entry.user_id, entry.session_id, reason)
 
@@ -676,6 +681,8 @@ class AgentPool:
         async with self._global_lock:
             entries = list(self._entries.items())
             self._entries.clear()
+            # 同步清空 per-key 创建锁，避免 _entry_locks 残留（内存泄漏）
+            self._entry_locks.clear()
             for key, entry in entries:
                 try:
                     await entry.agent.disconnect_mcp()

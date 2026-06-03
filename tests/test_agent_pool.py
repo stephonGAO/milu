@@ -202,6 +202,71 @@ async def test_pool_idle_sweep(llm_factory):
 
 
 @pytest.mark.asyncio
+async def test_pool_entry_lock_cleaned_on_lru_eviction(llm_factory):
+    """回归：LRU 淘汰后 per-key 创建锁应随之移除，不随历史 key 数无限增长。
+
+    _entry_locks 的不变量：始终与 _entries 的 key 集合一致——
+    每个 entry 在「缓存未命中」创建时建一把锁，淘汰时连同 entry 一起删。
+    """
+    pool = AgentPool(llm_factory=llm_factory,
+                     config=AgentPoolConfig(max_agents=2))
+    await pool.start()
+    try:
+        # 制造 5 个不同 key 的 churn：池容量 2 → 触发 3 次 LRU 淘汰
+        for i in range(5):
+            async with pool.acquire(f"u{i}", f"s{i}"):
+                pass
+
+        assert pool.get_stats()["evicted_lru"] == 3
+        # 关键断言：锁字典不随历史 key 数（5）增长，只保留在用的 2 个
+        assert len(pool._entry_locks) <= 2
+        assert set(pool._entry_locks.keys()) == set(pool._entries.keys()), \
+            "_entry_locks 应始终与 _entries 同步（淘汰时同步清理）"
+    finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
+async def test_pool_entry_lock_cleaned_on_idle_sweep(llm_factory):
+    """回归：空闲 TTL 清理掉所有 entry 后，per-key 创建锁也应清空。"""
+    pool = AgentPool(
+        llm_factory=llm_factory,
+        config=AgentPoolConfig(
+            max_agents=10,
+            idle_ttl_seconds=0.2,
+            sweep_interval_seconds=0.1,
+        ),
+    )
+    await pool.start()
+    try:
+        for i in range(3):
+            async with pool.acquire(f"u{i}", "s1"):
+                pass
+        assert len(pool._entry_locks) == 3
+
+        # 等后台 sweep 清掉全部空闲实例
+        await asyncio.sleep(0.5)
+        assert pool.get_stats()["active_entries"] == 0
+        assert len(pool._entry_locks) == 0, "空闲清理后锁字典应清空，否则内存泄漏"
+    finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
+async def test_pool_entry_locks_cleared_on_stop(llm_factory):
+    """回归：stop()/_close_all 应清空 per-key 创建锁。"""
+    pool = AgentPool(llm_factory=llm_factory,
+                     config=AgentPoolConfig(max_agents=10))
+    await pool.start()
+    for i in range(3):
+        async with pool.acquire(f"u{i}", "s1"):
+            pass
+    assert len(pool._entry_locks) == 3
+    await pool.stop()
+    assert len(pool._entry_locks) == 0, "关闭池后锁字典应清空"
+
+
+@pytest.mark.asyncio
 async def test_pool_get_or_create_agent_bypasses_semaphore(llm_factory):
     """get_or_create_agent 不占并发许可（供后台任务使用）。"""
     pool = AgentPool(
