@@ -73,12 +73,20 @@ async def echo_tool() -> str:
 # Test 1: 共享 Agent 实例并发调用 — 历史串味
 # ─────────────────────────────────────────────────────────────
 
+@pytest.mark.xfail(
+    reason=(
+        "shared Agent + concurrent run() 是反模式；"
+        "生产用 AgentPool 隔离。严格断言见 "
+        "tests/test_concurrency_with_pool.py::test_pool_isolates_concurrent_users_under_load"
+    ),
+    strict=False,  # 不强制失败（仅在 bug 存在时记录）
+)
 @pytest.mark.asyncio
 async def test_shared_agent_concurrent_runs_history_cross_contamination(capsys):
     """P0-2: 共享同一 Agent 实例并发调用，用户历史会相互串味。
 
-    预期：N 个并发请求都把对方的消息混进自己的 history。
-    这个 test 现在应该"通过"（显示 bug 存在）—— 修复后才会失败。
+    注意：这是反模式，shared Agent + concurrent run() 不受 Agent 设计支持。
+    严格隔离版本见 tests/test_concurrency_with_pool.py。
     """
     llm = _make_echo_llm("ok")
     agent = Agent(llm=llm, system_prompt="sys", config=AgentConfig(session_enabled=False))
@@ -106,9 +114,7 @@ async def test_shared_agent_concurrent_runs_history_cross_contamination(capsys):
 
     print(f"\n[Test 1] 共享 Agent 实例下，{len(contaminated)}/20 个用户历史被污染")
     print(f"  样例污染情况: {contaminated[:3]}")
-    # bug 存在时 contaminated > 0，修复后应该全部为 0
-    # 暂时只记录，不断言（让测试通过以记录现状）
-    # assert len(contaminated) == 0, f"历史串味: {contaminated[:5]}"
+    assert len(contaminated) == 0, f"历史串味: {contaminated[:5]}"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -129,37 +135,42 @@ async def test_subagent_concurrent_events_cross_contamination(capsys):
 
     # 拿一个父 Agent 包装 subagent
     # 父 LLM 第一次返回 tool_call(helper)，第二次返回 text
-    state = {"count": 0}
-    async def parent_chat(messages, **kwargs):
-        await asyncio.sleep(0.01)
-        state["count"] += 1
-        if state["count"] % 2 == 1:
-            yield StreamChunk(tool_calls=[type("TC", (), {
-                "index": 0, "id": "call_sub",
-                "function": type("FN", (), {"name": "helper", "arguments": '{"task":"x"}'})(),
-            })()])
-            yield StreamChunk(finish_reason="tool_calls")
-        else:
-            yield StreamChunk(content="parent-done", finish_reason="stop")
-            yield StreamChunk(usage=TokenUsage(10, 5, 15))
+    def _make_parent_llm(label: str):
+        """每个 parent 独立的 LLM mock（state 隔离，避免并发交错）。"""
+        state = {"count": 0}
+        async def chat(messages, **kwargs):
+            await asyncio.sleep(0.01)
+            state["count"] += 1
+            if state["count"] % 2 == 1:
+                yield StreamChunk(tool_calls=[type("TC", (), {
+                    "index": 0, "id": f"call_sub_{label}",
+                    "function": type("FN", (), {"name": "helper", "arguments": '{"task":"x"}'})(),
+                })()])
+                yield StreamChunk(finish_reason="tool_calls")
+            else:
+                yield StreamChunk(content=f"parent-{label}-done", finish_reason="stop")
+                yield StreamChunk(usage=TokenUsage(10, 5, 15))
+        llm = AsyncMock()
+        llm.chat = chat
+        return llm
 
-    parent_llm = AsyncMock()
-    parent_llm.chat = parent_chat
+    parent_a = Agent(llm=_make_parent_llm("a"), system_prompt="parent-a", tools=[sub_tool],
+                     config=AgentConfig(session_enabled=False))
+    parent_b = Agent(llm=_make_parent_llm("b"), system_prompt="parent-b", tools=[sub_tool],
+                     config=AgentConfig(session_enabled=False))
 
-    parent = Agent(llm=parent_llm, system_prompt="parent", tools=[sub_tool],
-                   config=AgentConfig(session_enabled=False))
-
-    # 单次跑，看 baseline
+    # 单次跑，看 baseline (parent_a)
     base_events = []
-    async for e in parent.run("hi"):
+    async for e in parent_a.run("hi"):
         base_events.append(e)
     base_sub_done = sum(1 for e in base_events if isinstance(e, SubAgentDone))
     base_sub_events = sum(1 for e in base_events if isinstance(e, SubAgentEvent))
     print(f"\n[Test 2 baseline] 单次 run: SubAgentDone={base_sub_done}, SubAgentEvent={base_sub_events}")
 
-    # 并发跑 2 次，看事件是否完整
+    # 并发跑 2 次（每个 parent 独立），看事件是否完整
     concurrent_events_lists = await asyncio.gather(*[
-        (lambda: _collect(parent.run(f"msg-{i}")))() for i in range(2)
+        _collect(parent_a.run("msg-a")),
+        _collect(parent_b.run("msg-b")),
     ])
 
     # 每个并发 run 期望至少 1 个 SubAgentDone
@@ -170,7 +181,7 @@ async def test_subagent_concurrent_events_cross_contamination(capsys):
             missing.append(i)
 
     print(f"[Test 2 concurrent] {len(concurrent_events_lists)} 个并发 run 中 {len(missing)} 个缺失 SubAgentDone")
-    # bug 存在时 missing > 0（部分并发 run 看到对方的子事件被覆盖）
+    assert len(missing) == 0, f"{len(missing)}/{len(concurrent_events_lists)} 并发 run 缺失 SubAgentDone 事件"
 
 
 async def _collect(agen):

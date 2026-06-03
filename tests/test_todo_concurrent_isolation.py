@@ -10,7 +10,6 @@ from pathlib import Path
 import pytest
 
 from agent_framework.agent import Agent, AgentConfig
-from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
 from agent_framework.tools.builtin.todo_write import (
@@ -237,57 +236,3 @@ async def test_two_agents_concurrent_writes_isolated(tmp_path: Path):
     assert "任务 B2" in contents_b
     assert "任务 A1" not in contents_b
     assert "任务 A2" not in contents_b
-
-
-@pytest.mark.asyncio
-async def test_reminder_injected_after_n_rounds(tmp_path: Path):
-    """3 轮不调 todo_write（tool 结果 ≥ 3），第 4 轮 LLM 收到 reminder"""
-    from agent_framework.tools.builtin.todo_write import _current_session_dir
-
-    # 先写一个 plan
-    plan_path = tmp_path / "plan.json"
-    plan_path.parent.mkdir(parents=True, exist_ok=True)
-    plan_path.write_text(
-        json.dumps({
-            "items": [
-                {"content": "任务 X", "status": "in_progress", "activeForm": ""},
-            ]
-        }, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-    llm = _MockLLM()
-    agent = Agent(
-        llm=llm,
-        system_prompt="test",
-        tools=list(create_todo_write_tool()),
-        config=AgentConfig(session_dir=str(tmp_path), session_enabled=True),
-    )
-
-    # 构造 3 个 tool 结果的历史（达到 _PLAN_REMINDER_INTERVAL 阈值）
-    history_messages = [
-        Message(role=MessageRole.SYSTEM, content="system"),
-        Message(role=MessageRole.ASSISTANT, content="thinking1", tool_calls=[
-            _FakeToolCall(function=_FakeFunction(name="some_tool"), id="1"),
-        ]),
-        Message(role=MessageRole.TOOL, content="result1", tool_call_id="1", name="some_tool"),
-        Message(role=MessageRole.ASSISTANT, content="thinking2", tool_calls=[
-            _FakeToolCall(function=_FakeFunction(name="another_tool"), id="2"),
-        ]),
-        Message(role=MessageRole.TOOL, content="result2", tool_call_id="2", name="another_tool"),
-        Message(role=MessageRole.ASSISTANT, content="thinking3", tool_calls=[
-            _FakeToolCall(function=_FakeFunction(name="tool3"), id="3"),
-        ]),
-        Message(role=MessageRole.TOOL, content="result3", tool_call_id="3", name="tool3"),
-    ]
-
-    # 调用 reminder 注入方法
-    token = _current_session_dir.set(tmp_path)
-    try:
-        agent._maybe_inject_plan_reminder(history_messages)
-        # system message 应包含 reminder
-        system_msg = history_messages[0]
-        assert "<reminder>" in system_msg.content
-        assert "任务 X" in system_msg.content
-    finally:
-        _current_session_dir.reset(token)

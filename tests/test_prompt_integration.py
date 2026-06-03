@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 from agent_framework.agent import Agent, AgentConfig
 from agent_framework.agent.events import AgentDone
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
+from agent_framework.agent.subagent import SubAgentConfig, _current_subagent_events, create_subagent_tools
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 
 
@@ -213,7 +213,13 @@ class TestSubAgentWithPromptDir:
                 ),
             ])
 
-            result = await tools[0]._tool_wrapper.func(task="你好")
+            # v2: subagent 工具需要 _current_subagent_events ContextVar
+            events_capture: list = []
+            token = _current_subagent_events.set(events_capture)
+            try:
+                result = await tools[0]._tool_wrapper.func(task="你好")
+            finally:
+                _current_subagent_events.reset(token)
             assert "[helper]:" in result
             assert "LLM 回复" in result
 
@@ -232,5 +238,11 @@ class TestSubAgentWithPromptDir:
                 ),
             ])
 
-            result = await tools[0]._tool_wrapper.func(task="你好")
+            # v2: subagent 工具需要 _current_subagent_events ContextVar
+            events_capture: list = []
+            token = _current_subagent_events.set(events_capture)
+            try:
+                result = await tools[0]._tool_wrapper.func(task="你好")
+            finally:
+                _current_subagent_events.reset(token)
             assert "[helper]:" in result

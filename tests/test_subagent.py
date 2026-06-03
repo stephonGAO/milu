@@ -8,7 +8,9 @@ from agent_framework.agent.events import (
     AgentDone, AgentError, TextDelta, ToolCallStart, ToolResult,
     SubAgentEvent, SubAgentDone,
 )
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
+from agent_framework.agent.subagent import (
+    SubAgentConfig, _current_subagent_events, create_subagent_tools,
+)
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.tools import tool
 
@@ -34,6 +36,23 @@ def simple_tool():
     async def add(a: int, b: int) -> str:
         return str(a + b)
     return add
+
+
+async def _run_subagent_capture(tool, **kwargs):
+    """直接调用 subagent 工具并通过 ContextVar 注入 per-call events。
+
+    v2 架构：subagent 工具不再持有内部 events 状态，依赖 Agent 在调用前
+    通过 _current_subagent_events ContextVar 注入列表。本辅助函数模拟
+    Agent 端的注入逻辑，用于单元测试 subagent 工具本身的行为。
+    返回 (result_str, events_list)。
+    """
+    events: list = []
+    token = _current_subagent_events.set(events)
+    try:
+        result = await tool._tool_wrapper.func(**kwargs)
+    finally:
+        _current_subagent_events.reset(token)
+    return result, events
 
 
 # ── SubAgentConfig 测试 ──────────────────────────────────
@@ -118,8 +137,7 @@ class TestCreateSubagentTools:
         assert w.name == "researcher"
         assert w.description == "调研助手"
         assert w._is_subagent is True
-        assert hasattr(w, '_subagent_events')
-        assert isinstance(w._subagent_events, list)
+        # v2: 不再有 _subagent_events 闭包，per-call events 由 ContextVar 注入
 
     def test_tool_schema(self, mock_llm):
         """工具 schema 应有 task 参数"""
@@ -132,15 +150,24 @@ class TestCreateSubagentTools:
         assert schema["properties"]["task"]["type"] == "string"
         assert "task" in schema["required"]
 
-    def test_multiple_tools_independent(self, mock_llm):
-        """多个工具应有独立的事件存储"""
+    def test_no_closure_state(self, mock_llm):
+        """v2：工具函数应无 _last_events / _subagent_events 闭包状态
+
+        共享闭包是 v1 的 P0 并发 bug 源头。重构后状态外置到 ContextVar，
+        工具函数本身应是纯函数（除 llm/cfg 捕获外）。
+        """
+        import inspect
         tools = create_subagent_tools(mock_llm, [
             SubAgentConfig(name="a", description="A", system_prompt="sa"),
-            SubAgentConfig(name="b", description="B", system_prompt="sb"),
         ])
-        events_a = tools[0]._tool_wrapper._subagent_events
-        events_b = tools[1]._tool_wrapper._subagent_events
-        assert events_a is not events_b
+        closure = inspect.getclosurevars(tools[0])
+        nonlocals = closure.nonlocals
+        assert "_last_events" not in nonlocals, (
+            f"_last_events 仍在闭包中（共享状态导致并发事件丢失）: {list(nonlocals)}"
+        )
+        assert "_subagent_events" not in nonlocals, (
+            f"_subagent_events 不应作为闭包状态存在: {list(nonlocals)}"
+        )
 
 
 # ── 子代理执行测试 ────────────────────────────────────────
@@ -156,38 +183,39 @@ class TestSubagentExecution:
             SubAgentConfig(name="helper", description="助手", system_prompt="你是助手"),
         ])
 
-        result = await tools[0]._tool_wrapper.func(task="你好")
+        result, _ = await _run_subagent_capture(tools[0], task="你好")
         assert result.startswith("[helper]:")
         assert "LLM 回复" in result
 
     @pytest.mark.asyncio
     async def test_events_collected(self, mock_llm):
-        """子代理执行后应收集事件"""
+        """子代理执行后应通过 ContextVar 收集事件"""
         tools = create_subagent_tools(mock_llm, [
             SubAgentConfig(name="helper", description="助手", system_prompt="你是助手"),
         ])
 
-        await tools[0]._tool_wrapper.func(task="你好")
-        events = tools[0]._tool_wrapper._subagent_events
+        _, events = await _run_subagent_capture(tools[0], task="你好")
         assert len(events) > 0
         # 最后一个事件应是 AgentDone
         assert isinstance(events[-1], AgentDone)
 
     @pytest.mark.asyncio
     async def test_events_cleared_between_calls(self, mock_llm):
-        """每次调用应清空事件列表"""
+        """每次调用应使用新的 per-call events 列表（无历史串味）"""
         tools = create_subagent_tools(mock_llm, [
             SubAgentConfig(name="helper", description="助手", system_prompt="你是助手"),
         ])
 
-        await tools[0]._tool_wrapper.func(task="第一次")
-        first_count = len(tools[0]._tool_wrapper._subagent_events)
+        _, events_first = await _run_subagent_capture(tools[0], task="第一次")
+        _, events_second = await _run_subagent_capture(tools[0], task="第二次")
 
-        await tools[0]._tool_wrapper.func(task="第二次")
-        second_count = len(tools[0]._tool_wrapper._subagent_events)
-
+        # 两次调用应是独立的事件列表（通过 ContextVar 隔离）
+        assert events_first is not events_second
         # 两次调用的事件数量应相同（都只是一次简单回复）
-        assert first_count == second_count
+        assert len(events_first) == len(events_second)
+        # 每次都应以 AgentDone 收尾
+        assert isinstance(events_first[-1], AgentDone)
+        assert isinstance(events_second[-1], AgentDone)
 
     @pytest.mark.asyncio
     async def test_subagent_with_tool(self, mock_llm, simple_tool):
@@ -228,7 +256,7 @@ class TestSubagentExecution:
             ),
         ])
 
-        result = await tools[0]._tool_wrapper.func(task="计算 1+2")
+        result, _ = await _run_subagent_capture(tools[0], task="计算 1+2")
         assert "[calculator]:" in result
         assert "1+2=3" in result
 
@@ -258,7 +286,7 @@ class TestSubagentExecution:
             ),
         ])
 
-        result = await tools[0]._tool_wrapper.func(task="测试超时")
+        result, _ = await _run_subagent_capture(tools[0], task="测试超时")
         assert "[slow]" in result
         assert "错误" in result or "失败" in result
 
@@ -276,7 +304,7 @@ class TestSubagentExecution:
             SubAgentConfig(name="crasher", description="崩溃", system_prompt="s"),
         ])
 
-        result = await tools[0]._tool_wrapper.func(task="测试崩溃")
+        result, _ = await _run_subagent_capture(tools[0], task="测试崩溃")
         assert "[crasher]" in result
         # 应当是错误信息而不是抛异常
         assert "失败" in result or "错误" in result
@@ -295,7 +323,7 @@ class TestSubagentExecution:
             SubAgentConfig(name="empty", description="空", system_prompt="s"),
         ])
 
-        result = await tools[0]._tool_wrapper.func(task="测试空")
+        result, _ = await _run_subagent_capture(tools[0], task="测试空")
         # 应返回某种结果（不是崩溃）
         assert "[empty]" in result
 
@@ -328,9 +356,9 @@ class TestIsolation:
             SubAgentConfig(name="isolated", description="隔离", system_prompt="s"),
         ])
 
-        # 调用两次
-        await tools[0]._tool_wrapper.func(task="第一次")
-        await tools[0]._tool_wrapper.func(task="第二次")
+        # 调用两次（每次注入独立的 ContextVar events 列表）
+        await _run_subagent_capture(tools[0], task="第一次")
+        await _run_subagent_capture(tools[0], task="第二次")
 
         assert call_count == 2  # 两次调用都成功执行
 
@@ -352,7 +380,7 @@ class TestIsolation:
 
         Agent.__init__ = tracking_init
         try:
-            await tools[0]._tool_wrapper.func(task="测试")
+            await _run_subagent_capture(tools[0], task="测试")
         finally:
             Agent.__init__ = original_agent_init
 
