@@ -105,12 +105,23 @@ def test_is_safe_flag():
     assert wrapper.is_safe is True
 
 
-def test_default_not_safe():
-    @tool(name="default_tool", description="默认不安全")
+def test_default_is_safe():
+    """@tool 默认 is_safe=True：工具默认安全，危险工具需显式 is_safe=False。"""
+    @tool(name="default_tool", description="默认安全")
     async def default_tool(path: str) -> str:
         return "ok"
 
     wrapper: ToolWrapper = default_tool._tool_wrapper
+    assert wrapper.is_safe is True
+
+
+def test_explicit_unsafe():
+    """显式标记 is_safe=False 的工具应为不安全。"""
+    @tool(name="danger_tool", description="危险操作", is_safe=False)
+    async def danger_tool(cmd: str) -> str:
+        return "ok"
+
+    wrapper: ToolWrapper = danger_tool._tool_wrapper
     assert wrapper.is_safe is False
 
 

@@ -54,23 +54,26 @@ def _make_safe_tool():
 
 
 def _make_write_tool():
-    @tool(name="write_data", description="写入数据")
+    @tool(name="write_data", description="写入数据", is_safe=False)
     async def write_data() -> str:
         return "written"
     return write_data
 
 
 def _make_unsafe_tool():
-    @tool(name="danger_op", description="危险操作")
+    @tool(name="danger_op", description="危险操作", is_safe=False)
     async def danger_op() -> str:
         return "executed"
     return danger_op
 
 
 def _make_mixed_tool():
+    # 动态安全工具：is_safe=False 才会让 _is_safe_call 去咨询 safe_check
+    # （与内置 shell_command 的 is_safe=False + safe_check 模式一致）
     @tool(
         name="file_op",
         description="混合工具",
+        is_safe=False,
         safe_check=lambda args: args.get("action", "") in {"read", "index"},
     )
     async def file_op(action: str = "read") -> str:
@@ -418,7 +421,7 @@ class TestSubAgentModeInheritance:
 
         write_tool_called = False
 
-        @tool(name="sub_write", description="写入")
+        @tool(name="sub_write", description="写入", is_safe=False)
         async def sub_write() -> str:
             nonlocal write_tool_called
             write_tool_called = True

@@ -17,8 +17,8 @@ from agent_framework.tools import tool
 
 @pytest.fixture
 def unsafe_tool():
-    """默认非安全工具（is_safe=False）"""
-    @tool(name="unsafe_op", description="非安全操作")
+    """非安全工具（显式 is_safe=False）"""
+    @tool(name="unsafe_op", description="非安全操作", is_safe=False)
     async def unsafe_op(cmd: str) -> str:
         return f"executed: {cmd}"
     return unsafe_op
@@ -127,7 +127,7 @@ async def test_confirm_rejected_skips_execution(unsafe_tool):
     tool_executed = False
 
     # 重新定义一个会记录是否被调用的非安全工具
-    @tool(name="unsafe_op", description="非安全操作")
+    @tool(name="unsafe_op", description="非安全操作", is_safe=False)
     async def tracked_unsafe_op(cmd: str) -> str:
         nonlocal tool_executed
         tool_executed = True
