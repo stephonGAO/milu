@@ -329,14 +329,32 @@ class AgentPool:
                 # 4. 全局并发限流
                 await self._semaphore.acquire()
                 self._stats["concurrent_waits"] += 1
+                # 注入「确认等待守卫」：仅在持有 semaphore 期间生效，
+                # 使 Agent 在等待人工确认时临时释放并发许可（确认期间不占名额）。
+                entry.agent.set_confirm_wait_guard(self._release_slot_during_wait)
                 try:
                     entry.last_used = time.monotonic()
                     yield handle
                 finally:
+                    entry.agent.set_confirm_wait_guard(None)
                     self._semaphore.release()
         finally:
             # 释放：active_count -1、刷新 last_used、更新 LRU 顺序
             await self._release(handle)
+
+    @asynccontextmanager
+    async def _release_slot_during_wait(self) -> AsyncIterator[None]:
+        """供 Agent 在等待人工确认期间临时释放全局并发许可。
+
+        进入时释放 Semaphore（让出名额给其他用户），退出时重新获取。
+        re-acquire 可能阻塞——这是期望的背压：确认结束后需排队等待空闲名额
+        才继续消耗算力。
+        """
+        self._semaphore.release()
+        try:
+            yield
+        finally:
+            await self._semaphore.acquire()
 
     async def _release(self, handle: PooledAgent) -> None:
         """PooledAgent 退出 with 时调用。"""

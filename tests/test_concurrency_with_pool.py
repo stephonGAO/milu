@@ -9,11 +9,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import AgentConfig
+from agent_framework.agent import Agent, AgentConfig
 from agent_framework.agent.events import TextDelta, AgentDone
 from agent_framework.llm.base.message import MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.serving import AgentPool, AgentPoolConfig
+from agent_framework.tools import tool
 
 
 def _make_echo_llm(delay: float = 0.01):
@@ -21,6 +22,33 @@ def _make_echo_llm(delay: float = 0.01):
         await asyncio.sleep(delay)
         yield StreamChunk(content="ok", finish_reason="stop")
         yield StreamChunk(usage=TokenUsage(10, 5, 15))
+    llm = AsyncMock()
+    llm.chat = chat
+    return llm
+
+
+def _make_tool_call_llm(tool_name: str, args: dict | None = None):
+    """第一轮发起指定工具调用，第二轮收尾。"""
+    import json
+    call_count = 0
+    args_str = json.dumps(args or {})
+
+    async def chat(*a, **kw):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            yield StreamChunk(tool_calls=[
+                type("obj", (), {
+                    "index": 0, "id": "call_1",
+                    "function": type("obj", (), {
+                        "name": tool_name, "arguments": args_str,
+                    })(),
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        else:
+            yield StreamChunk(content="完成", finish_reason="stop")
+
     llm = AsyncMock()
     llm.chat = chat
     return llm
@@ -159,4 +187,73 @@ async def test_pool_same_user_serial_runs_share_history(capsys):
         assert pool.get_stats()["created"] == 1
         assert pool.get_stats()["reused"] == 3
     finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
+async def test_confirm_wait_does_not_hold_concurrency_slot():
+    """P1-4：等待人工确认期间应释放全局并发许可，不阻塞其他用户。
+
+    场景：max_concurrent_runs=1。用户 A 触发危险工具确认并长时间阻塞，
+    用户 B 的请求应能拿到（A 让出的）并发名额并完成。
+    """
+    @tool(name="danger", description="危险操作", is_safe=False)
+    async def danger(x: str) -> str:
+        return f"done {x}"
+
+    confirm_started = asyncio.Event()
+    confirm_release = asyncio.Event()
+
+    async def on_confirm_a(tool_name, args_str):
+        confirm_started.set()
+        await confirm_release.wait()   # 模拟人工长时间未响应
+        return True
+
+    echo_llm = _make_echo_llm(delay=0.0)
+
+    def agent_factory(user_id, session_id, llm):
+        if user_id == "A":
+            return Agent(
+                llm=_make_tool_call_llm("danger", {"x": "1"}),
+                tools=[danger],
+                on_confirm=on_confirm_a,
+                config=AgentConfig(session_enabled=False),  # AUTO 模式（默认）
+            )
+        return Agent(llm=echo_llm, config=AgentConfig(session_enabled=False))
+
+    pool = AgentPool(
+        llm_factory=lambda u, s: echo_llm,
+        agent_factory=agent_factory,
+        config=AgentPoolConfig(max_agents=10, max_concurrent_runs=1),
+    )
+    await pool.start()
+    try:
+        async def run_a():
+            async with pool.acquire("A", "s1") as h:
+                async for _ in h.agent.run("do danger"):
+                    pass
+
+        async def run_b():
+            async with pool.acquire("B", "s1") as h:
+                done = False
+                async for e in h.agent.run("hi"):
+                    if isinstance(e, AgentDone):
+                        done = True
+                return done
+
+        task_a = asyncio.create_task(run_a())
+
+        # 等 A 进入确认等待（此时它应已释放 semaphore）
+        await asyncio.wait_for(confirm_started.wait(), timeout=2.0)
+
+        # 关键断言：B 能在 A 仍卡在确认时完成（说明名额已被释放）
+        b_done = await asyncio.wait_for(run_b(), timeout=2.0)
+        assert b_done, "用户 B 未能完成"
+        assert not task_a.done(), "A 应仍卡在确认等待"
+
+        # 放行 A，确认其也能正常收尾
+        confirm_release.set()
+        await asyncio.wait_for(task_a, timeout=2.0)
+    finally:
+        confirm_release.set()
         await pool.stop()

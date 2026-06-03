@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
@@ -185,6 +186,11 @@ class Agent:
         self._executor = ToolExecutor(self._registry, self._config)
         self._on_confirm = on_confirm
 
+        # 可选钩子：等待人工确认期间进入此 async 上下文管理器，用于释放外部并发许可
+        # （如 AgentPool 的全局 Semaphore），避免长时间人工确认占用并发名额。
+        # None 表示不启用（独立使用 Agent 时为 no-op）。由 AgentPool 注入。
+        self._confirm_wait_guard: Callable[[], "contextlib.AbstractAsyncContextManager"] | None = None
+
         # MCP 配置文件路径
         self._mcp_config_path = mcp_config_path
         self._mcp_manager = None
@@ -271,6 +277,18 @@ class Agent:
     def mode(self) -> AgentMode:
         """当前操作模式。"""
         return self._config.mode
+
+    def set_confirm_wait_guard(
+        self, guard: "Callable[[], contextlib.AbstractAsyncContextManager] | None"
+    ) -> None:
+        """注入「等待人工确认」期间使用的 async 上下文管理器工厂。
+
+        AgentPool 用它在确认等待期间临时释放全局并发许可（Semaphore），
+        确认结束后重新获取，避免长时间人工确认阻塞占用 max_concurrent_runs 名额。
+
+        :param guard: 无参可调用，返回一个 async context manager；None 表示停用。
+        """
+        self._confirm_wait_guard = guard
 
     async def reset(self) -> None:
         """清空对话历史（保留 system 消息）。"""
@@ -758,7 +776,15 @@ class Agent:
                     if (self._config.mode == AgentMode.AUTO
                             and not self._is_safe_call(wrapper, tool_args)
                             and self._on_confirm):
-                        raw_result = await self._on_confirm(tool_name, tool_args)
+                        # 等待人工确认期间，通过守卫释放外部并发许可（无注入时为 no-op），
+                        # 避免长时间确认阻塞占用全局并发名额。
+                        wait_guard = (
+                            self._confirm_wait_guard()
+                            if self._confirm_wait_guard
+                            else contextlib.nullcontext()
+                        )
+                        async with wait_guard:
+                            raw_result = await self._on_confirm(tool_name, tool_args)
 
                         # 兼容 bool 和 ConfirmResponse 两种返回
                         if isinstance(raw_result, ConfirmResponse):
