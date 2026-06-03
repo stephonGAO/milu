@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from agent_framework.llm.base.exceptions import AuthenticationError
@@ -114,7 +113,9 @@ class BaseLLM(ABC):
         """获取API密钥。优先级：构造函数传入 > 环境变量 {PROVIDER_NAME}_API_KEY"""
         if self._api_key:
             return self._api_key
-        load_dotenv()  # 自动加载 .env 文件
+        # 幂等、可通过 AGENT_FRAMEWORK_NO_DOTENV 关闭的 .env 加载（不再每次静默扫描 CWD）
+        from agent_framework._env import ensure_dotenv_loaded
+        ensure_dotenv_loaded()
         env_key = f"{self.provider_name.upper()}_API_KEY"
         key = os.environ.get(env_key)
         if not key:

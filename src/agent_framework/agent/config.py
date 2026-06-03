@@ -34,4 +34,6 @@ class AgentConfig:
 
     # Session 会话配置
     session_enabled: bool = True           # 自动创建会话（对话日志持久化）
-    session_dir: str | None = None         # 会话目录（默认 .sessions/）
+    # 会话目录。None 时默认 "./.sessions"（相对当前工作目录 CWD）。
+    # ⚠️ 作为库被集成时，CWD 取决于宿主应用，建议显式传入绝对路径以避免写入意外位置。
+    session_dir: str | None = None

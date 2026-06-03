@@ -45,7 +45,9 @@ _PLAN_TOOLS = {"todo_write", "todo_read"}
 # 元工具名称集合 — 用于发现和加载工具（MCP / Skill），不视为"已开始工作"
 _META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill", "compact"}
 
-# 技能目录自动搜索路径
+# 技能目录自动搜索路径（仅在未显式传入 skills_dir 时生效）。
+# ⚠️ "skills" 是相对 CWD 的路径——作为库集成时，CWD 取决于宿主应用。
+# 若不希望扫描宿主 CWD，请显式传入 skills_dir（绝对路径），或不依赖此自动发现。
 _SKILL_SEARCH_PATHS = [
     "skills",
     os.path.expanduser("~/.agent_framework/skills"),
@@ -419,13 +421,13 @@ class Agent:
         """
         from agent_framework.tools.mcp.config import MCPServerConfig
         from agent_framework.tools.mcp.manager import MCPManager
-        from dotenv import load_dotenv
+        from agent_framework._env import ensure_dotenv_loaded
         import os
 
         # 确定配置文件路径
         path = self._mcp_config_path
         if not path:
-            load_dotenv()
+            ensure_dotenv_loaded()
             path = os.environ.get("MCP_CONFIG_PATH")
 
         configs = MCPServerConfig.load_file(path)  # path=None 时自动搜索

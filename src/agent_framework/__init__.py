@@ -1,5 +1,6 @@
 """AI Agent Framework - 统一AI模型抽象层，兼容6家国内大模型厂商API"""
 
+from agent_framework._env import load_env
 from agent_framework.exceptions import AgentFrameworkError
 from agent_framework.llm.base.exceptions import (
     AuthenticationError,
@@ -46,6 +47,8 @@ from agent_framework.prompts.builder import PromptBuilder
 from agent_framework.tools.mcp.config import MCPServerConfig
 
 __all__ = [
+    # Env
+    "load_env",
     # Root Exception
     "AgentFrameworkError",
     # LLM Exceptions

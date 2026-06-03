@@ -12,7 +12,9 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-# 配置文件搜索路径（按优先级）
+# 配置文件搜索路径（按优先级，仅在未显式传入路径时生效）。
+# ⚠️ "./config/mcp_servers.json" 相对 CWD——作为库集成时 CWD 取决于宿主应用，
+# 建议显式传入 mcp_config_path 或用环境变量 MCP_CONFIG_PATH 指定绝对路径。
 _SEARCH_PATHS = [
     Path("./config/mcp_servers.json"),
     Path.home() / ".agent_framework" / "mcp_servers.json",
