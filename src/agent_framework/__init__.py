@@ -50,6 +50,8 @@ from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
 from agent_framework.prompts.builder import PromptBuilder
 from agent_framework.tools.mcp.config import MCPServerConfig
+from agent_framework.tools.decorator import tool, ToolWrapper
+from agent_framework.serving import AgentPool, AgentPoolConfig, PooledAgent
 
 __all__ = [
     # Env
@@ -117,4 +119,11 @@ __all__ = [
     "SkillRegistry",
     # Prompts
     "PromptBuilder",
+    # Tools
+    "tool",
+    "ToolWrapper",
+    # Serving（多用户并发资源池）
+    "AgentPool",
+    "AgentPoolConfig",
+    "PooledAgent",
 ]
