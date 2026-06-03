@@ -37,8 +37,11 @@ from agent_framework.llm.base.message import Message, MessageRole
 from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.llm.providers.base import BaseLLM
 from agent_framework.tools.registry import ToolRegistry
-from agent_framework.tools.builtin.todo_write import _current_session_dir as _current_todo_session_dir
-from agent_framework.agent.subagent import _current_subagent_events
+from agent_framework.tools.builtin.todo_write import (
+    _current_session_dir as _current_todo_session_dir,
+    _current_plan_items as _current_todo_plan_items,
+)
+from agent_framework.agent.subagent import _current_subagent_events, _current_parent_mode
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +51,10 @@ _PLAN_TOOLS = {"todo_write", "todo_read"}
 # 元工具名称集合 — 用于发现和加载工具（MCP / Skill），不视为"已开始工作"
 _META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill", "compact"}
 
-# 技能目录自动搜索路径（仅在未显式传入 skills_dir 时生效）。
-# ⚠️ "skills" 是相对 CWD 的路径——作为库集成时，CWD 取决于宿主应用。
-# 若不希望扫描宿主 CWD，请显式传入 skills_dir（绝对路径），或不依赖此自动发现。
-_SKILL_SEARCH_PATHS = [
-    "skills",
-    os.path.expanduser("~/.agent_framework/skills"),
-]
+# prompt_dir / skills_dir 的默认解析约定（见 __init__）：
+#   None  → 用内置默认资源（仅顶层 Agent；子代理 register_catalog=False 保持精简，不注入）
+#   路径  → 用该路径
+# 顶层 Agent 与子代理用 register_catalog 区分：只有子代理会显式传 register_catalog=False。
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +142,9 @@ class Agent:
         mcp_config_path: str | None = None,
         register_catalog: bool = True,
         skills: list | None = None,
-        skills_dir: str | None = None,
+        skills_dir: "str | os.PathLike | None" = None,  # None→内置技能（顶层）；路径→该目录
         register_skills: bool = True,
-        prompt_dir: "str | os.PathLike | None" = None,
+        prompt_dir: "str | os.PathLike | None" = None,  # None→内置 main（顶层且无 system_prompt）；路径→该目录
         prompt_variables: dict[str, str] | None = None,
         session_id: str | None = None,
         mcp_manager: "MCPManager | None" = None,
@@ -221,7 +221,9 @@ class Agent:
         self._work_started = False   # 非计划工具是否已执行
         self._plan_created = False   # todo_write 是否已被成功调用
 
-        # v2: TodoManager 已删除，session_dir 在 run() 入口通过 ContextVar 注入
+        # todo 计划的内存后端：无 session 时承载计划（同一 Agent 跨轮保留）。
+        # 有 session 时不用它（计划落盘 session_dir/plan.json）。在 run() 入口择一注入。
+        self._in_memory_plan: list[dict] = []
 
         # ── 技能（Skills）初始化 ──
         from agent_framework.skills.registry import SkillRegistry
@@ -232,21 +234,31 @@ class Agent:
             for cfg in skills:
                 self._skill_registry.add(cfg)
 
-        # 扫描技能目录
-        if skills_dir:
-            self._skill_registry.load_from_directory(skills_dir)
-        else:
-            for search_path in _SKILL_SEARCH_PATHS:
-                if os.path.isdir(search_path):
-                    self._skill_registry.load_from_directory(search_path)
-                    break
+        # 技能目录默认：None + 顶层 Agent → 内置技能目录；显式路径 → 该目录。
+        # 子代理（register_catalog=False）保持精简，None 时不注入内置技能。
+        resolved_skills_dir = skills_dir
+        if resolved_skills_dir is None and register_catalog:
+            from agent_framework.resources import builtin_skills_dir
+            resolved_skills_dir = str(builtin_skills_dir())
+        if resolved_skills_dir:
+            self._skill_registry.load_from_directory(str(resolved_skills_dir))
 
-        # ── PromptBuilder 初始化 ──
+        # ── PromptBuilder 初始化（None 默认 + 与 system_prompt 互斥）──
+        # prompt_dir 解析：
+        #   显式路径                          → 该目录
+        #   None + 有 system_prompt           → 只用 system_prompt（不接内置）
+        #   None + 无 system_prompt + 顶层    → 内置 main 角色提示词（开箱即用）
+        #   子代理（register_catalog=False）   → None 时不注入内置 main，保持精简
+        resolved_prompt_dir = prompt_dir
+        if resolved_prompt_dir is None and not system_prompt and register_catalog:
+            from agent_framework.resources import builtin_prompts_dir
+            resolved_prompt_dir = builtin_prompts_dir("main")
+
         self._prompt_builder = None
         self._prompt_variables: dict[str, str] = prompt_variables or {}
-        if prompt_dir:
+        if resolved_prompt_dir:
             from agent_framework.prompts.builder import PromptBuilder
-            self._prompt_builder = PromptBuilder(prompt_dir)
+            self._prompt_builder = PromptBuilder(resolved_prompt_dir)
 
         # 保存原始 system prompt（每轮动态拼装，不在此处 set_system）
         self._system_prompt = system_prompt
@@ -508,10 +520,16 @@ class Agent:
         Yields:
             AgentEvent 子类实例
         """
-        # v2: 注入 todo 工具的 session_dir 到 ContextVar（asyncio 任务级隔离）
-        plan_token = None
+        # 注入 per-run 状态到 ContextVar（asyncio 任务级隔离）：
+        #   - todo 计划存储：有 session → 文件后端（session_dir）；无 session → 内存后端
+        #   - 父 Agent 操作模式：供子代理工具继承（无需 get_parent_mode 回调）
+        session_token = None
+        plan_items_token = None
         if self._session is not None:
-            plan_token = _current_todo_session_dir.set(self._session.dir_path)
+            session_token = _current_todo_session_dir.set(self._session.dir_path)
+        else:
+            plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
+        mode_token = _current_parent_mode.set(self._mode)
         try:
             self._history.add(Message(role=MessageRole.USER, content=user_input))
 
@@ -950,5 +968,8 @@ class Agent:
                 # 11. 继续循环，LLM 将看到工具结果
 
         finally:
-            if plan_token is not None:
-                _current_todo_session_dir.reset(plan_token)
+            if session_token is not None:
+                _current_todo_session_dir.reset(session_token)
+            if plan_items_token is not None:
+                _current_todo_plan_items.reset(plan_items_token)
+            _current_parent_mode.reset(mode_token)

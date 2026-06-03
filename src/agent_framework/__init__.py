@@ -5,6 +5,9 @@ from agent_framework.resources import (
     builtin_prompts_dir,
     builtin_skills_dir,
     templates_dir,
+    user_data_dir,
+    default_session_dir,
+    default_mcp_config_path,
 )
 from agent_framework.exceptions import AgentFrameworkError
 from agent_framework.llm.base.exceptions import (
@@ -67,6 +70,10 @@ __all__ = [
     "templates_dir",
     "builtin_prompts_dir",
     "builtin_skills_dir",
+    # 用户级数据/配置目录（与 CWD 解耦）
+    "user_data_dir",
+    "default_session_dir",
+    "default_mcp_config_path",
     # Root Exception
     "AgentFrameworkError",
     # LLM Exceptions

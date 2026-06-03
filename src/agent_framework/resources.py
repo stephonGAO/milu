@@ -14,6 +14,7 @@ pip 安装后即可通过下列函数取到它们的绝对路径，无需依赖�
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # 包内模板根目录（随 wheel 一起分发）
@@ -26,6 +27,40 @@ PROMPT_ROLES = ("main", "coder", "researcher", "reviewer")
 def templates_dir() -> Path:
     """内置模板根目录（含 prompts/ 与 skills/）。"""
     return _TEMPLATES_DIR
+
+
+# ── 用户级数据/配置目录（与 CWD 解耦）────────────────────────────
+#
+# 「内置模板」（prompts/skills）是只读的包内资源，随 wheel 分发，用上面的
+# templates_dir() / builtin_*_dir() 定位。
+# 「用户级可写数据」（会话日志、MCP 配置等）则不应写进 CWD——作为库被集成或部署到
+# 服务器时 CWD 取决于宿主应用，写入位置会漂移。统一锚定到 user_data_dir() 下，
+# 默认 ~/.agent_framework，可用环境变量 AGENT_FRAMEWORK_HOME 覆盖。
+
+
+def user_data_dir() -> Path:
+    """用户级数据/配置根目录（与 CWD 解耦）。
+
+    解析优先级：
+      1. 环境变量 AGENT_FRAMEWORK_HOME（如显式指定服务器数据盘）
+      2. ~/.agent_framework
+
+    :return: 根目录路径（不保证已存在，写入方负责按需 mkdir）。
+    """
+    env = os.environ.get("AGENT_FRAMEWORK_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".agent_framework"
+
+
+def default_session_dir() -> Path:
+    """会话日志默认根目录：user_data_dir()/sessions。"""
+    return user_data_dir() / "sessions"
+
+
+def default_mcp_config_path() -> Path:
+    """MCP 配置文件默认路径：user_data_dir()/mcp_servers.json。"""
+    return user_data_dir() / "mcp_servers.json"
 
 
 def builtin_prompts_dir(role: str = "main") -> Path:

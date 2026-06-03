@@ -9,6 +9,7 @@ import pytest
 
 from agent_framework.tools.builtin.todo_write import (
     _current_session_dir,
+    _current_plan_items,
     _MAX_PLAN_ITEMS,
     _render,
     todo_read,
@@ -311,16 +312,18 @@ class TestTodoWriteTool:
 
     @pytest.mark.asyncio
     async def test_write_without_contextvar_raises(self):
-        """未设置 ContextVar 时 todo_write 抛 RuntimeError"""
-        # 显式重置（其他测试可能泄漏）
-        token = _current_session_dir.set(None)
+        """两种后端都未注入时 todo_write 抛 RuntimeError（文件后端与内存后端都缺失）"""
+        # 显式重置两个后端（其他测试可能泄漏）
+        sess_token = _current_session_dir.set(None)
+        mem_token = _current_plan_items.set(None)
         try:
-            with pytest.raises(RuntimeError, match="session_dir"):
+            with pytest.raises(RuntimeError, match="计划存储未注入"):
                 await todo_write._tool_wrapper.func(items=[
                     {"content": "任务", "status": "pending"},
                 ])
         finally:
-            _current_session_dir.reset(token)
+            _current_session_dir.reset(sess_token)
+            _current_plan_items.reset(mem_token)
 
     @pytest.mark.asyncio
     async def test_write_error_propagates(self, tmp_path):
@@ -333,6 +336,65 @@ class TestTodoWriteTool:
                 ])
         finally:
             _current_session_dir.reset(token)
+
+
+# ── 内存后端测试（无 session 时 todo 仍可用）─────────────────────
+
+
+class TestTodoMemoryBackend:
+    """无 session（session_enabled=False / 子代理 / 用户自管 history）时，
+    todo 通过内存后端工作，不再抛 RuntimeError。"""
+
+    @pytest.mark.asyncio
+    async def test_write_then_read_via_memory(self):
+        """仅注入内存后端：todo_write 写入列表，todo_read 读回。"""
+        store: list[dict] = []
+        sess_token = _current_session_dir.set(None)
+        mem_token = _current_plan_items.set(store)
+        try:
+            await todo_write._tool_wrapper.func(items=[
+                {"content": "任务A", "status": "in_progress", "activeForm": "执行A"},
+                {"content": "任务B", "status": "pending"},
+            ])
+            # 原地写入了同一个列表引用（跨轮可见）
+            assert len(store) == 2
+            assert store[0]["content"] == "任务A"
+
+            result = await todo_read._tool_wrapper.func()
+            assert "任务A" in result
+            assert "任务B" in result
+            assert "(0/2 已完成)" in result
+        finally:
+            _current_session_dir.reset(sess_token)
+            _current_plan_items.reset(mem_token)
+
+    @pytest.mark.asyncio
+    async def test_read_empty_when_no_backend(self):
+        """两种后端都未注入时 todo_read 宽容返回（不抛异常）。"""
+        sess_token = _current_session_dir.set(None)
+        mem_token = _current_plan_items.set(None)
+        try:
+            result = await todo_read._tool_wrapper.func()
+            assert "暂无" in result
+        finally:
+            _current_session_dir.reset(sess_token)
+            _current_plan_items.reset(mem_token)
+
+    @pytest.mark.asyncio
+    async def test_file_backend_takes_priority(self, tmp_path):
+        """同时注入两种后端时，文件后端优先（计划落盘，不写内存列表）。"""
+        store: list[dict] = []
+        sess_token = _current_session_dir.set(tmp_path)
+        mem_token = _current_plan_items.set(store)
+        try:
+            await todo_write._tool_wrapper.func(items=[
+                {"content": "落盘任务", "status": "pending"},
+            ])
+            assert (tmp_path / "plan.json").exists()
+            assert store == []  # 内存后端未被触碰
+        finally:
+            _current_session_dir.reset(sess_token)
+            _current_plan_items.reset(mem_token)
 
 
 # ── 文件持久化测试 ──────────────────────────────────────────

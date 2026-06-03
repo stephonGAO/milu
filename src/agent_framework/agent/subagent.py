@@ -29,6 +29,16 @@ _current_subagent_events: contextvars.ContextVar[list[AgentEvent] | None] = cont
     "current_subagent_events", default=None
 )
 
+# ── 父 Agent 操作模式注入（asyncio 任务级隔离）──────────
+#
+# Agent.run() 在入口把自身 mode 写入此 ContextVar，子代理工具在执行时读取它来继承
+# 父模式。相比旧的 get_parent_mode 回调，这种方式无需「先建 Agent 再回填闭包」，
+# 子代理工具可在 Agent 之前创建并正常通过 tools=[...] 传入。get_parent_mode 仍保留
+# 为可选显式覆盖（传入时优先于 ContextVar）。
+_current_parent_mode: contextvars.ContextVar[AgentMode | None] = contextvars.ContextVar(
+    "current_parent_mode", default=None
+)
+
 
 # ── 数据模型 ──────────────────────────────────────────────
 
@@ -139,9 +149,12 @@ def _create_single_subagent_tool(
         # 每次调用创建全新 Agent → 完全的历史隔离
         sub_config = cfg.config or _DEFAULT_SUBAGENT_CONFIG
 
-        # 继承父 Agent 的操作模式
-        if get_parent_mode is not None:
-            parent_mode = get_parent_mode()
+        # 继承父 Agent 的操作模式：显式回调优先，否则读 ContextVar（Agent.run 已注入）
+        parent_mode = (
+            get_parent_mode() if get_parent_mode is not None
+            else _current_parent_mode.get()
+        )
+        if parent_mode is not None:
             sub_config = dataclasses.replace(sub_config, mode=parent_mode)
         else:
             sub_config = dataclasses.replace(sub_config)

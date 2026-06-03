@@ -500,6 +500,92 @@ class TestSubAgentModeInheritance:
         # 所以 write_tool_called 应为 False
         assert write_tool_called is False
 
+    @pytest.mark.asyncio
+    async def test_subagent_inherits_mode_via_contextvar(self):
+        """不传 get_parent_mode 时，子代理通过 ContextVar 继承父 Agent 的 talk 模式。
+
+        验证 Phase A.2：Agent.run() 注入 _current_parent_mode，子代理工具读取它，
+        无需「先建 Agent 再回填 get_parent_mode 闭包」。
+        """
+        from agent_framework.agent.subagent import create_subagent_tools, SubAgentConfig
+
+        write_tool_called = False
+
+        @tool(name="sub_write2", description="写入", is_safe=False)
+        async def sub_write() -> str:
+            nonlocal write_tool_called
+            write_tool_called = True
+            return "written"
+
+        sub_call_count = 0
+
+        async def sub_mock_chat(*args, **kwargs):
+            nonlocal sub_call_count
+            sub_call_count += 1
+            if sub_call_count == 1:
+                yield StreamChunk(tool_calls=[
+                    type('obj', (), {
+                        'index': 0, 'id': 'call_sub',
+                        'function': type('obj', (), {
+                            'name': 'sub_write2', 'arguments': '{}',
+                        })()
+                    })()
+                ])
+                yield StreamChunk(finish_reason="tool_calls")
+            else:
+                yield StreamChunk(content="子代理完成", finish_reason="stop")
+
+        sub_llm = AsyncMock()
+        sub_llm.chat = sub_mock_chat
+
+        # 关键：不传 get_parent_mode，子代理工具可在 Agent 之前创建
+        subagent_tools = create_subagent_tools(
+            llm=sub_llm,
+            subagents=[SubAgentConfig(
+                name="test_sub2",
+                description="测试子代理",
+                tools=[sub_write],
+                config=AgentConfig(session_enabled=False),
+            )],
+        )
+
+        parent_call_count = 0
+
+        async def parent_mock_chat(*args, **kwargs):
+            nonlocal parent_call_count
+            parent_call_count += 1
+            if parent_call_count == 1:
+                yield StreamChunk(tool_calls=[
+                    type('obj', (), {
+                        'index': 0, 'id': 'call_parent',
+                        'function': type('obj', (), {
+                            'name': 'test_sub2',
+                            'arguments': json.dumps({"task": "测试"}),
+                        })()
+                    })()
+                ])
+                yield StreamChunk(finish_reason="tool_calls")
+            else:
+                yield StreamChunk(content="父代理完成", finish_reason="stop")
+
+        parent_llm = AsyncMock()
+        parent_llm.chat = parent_mock_chat
+
+        agent = Agent(
+            llm=parent_llm,
+            tools=subagent_tools,
+            config=AgentConfig(
+                mode=AgentMode.TALK,
+                session_enabled=False,
+            ),
+        )
+
+        async for _ in agent.run("委派任务"):
+            pass
+
+        # 子代理经 ContextVar 继承 talk 模式，sub_write 被阻止
+        assert write_tool_called is False
+
 
 # ── _is_safe_call 辅助方法 ────────────────────────────────
 
