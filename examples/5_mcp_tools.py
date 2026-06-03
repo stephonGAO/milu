@@ -30,7 +30,7 @@ async def example_auto():
     async with Agent(
         llm=llm,
         system_prompt="你是一个使用外部工具的助手。",
-        config=AgentConfig(max_turns=5, confirm_dangerous=False),
+        config=AgentConfig(max_turns=5),
     ) as agent:
         # 查看已注册的工具
         print(f"已注册工具: {agent.tools.list_tools()}")
@@ -56,7 +56,7 @@ async def example_explicit_path():
         llm=llm,
         system_prompt="你是一个使用外部工具的助手。",
         mcp_config_path="config/mcp_servers.json",
-        config=AgentConfig(max_turns=5, confirm_dangerous=False),
+        config=AgentConfig(max_turns=5),
     ) as agent:
         print(f"已注册工具: {agent.tools.list_tools()}")
 
@@ -73,7 +73,7 @@ async def example_env_path():
     async with Agent(
         llm=llm,
         system_prompt="你是一个使用外部工具的助手。",
-        config=AgentConfig(max_turns=5, confirm_dangerous=False),
+        config=AgentConfig(max_turns=5),
     ) as agent:
         print(f"已注册工具: {agent.tools.list_tools()}")
 

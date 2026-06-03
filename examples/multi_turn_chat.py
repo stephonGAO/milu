@@ -11,6 +11,7 @@
     python examples/multi_turn_chat.py
 """
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -38,6 +39,24 @@ from agent_framework.tools.builtin import (
 )
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+
+def _read_plan_items(agent) -> list[dict]:
+    """读取当前会话的计划条目（todo 工具持久化在 session 目录的 plan.json）。
+
+    v2 起 todo 工具无状态化，计划不再挂在 agent 上，而是落盘到
+    {session_dir}/plan.json，格式为 {"items": [{content, status, activeForm}]}。
+    """
+    if not agent.session:
+        return []
+    plan_file = agent.session.dir_path / "plan.json"
+    if not plan_file.exists():
+        return []
+    try:
+        return json.loads(plan_file.read_text(encoding="utf-8")).get("items", [])
+    except (OSError, ValueError):
+        return []
+
 
 # ── 样式常量 ───────────────────────────────────────────────
 
@@ -514,30 +533,31 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
             print(f"\n  {c('red', f'无效模式: {new_mode}')}（可选: talk, auto, superwork）\n")
 
     elif cmd == "/plan":
-        mgr = agent._todo_manager
-        if not mgr or not mgr.state.items:
+        items = _read_plan_items(agent)
+        if not items:
             print(f"\n  {c('dim', '暂无会话计划。')}\n")
             return True
 
         print(f"\n{DIVIDER}")
-        print(c("bold", "  当前会话计划") + c("dim", f" ({len(mgr.state.items)} 个条目)"))
+        print(c("bold", "  当前会话计划") + c("dim", f" ({len(items)} 个条目)"))
         print(DIVIDER)
         markers = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
         colors = {"pending": "yellow", "in_progress": "green", "completed": "dim"}
         completed = 0
-        for item in mgr.state.items:
-            status = item.status
+        for item in items:
+            status = item.get("status", "pending")
             marker = markers.get(status, "[ ]")
             color = colors.get(status, "yellow")
-            line = f"  {marker} {item.content}"
-            if status == "in_progress" and item.active_form:
-                line += f"  ({c('cyan', item.active_form)})"
+            line = f"  {marker} {item.get('content', '')}"
+            if status == "in_progress" and item.get("activeForm"):
+                line += f"  ({c('cyan', item['activeForm'])})"
             if status == "completed":
                 completed += 1
             print(f"  {c(color, line)}")
-        print(f"\n  {c('dim', f'({completed}/{len(mgr.state.items)} 已完成)')}")
-        if mgr.plan_file:
-            print(f"  {c('dim', f'文件: {mgr.plan_file}')}")
+        print(f"\n  {c('dim', f'({completed}/{len(items)} 已完成)')}")
+        if agent.session:
+            plan_path = agent.session.dir_path / "plan.json"
+            print(f"  {c('dim', f'文件: {plan_path}')}")
         print(DIVIDER + "\n")
 
     elif cmd == "/skills":
@@ -699,11 +719,11 @@ async def main():
         print()
 
     # 显示恢复的计划状态
-    if agent._todo_manager and agent._todo_manager.state.items:
-        items = agent._todo_manager.state.items
-        completed = sum(1 for i in items if i.status == "completed")
+    items = _read_plan_items(agent)
+    if items:
+        completed = sum(1 for i in items if i.get("status") == "completed")
         in_progress = next(
-            (i.content for i in items if i.status == "in_progress"), None
+            (i.get("content") for i in items if i.get("status") == "in_progress"), None
         )
         status_line = f"  计划已恢复: {completed}/{len(items)} 已完成"
         if in_progress:

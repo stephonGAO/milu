@@ -63,6 +63,23 @@ logger = logging.getLogger("multi_user_chat")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(message)s")
 
 
+def _read_plan_items(agent) -> list[dict]:
+    """读取当前会话的计划条目（todo 工具持久化在 session 目录的 plan.json）。
+
+    v2 起 todo 工具无状态化，计划落盘到 {session_dir}/plan.json，
+    格式为 {"items": [{content, status, activeForm}]}。
+    """
+    if not agent.session:
+        return []
+    plan_file = agent.session.dir_path / "plan.json"
+    if not plan_file.exists():
+        return []
+    try:
+        return json.loads(plan_file.read_text(encoding="utf-8")).get("items", [])
+    except (OSError, ValueError):
+        return []
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Agent 工厂（与 multi_turn_chat.py 保持完全一致）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -350,25 +367,27 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                     {"type": "text", "text": "\n".join(lines)}, ensure_ascii=False)}
 
         elif cmd == "/plan":
-            mgr = agent._todo_manager
-            if not mgr or not mgr.state.items:
+            items = _read_plan_items(agent)
+            if not items:
                 yield {"event": "CommandResult", "data": json.dumps(
                     {"type": "info", "text": "暂无会话计划。"}, ensure_ascii=False)}
             else:
                 markers = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}
-                lines = [f"=== 当前会话计划（共 {len(mgr.state.items)} 个条目）===", "-" * 50]
+                lines = [f"=== 当前会话计划（共 {len(items)} 个条目）===", "-" * 50]
                 completed = 0
-                for item in mgr.state.items:
-                    marker = markers.get(item.status, "[ ]")
-                    line = f"  {marker} {item.content}"
-                    if item.status == "in_progress" and item.active_form:
-                        line += f"  ({item.active_form})"
-                    if item.status == "completed":
+                for item in items:
+                    status = item.get("status", "pending")
+                    marker = markers.get(status, "[ ]")
+                    line = f"  {marker} {item.get('content', '')}"
+                    if status == "in_progress" and item.get("activeForm"):
+                        line += f"  ({item['activeForm']})"
+                    if status == "completed":
                         completed += 1
                     lines.append(line)
-                lines.append(f"\n  ({completed}/{len(mgr.state.items)} 已完成)")
-                if mgr.plan_file:
-                    lines.append(f"  文件: {mgr.plan_file}")
+                lines.append(f"\n  ({completed}/{len(items)} 已完成)")
+                if agent.session:
+                    plan_path = agent.session.dir_path / "plan.json"
+                    lines.append(f"  文件: {plan_path}")
                 lines.append("-" * 50)
                 yield {"event": "CommandResult", "data": json.dumps(
                     {"type": "text", "text": "\n".join(lines)}, ensure_ascii=False)}
