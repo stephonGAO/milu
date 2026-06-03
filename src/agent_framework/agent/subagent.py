@@ -1,29 +1,13 @@
-"""子代理（SubAgent）— 让父 Agent 将专项任务委派给独立的子 Agent
+"""子代理（SubAgent）— 无状态版本
 
-每个子代理以工具形式暴露给父 LLM：
-  - 独立的系统提示、工具集、对话历史（完全隔离）
-  - 每次调用创建全新 Agent 实例，历史不累积
-  - 执行完毕只将精炼结果返回父 Agent（不污染父上下文）
-  - 不可嵌套子代理（v1 结构性保证）
-
-使用方式：
-    from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
-
-    subagent_tools = create_subagent_tools(
-        llm=llm,
-        subagents=[
-            SubAgentConfig(
-                name="researcher",
-                description="调研助手：擅长搜索和整理信息",
-                system_prompt="你是一个专业的调研助手...",
-                tools=[web_search, http_request],
-            ),
-        ],
-    )
-    agent = Agent(llm=llm, tools=[*BUILTIN_TOOLS, *subagent_tools])
+v2 变更：
+- 删除 _last_events 闭包变量
+- 每次工具调用通过 ContextVar 注入 per-call events 列表
+- 工具函数和工厂签名不变
 """
 from __future__ import annotations
 
+import contextvars
 import dataclasses
 import logging
 from dataclasses import dataclass, field
@@ -38,6 +22,12 @@ if TYPE_CHECKING:
     from agent_framework.llm.providers.base import BaseLLM
 
 logger = logging.getLogger(__name__)
+
+# ── per-call events 注入（asyncio 任务级隔离）──────────
+
+_current_subagent_events: contextvars.ContextVar[list[AgentEvent] | None] = contextvars.ContextVar(
+    "current_subagent_events", default=None
+)
 
 
 # ── 数据模型 ──────────────────────────────────────────────
@@ -99,6 +89,9 @@ def create_subagent_tools(
     父 LLM 调用该工具时，内部创建全新的 Agent 实例执行任务，
     执行完毕后将精炼结果返回给父 Agent。
 
+    v2: 工具函数本身无 _last_events 闭包。Agent 在每次工具调用前
+    通过 ContextVar `_current_subagent_events` 注入 per-call 事件列表。
+
     :param llm: 共享的 LLM 实例（BaseLLM 无状态，安全共享）
     :param subagents: 子代理配置列表
     :param get_parent_mode: 获取父 Agent 当前模式的回调（用于模式继承）
@@ -126,9 +119,6 @@ def _create_single_subagent_tool(
     # 延迟导入避免循环依赖
     from agent_framework.agent.agent import Agent
 
-    # 每次调用时存储子代理事件（供父 Agent 读取转发）
-    _last_events: list[AgentEvent] = []
-
     @tool(
         name=cfg.name,
         description=cfg.description,
@@ -137,7 +127,14 @@ def _create_single_subagent_tool(
         """
         :param task: 委派给子代理的任务描述或问题
         """
-        _last_events.clear()
+        # v2: 从 ContextVar 取出 per-call events 列表（Agent 在调用前已 set）
+        events = _current_subagent_events.get()
+        if events is None:
+            raise RuntimeError(
+                f"子代理 {cfg.name} 必须在 Agent.run() 上下文中调用"
+                "（Agent 应在调用前通过 ContextVar 注入 per-call events 列表）"
+            )
+        events.clear()
 
         # 每次调用创建全新 Agent → 完全的历史隔离
         sub_config = cfg.config or _DEFAULT_SUBAGENT_CONFIG
@@ -171,27 +168,24 @@ def _create_single_subagent_tool(
         )
         # 不调用 create_subagent_tools → 子代理不能嵌套子代理（结构性保证）
 
+        final_text: Optional[str] = None
         try:
             async for event in sub_agent.run(task, **cfg.llm_kwargs):
-                _last_events.append(event)
+                events.append(event)
+                if isinstance(event, AgentDone):
+                    final_text = event.final_text
+                elif isinstance(event, AgentError):
+                    return f"[{cfg.name}] 错误: {event.message}"
         except Exception as e:
             logger.warning("子代理 %s 执行异常: %s", cfg.name, e)
-            _last_events.append(
+            events.append(
                 AgentError(error_type="subagent_crash", message=str(e))
             )
             return f"[{cfg.name}] 子代理执行失败: {e}"
 
-        # 从终止事件提取结果
-        for event in reversed(_last_events):
-            if isinstance(event, AgentDone):
-                return f"[{cfg.name}]: {event.final_text}"
-            if isinstance(event, AgentError):
-                return f"[{cfg.name}] 错误: {event.message}"
+        return f"[{cfg.name}]: {final_text or '(无结果返回)'}"
 
-        return f"[{cfg.name}]: (无结果返回)"
-
-    # 在 ToolWrapper 上附加事件存储和标记（供 Agent 循环读取）
-    _subagent_tool._tool_wrapper._subagent_events = _last_events
+    # 仅标记 _is_subagent（不再设置 _subagent_events；Agent 通过 ContextVar 注入 per-call events）
     _subagent_tool._tool_wrapper._is_subagent = True
 
     return _subagent_tool

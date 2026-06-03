@@ -33,6 +33,7 @@ from agent_framework.llm.base.response import StreamChunk, TokenUsage
 from agent_framework.llm.providers.base import BaseLLM
 from agent_framework.tools.registry import ToolRegistry
 from agent_framework.tools.builtin.todo_write import _current_session_dir as _current_todo_session_dir
+from agent_framework.agent.subagent import _current_subagent_events
 
 logger = logging.getLogger(__name__)
 
@@ -800,7 +801,18 @@ class Agent:
                 # ── 10c. 并发执行所有已确认的工具 ──
                 if confirmed:
                     async def _execute_one(item):
-                        return item, result
+                        wrapper = item["wrapper"]
+                        # v2: subagent 工具注入 per-call events 列表（替代 _last_events 闭包）
+                        per_call_events: list[AgentEvent] = []
+                        events_token = None
+                        if wrapper and getattr(wrapper, '_is_subagent', False):
+                            events_token = _current_subagent_events.set(per_call_events)
+                        try:
+                            result = await self._executor.execute(item["call"])
+                        finally:
+                            if events_token is not None:
+                                _current_subagent_events.reset(events_token)
+                        return item, result, per_call_events
 
                     results = await asyncio.gather(
                         *[_execute_one(item) for item in confirmed]
@@ -812,7 +824,7 @@ class Agent:
                         tool_call_id = item["tool_call_id"]
                         wrapper = item["wrapper"]
 
-                        # 子代理事件
+                        # v2: 子代理事件从 per-call 列表读取（无闭包共享）
                         if wrapper and getattr(wrapper, '_is_subagent', False):
                             sub_final_text = ""
                             sub_turn_count = 0
@@ -836,6 +848,8 @@ class Agent:
                                 total_usage=sub_total_usage,
                                 is_error=sub_is_error,
                             )
+                            
+                            per_call_events.clear()
 
                         # 产出 ToolResult 事件
                         yield ToolResult(
