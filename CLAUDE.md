@@ -77,7 +77,7 @@ pip install -e ".[dev,mcp]"
 
 ### 5. 提示词 & 技能层 (`src/agent_framework/prompts/`, `skills/`)
 
-- `PromptBuilder`（`prompts/builder.py`）：从 Markdown 目录**分层拼装** system prompt。每个 `.md` 是一个片段，YAML frontmatter 控制 `section`(safeguard/soul/agent/memory/custom) + `order` + `enabled`，`{{key}}` 变量插值，**每次 `build()` 重读文件支持热重载**。预置角色提示词在 `config/prompts/{main,coder,researcher,reviewer}/`
+- `PromptBuilder`（`prompts/builder.py`）：从 Markdown 目录**分层拼装** system prompt。每个 `.md` 是一个片段，YAML frontmatter 控制 `section`(safeguard/soul/agent/memory/custom) + `order` + `enabled`，`{{key}}` 变量插值，**每次 `build()` 重读文件支持热重载**。预置角色提示词随包分发在 `src/agent_framework/templates/prompts/{main,coder,researcher,reviewer}/`，通过 `agent_framework.builtin_prompts_dir(role)` 定位（内置技能同理用 `builtin_skills_dir()`）
 - `SkillRegistry`（`skills/registry.py`）：技能**元数据（name/description/triggers）始终注入 system prompt**，正文按需通过 `load_skill` 元工具拉取。无激活/卸载生命周期。支持平铺 `skills/x.md` 或子目录 `skills/x/SKILL.md`
 
 ### 6. 服务层 (`src/agent_framework/serving/`)

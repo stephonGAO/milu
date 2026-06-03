@@ -8,8 +8,9 @@
 
 用法：
     from agent_framework.prompts import PromptBuilder
+    from agent_framework import builtin_prompts_dir
 
-    builder = PromptBuilder("config/prompts/main")
+    builder = PromptBuilder(builtin_prompts_dir("main"))  # 或任意自定义目录
     prompt = builder.build(user_name="张三")
 """
 from __future__ import annotations
@@ -62,7 +63,7 @@ class PromptBuilder:
     """从文件目录拼装系统提示词。
 
     用法：
-        builder = PromptBuilder("config/prompts/main")
+        builder = PromptBuilder(builtin_prompts_dir("main"))
         prompt = builder.build()                    # 无变量
         prompt = builder.build(user_name="张三")     # 带变量插值
 

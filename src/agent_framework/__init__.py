@@ -1,6 +1,11 @@
 """AI Agent Framework - 统一AI模型抽象层，兼容6家国内大模型厂商API"""
 
 from agent_framework._env import load_env
+from agent_framework.resources import (
+    builtin_prompts_dir,
+    builtin_skills_dir,
+    templates_dir,
+)
 from agent_framework.exceptions import AgentFrameworkError
 from agent_framework.llm.base.exceptions import (
     AuthenticationError,
@@ -49,6 +54,10 @@ from agent_framework.tools.mcp.config import MCPServerConfig
 __all__ = [
     # Env
     "load_env",
+    # 内置资源（提示词模板 / 技能）
+    "templates_dir",
+    "builtin_prompts_dir",
+    "builtin_skills_dir",
     # Root Exception
     "AgentFrameworkError",
     # LLM Exceptions

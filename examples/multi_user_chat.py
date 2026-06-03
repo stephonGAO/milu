@@ -56,6 +56,7 @@ from agent_framework import (
     SubAgentConfig,
     create_subagent_tools,
     SkillConfig,
+    templates_dir,
 )
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -95,8 +96,8 @@ def make_agent_factory(llm):
     因为 get_parent_mode=lambda: agent.mode 需要引用「正在创建的」agent 自身。
     跨用户共享同一组 subagent_tools 会让所有用户的 mode 锁定为第一个用户。
     """
-    prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
-    skills_dir = Path(__file__).resolve().parent.parent / "skills"
+    prompts_base = templates_dir() / "prompts"
+    skills_dir = templates_dir() / "skills"
     so_tool = create_structured_output_tool()
 
     def _build_subagent_tools(agent):

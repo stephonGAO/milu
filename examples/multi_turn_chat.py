@@ -27,6 +27,7 @@ from agent_framework import (
     HistoryCompacted, SessionLoaded,
     Session,
     SkillConfig,
+    templates_dir,
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools.builtin import (
@@ -140,8 +141,8 @@ def build_agent() -> Agent:
 
     so_tool = create_structured_output_tool()
 
-    # 提示词目录路径（相对于项目根目录）
-    prompts_base = Path(__file__).resolve().parent.parent / "config" / "prompts"
+    # 提示词目录：使用随包分发的内置模板（pip 安装后亦可用）
+    prompts_base = templates_dir() / "prompts"
 
     # 创建子代理工具
     subagent_tools = create_subagent_tools(
@@ -205,7 +206,7 @@ def build_agent() -> Agent:
                 # 手动加载 code-review.md 技能文件，通过 skills 参数传入
                 skills=[
                     SkillConfig.from_file(
-                        str(Path(__file__).resolve().parent.parent / "skills" / "code-review.md")
+                        str(templates_dir() / "skills" / "code-review.md")
                     ),
                 ],
 
