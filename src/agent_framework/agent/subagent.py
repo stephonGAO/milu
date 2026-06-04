@@ -119,8 +119,8 @@ def builtin_subagent_configs(
     """返回内置子代理配置列表（生产级预设，配套内置角色提示词与技能）。
 
     默认三件套（按「上下文隔离 / 权限收窄 / 可并行」标准选型）：
-      - researcher 调研员：开放网络信息获取（web_search/http_request/datetime），只读
-      - reader     长内容阅读员：长文档/日志/网页定向提取（file_read/http_request），只读
+      - researcher 调研员：开放网络信息获取（web_search/web_fetch/datetime），只读
+      - reader     长内容阅读员：长文档/日志/网页定向提取（file_read/web_fetch），只读
       - coder      编码执行员：计算/脚本/数据处理（python_repl/file_read/file_write）
 
     可选（不在默认集）：
@@ -141,8 +141,8 @@ def builtin_subagent_configs(
         datetime_tool,
         file_read,
         file_write,
-        http_request,
         python_repl,
+        web_fetch,
         web_search,
     )
 
@@ -159,7 +159,7 @@ def builtin_subagent_configs(
                 "简单常识问题不要委派，直接回答。"
             ),
             role="researcher",
-            tools=[web_search, http_request, datetime_tool],
+            tools=[web_search, web_fetch, datetime_tool],
             skills=[SkillConfig.from_file(str(deep_research_md))]
             if deep_research_md.exists() else None,
         ),
@@ -172,7 +172,7 @@ def builtin_subagent_configs(
                 "短内容（几十行以内）不要委派，自己读。"
             ),
             role="reader",
-            tools=[file_read, http_request],
+            tools=[file_read, web_fetch],
         ),
         "coder": SubAgentConfig(
             name="coder",

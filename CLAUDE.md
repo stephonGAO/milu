@@ -62,7 +62,7 @@ pip install -e ".[dev,mcp]"
 - `Session`（`session.py`）：会话持久化，每会话一个 `{session_dir}/{id}/` 目录（默认 `~/.agent_framework/sessions/`），`conversation.jsonl`（append-only 消息日志，SYSTEM 不记录）+ `session.json`（元数据）。支持 compaction 快照点恢复
 - `Compactor`（`compactor.py`）：上下文自动压缩流水线，**0/1 次 API 调用分层**：L1 消息数裁剪 → 轮次分层工具结果压缩（旧轮→占位符、中间轮→截断、近期轮→保留，均带 session 文件指针）→ L4 超 `trigger_ratio` 时 LLM 摘要。阈值随 `max_context_window` 动态计算。另提供 `compact` 元工具供 LLM 主动触发
 - `SubAgent`（`subagent.py`）：`create_subagent_tools()` 工厂为每个 `SubAgentConfig` 生成一个 `@tool` 闭包；调用时**每次新建独立 Agent + 干净历史**，`register_catalog=False`/不嵌套子 Agent（结构性保证）。**模式与确认回调均通过 ContextVar 继承**（`_current_parent_mode` / `_current_parent_confirm`，`Agent.run()` 入口注入）——无需 `get_parent_mode` 回调、子代理工具可在 Agent 之前创建且跨 Agent 共享；AUTO 模式下子代理内的不安全工具同样走父的人工确认（**委派不构成安全旁路**）。`SubAgentConfig.role`（main/coder/researcher/reader/reviewer）便利字段自动套用对应内置角色提示词
-- **内置子代理三件套**：`builtin_subagent_configs()` 返回生产级预设——`researcher` 调研员（web_search/http_request/datetime + deep-research 技能，只读）、`reader` 长内容阅读员（file_read/http_request，定向提取，只读）、`coder` 编码执行员（python_repl/file_read/file_write）；可选 `reviewer` 审查员（include 加入）。选型标准：上下文隔离 / 权限收窄 / 可并行
+- **内置子代理三件套**：`builtin_subagent_configs()` 返回生产级预设——`researcher` 调研员（web_search/web_fetch/datetime + deep-research 技能，只读）、`reader` 长内容阅读员（file_read/web_fetch，定向提取，只读）、`coder` 编码执行员（python_repl/file_read/file_write）；可选 `reviewer` 审查员（include 加入）。选型标准：上下文隔离 / 权限收窄 / 可并行
 
 ### 3. 工具层 (`src/agent_framework/tools/`)
 
@@ -70,7 +70,7 @@ pip install -e ".[dev,mcp]"
 - `ToolRegistry` 双池设计（`registry.py`）：active pool（schema 注入 LLM）+ dormant pool（MCP 工具待激活）
 - `catalog.py` 提供三个元工具（`list_catalog`, `search_tools`, `activate_tools`）供 LLM 自主发现/激活 dormant 工具
 - `ToolExecutor`（`executor.py`）安全执行：JSON 参数解析、async/sync 兼容、异常捕获
-- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`、`web_search`、`datetime_tool`、`structured_output`、`todo_write`
+- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`（API/JSON 场景）、`web_fetch`（网页→Markdown 正文提取，阅读场景优先，省 token）、`web_search`、`datetime_tool`、`structured_output`、`todo_write`
 
 ### 4. MCP 层 (`src/agent_framework/tools/mcp/`)
 

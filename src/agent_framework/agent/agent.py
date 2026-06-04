@@ -459,6 +459,25 @@ class Agent:
             pass
         return ""
 
+    @staticmethod
+    def _default_prompt_variables() -> dict[str, str]:
+        """环境上下文变量（每轮重算），提示词模板可直接引用：
+
+        - {{current_date}}：当前日期（ISO 格式），供时效判断
+        - {{platform}}：操作系统（Windows / Linux / Darwin）
+        - {{cwd}}：当前工作目录
+
+        对齐业界实践（Claude Code 等在 system prompt 注入运行环境上下文）。
+        用户经 prompt_variables 传入的同名变量优先于这些默认值。
+        """
+        import platform as _platform
+        from datetime import date
+        return {
+            "current_date": date.today().isoformat(),
+            "platform": _platform.system(),
+            "cwd": str(Path.cwd()),
+        }
+
     def _build_system_prompt(self) -> None:
         """动态拼装 system prompt 并写入历史（每轮调用一次）。
 
@@ -469,10 +488,11 @@ class Agent:
         """
         parts: list[str] = []
 
-        # 1. PromptBuilder 输出（每轮重读文件 → 热重载）
+        # 1. PromptBuilder 输出（每轮重读文件 → 热重载；环境变量每轮重算保持新鲜）
         if self._prompt_builder:
             try:
-                prompt_text = self._prompt_builder.build(**self._prompt_variables)
+                variables = {**self._default_prompt_variables(), **self._prompt_variables}
+                prompt_text = self._prompt_builder.build(**variables)
                 if prompt_text:
                     parts.append(prompt_text)
             except FileNotFoundError as e:

@@ -23,6 +23,7 @@ from agent_framework.tools.builtin.http_request import http_request
 from agent_framework.tools.builtin.file_tool import file_read, file_write
 from agent_framework.tools.builtin.python_repl import python_repl
 from agent_framework.tools.builtin.web_search import web_search
+from agent_framework.tools.builtin.web_fetch import web_fetch
 from agent_framework.tools.builtin.shell_command import shell_command
 from agent_framework.tools.builtin.structured_output import (
     structured_output,
@@ -37,6 +38,7 @@ from agent_framework.tools.builtin.todo_write import todo_read, todo_write
 BUILTIN_TOOLS = [
     datetime_tool,
     http_request,
+    web_fetch,
     file_read,
     file_write,
     python_repl,
@@ -54,6 +56,7 @@ __all__ = [
     "file_write",
     "python_repl",
     "web_search",
+    "web_fetch",
     "shell_command",
     "structured_output",
     "create_structured_output_tool",

@@ -246,3 +246,54 @@ class TestSubAgentWithPromptDir:
             finally:
                 _current_subagent_events.reset(token)
             assert "[helper]:" in result
+
+
+class TestDefaultPromptVariables:
+    """环境上下文变量自动注入：{{current_date}} / {{platform}} / {{cwd}}"""
+
+    def test_env_vars_injected(self, mock_llm):
+        """模板中的环境变量占位符应被自动替换（每轮重算）"""
+        from datetime import date
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "agent.md"), "w", encoding="utf-8") as f:
+                f.write(
+                    "---\nsection: agent\n---\n\n"
+                    "今天是 {{current_date}}，系统 {{platform}}，目录 {{cwd}}。\n"
+                )
+            agent = Agent(
+                llm=mock_llm, prompt_dir=tmpdir,
+                session_enabled=False,
+                register_catalog=False, register_skills=False,
+            )
+            agent._build_system_prompt()
+            content = agent.history.all_messages[0].content
+            assert date.today().isoformat() in content
+            assert "{{current_date}}" not in content
+            assert "{{platform}}" not in content
+            assert "{{cwd}}" not in content
+
+    def test_user_variables_override_defaults(self, mock_llm):
+        """用户传入的 prompt_variables 同名变量优先于默认环境变量"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "agent.md"), "w", encoding="utf-8") as f:
+                f.write("---\nsection: agent\n---\n\n日期：{{current_date}}\n")
+            agent = Agent(
+                llm=mock_llm, prompt_dir=tmpdir,
+                prompt_variables={"current_date": "2099-01-01"},
+                session_enabled=False,
+                register_catalog=False, register_skills=False,
+            )
+            agent._build_system_prompt()
+            assert "2099-01-01" in agent.history.all_messages[0].content
+
+    def test_builtin_main_template_cache_friendly(self, mock_llm):
+        """内置 main 模板不引用动态环境变量（保护提示词前缀缓存），
+        时效判断走 datetime_tool；子代理名单为新三件套（researcher/reader/coder）"""
+        agent = Agent(llm=mock_llm, session_enabled=False)
+        agent._build_system_prompt()
+        content = agent.history.all_messages[0].content
+        # 无未解析的变量占位符，也不含会破坏缓存的动态值引用
+        assert "{{" not in content
+        assert "datetime_tool" in content   # 时效判断由工具按需获取
+        assert "reader" in content          # 子代理名单已更新
+        assert "reviewer（审查专家）" not in content  # 旧名单已移除

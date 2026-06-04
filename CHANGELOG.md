@@ -2,6 +2,36 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — 提示词体系完善（2026-06-04）
+
+### 变更
+
+- **重写内置 main 角色四件套**（对齐业界最佳实践）：补齐语气与风格、工具使用策略
+  （并行调用 / 专用优先 / 参数真实 / 时效用 datetime_tool / 失败如实）、主动性边界、
+  防提示注入等板块；修正过时内容（子代理名单 reviewer→reader、废弃的 dangerous 标记
+  表述、memory.md 仓库私货）；子代理委派四要素（目标/返回契约/信息指引/边界）写入提示词
+- **soul 语气定位**：跟随用户语言（不限中文）；对话交流自然有温度、可提供情绪价值，
+  执行任务简洁利落——区分两种场景而非一刀切。后续可扩展为多风格 soul 变体切换
+- **环境变量机制为可选项**（缓存友好）：`_default_prompt_variables()` 提供
+  `{{current_date}}/{{platform}}/{{cwd}}` 供**自定义模板**按需引用（动态值会使提示词
+  前缀缓存失效，谁引用谁承担）；**内置模板不引用**，时效判断走 datetime_tool 按需获取
+
+## [Unreleased] — web_fetch 网页正文抓取工具（2026-06-04）
+
+### 新增
+
+- **内置工具 `web_fetch`**（网页 → Markdown 正文提取）：自动剔除脚本/样式/导航等噪声标签，
+  优先提取 article/main 正文容器，实测可节省 20-30% token。对标 MCP 官方 Fetch server 与
+  Claude Code 的 WebFetch。与 `http_request` 分工：读网页用 web_fetch，调 API 用 http_request。
+  支持 max_chars 截断（标注全文长度）、JSON 美化、转换失败降级原文。
+- 新依赖 `markdownify`（含 beautifulsoup4，轻量纯 Python）。
+
+### 变更
+
+- 内置子代理换装：`researcher` 工具集 → web_search + **web_fetch** + datetime_tool；
+  `reader` → file_read + **web_fetch**（原 http_request 移出，页面阅读场景由 web_fetch 接管）。
+- researcher/reader 角色提示词同步更新。
+
 ## [Unreleased] — 全配默认下沉进 Agent（2026-06-04）
 
 「开箱即用」策略从 AgentPool 默认工厂下沉到 `Agent.__init__` 本身——**直接构造 Agent

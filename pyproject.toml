@@ -10,6 +10,7 @@ dependencies = [
     "jsonschema>=4.20.0",
     "ddgs>=8.0.0",
     "pyyaml>=6.0",
+    "markdownify>=0.13.0",
 ]
 
 [project.optional-dependencies]

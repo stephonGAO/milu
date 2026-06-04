@@ -61,9 +61,9 @@ class TestBuiltinSubagentConfigs:
             return {t._tool_wrapper.name for t in cfg.tools}
 
         assert tool_names(by_name["researcher"]) == {
-            "web_search", "http_request", "datetime_tool",
+            "web_search", "web_fetch", "datetime_tool",
         }
-        assert tool_names(by_name["reader"]) == {"file_read", "http_request"}
+        assert tool_names(by_name["reader"]) == {"file_read", "web_fetch"}
         assert tool_names(by_name["coder"]) == {
             "python_repl", "file_read", "file_write",
         }
