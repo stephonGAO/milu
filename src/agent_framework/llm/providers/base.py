@@ -133,6 +133,18 @@ class BaseLLM(ABC):
             )
         return self._client
 
+    async def aclose(self) -> None:
+        """关闭底层 HTTP 客户端，释放连接池。
+
+        懒加载客户端尚未创建时为空操作。多用户/多租户场景下，
+        当某个 LLM 实例被淘汰（如 KeyedLLMProvider 的 LRU 回收）或服务关闭时，
+        应调用本方法及时释放连接池，避免连接泄漏。调用后再次 chat() 会重新懒建客户端。
+        """
+        client = self._client
+        if client is not None:
+            self._client = None
+            await client.close()
+
     # 注释：
     # 这里是构造时候可能会用到的默认参数，实际用到多少是在实现的时候的chat运行的时候
     def get_available_params(self) -> dict[str, dict]:

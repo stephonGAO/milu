@@ -23,7 +23,6 @@ build/
 *.swp
 *.swo
 .claude/settings.local.json
-.env.example
 
 # Session & compact outputs
 .sessions/

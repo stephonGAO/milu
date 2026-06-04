@@ -66,6 +66,8 @@ from agent_framework.serving import (
     AgentPoolError,
     PoolBusyError,
     PoolExhaustedError,
+    KeyedLLMProvider,
+    ApiKeyResolver,
 )
 
 __all__ = [
@@ -152,4 +154,7 @@ __all__ = [
     "AgentPoolError",
     "PoolBusyError",
     "PoolExhaustedError",
+    # 多租户 API Key 隔离
+    "KeyedLLMProvider",
+    "ApiKeyResolver",
 ]

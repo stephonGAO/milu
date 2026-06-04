@@ -20,6 +20,7 @@ from .pool import (
     PoolBusyError,
     PoolExhaustedError,
 )
+from .llm_provider import KeyedLLMProvider, ApiKeyResolver
 
 __all__ = [
     "AgentPool",
@@ -28,4 +29,7 @@ __all__ = [
     "AgentPoolError",
     "PoolBusyError",
     "PoolExhaustedError",
+    # 多租户 API Key 隔离
+    "KeyedLLMProvider",
+    "ApiKeyResolver",
 ]

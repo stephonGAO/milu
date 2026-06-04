@@ -514,3 +514,33 @@ async def test_plan_first_then_work_allowed():
     assert tool_results[0].tool_name == "todo_write"
     assert tool_results[1].tool_name == "get_time"
     assert tool_results[2].tool_name == "todo_write"
+
+
+@pytest.mark.asyncio
+async def test_run_early_break_finalize_in_other_context():
+    """回归：消费方提前 break 后，run() 生成器在其它 Context 中 finalize 不应报错。
+
+    场景：SSE 客户端断连 / 消费方收到所需事件后 break——异步生成器之后由
+    别的任务（新 Context）执行 finally，ContextVar.reset(token) 曾抛
+    ValueError: Token was created in a different Context（已用 _safe_reset 容错）。
+    """
+    import asyncio
+
+    async def mock_chat(*args, **kwargs):
+        yield StreamChunk(content="你好", finish_reason="stop")
+        yield StreamChunk(usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+    agent = Agent(llm=llm, session_enabled=False)
+
+    gen = agent.run("hi")
+
+    async def consume_one():
+        # 在子任务的 Context 中启动生成器（ContextVar token 在该 Context 创建）
+        async for _ in gen:
+            break
+
+    await asyncio.create_task(consume_one())
+    # 在主任务（不同 Context）中 finalize —— 修复前此处抛 ValueError
+    await gen.aclose()

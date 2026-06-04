@@ -263,6 +263,8 @@ class AgentPool:
              "tools": [...], "subagents": [...], "mcp_tools_active_by_default": True}。
             tools/subagents 的「None→内置默认、[]→关闭」语义由 Agent 自身实现。
             默认工厂已显式控制 session_id 与 mcp_manager，勿在此重复传入。
+            ⚠️ 该字典（及其中的 list 等可变值）会被所有后续新建的 Agent 读取，
+            池创建后请勿再修改，否则先后创建的 Agent 配置不一致。
         """
         self._llm_factory = llm_factory
         self._agent_factory = agent_factory or self._default_agent_factory

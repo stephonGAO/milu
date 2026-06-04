@@ -133,6 +133,21 @@ def _merge_usage(total: TokenUsage, new: TokenUsage | None) -> TokenUsage:
     return total
 
 
+def _safe_reset(var, token) -> None:
+    """重置 ContextVar token，容忍「生成器在其它 Context 中被 finalize」。
+
+    消费方对 run() 提前 break / 客户端断连时，异步生成器被事件循环的
+    finalizer 在新任务（新 Context）中执行 finally——此时 reset 会抛
+    ValueError: Token was created in a different Context。原 Context 已随
+    任务结束销毁，无需（也无法）重置，安全忽略即可；且不能因第一个 reset
+    抛错而跳过后续 token 的重置。
+    """
+    try:
+        var.reset(token)
+    except ValueError:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Agent 类
 # ---------------------------------------------------------------------------
@@ -1146,13 +1161,13 @@ class Agent:
 
         finally:
             if session_token is not None:
-                _current_todo_session_dir.reset(session_token)
+                _safe_reset(_current_todo_session_dir, session_token)
             if plan_items_token is not None:
-                _current_todo_plan_items.reset(plan_items_token)
+                _safe_reset(_current_todo_plan_items, plan_items_token)
             if mem_dir_token is not None:
-                _current_memory_session_dir.reset(mem_dir_token)
+                _safe_reset(_current_memory_session_dir, mem_dir_token)
             if mem_items_token is not None:
-                _current_memory_items.reset(mem_items_token)
-            _current_parent_mode.reset(mode_token)
-            _current_parent_confirm.reset(confirm_token)
-            _current_parent_judge.reset(judge_token)
+                _safe_reset(_current_memory_items, mem_items_token)
+            _safe_reset(_current_parent_mode, mode_token)
+            _safe_reset(_current_parent_confirm, confirm_token)
+            _safe_reset(_current_parent_judge, judge_token)

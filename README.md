@@ -138,11 +138,28 @@ agent = Agent(
   - 默认 factory：`AgentPoolConfig(shared_mcp=True, mcp_config_path=...)`；
   - 自定义 factory：自建一个已连接的 `MCPManager`，透传 `Agent(mcp_manager=...)`（见 `examples/multi_user_chat.py`）。
   - ⚠️ 共享 = MCP server 端看不到 user_id、无法按用户隔离，**仅适合无状态 MCP 工具**（抓取/搜索/查询）；有服务端「每用户状态」的 MCP 仍应用默认的 per-agent 模式。
+- **多租户 API Key 隔离**：不同租户/用户需用各自的 API Key 时，用内置的 `KeyedLLMProvider` 作为 `llm_factory`——它按 Key 缓存 LLM 实例：同 Key 复用同一连接池、不同 Key 隔离，总数受 `max_clients` 约束（超出 LRU 淘汰并关闭连接池）：
+
+  ```python
+  from agent_framework import AgentPool, AgentPoolConfig, KeyedLLMProvider
+
+  provider = KeyedLLMProvider(
+      "qwen", model="qwen-plus",
+      resolve_api_key=lambda user_id, session_id: lookup_tenant_key(user_id),  # 你的 租户→Key 映射
+      max_clients=256,
+  )
+  pool = AgentPool(llm_factory=provider, config=AgentPoolConfig(max_agents=200))
+  await pool.start()
+  # ... 服务请求 ...
+  await pool.stop(); await provider.aclose()   # aclose 关闭所有缓存的连接池
+  ```
+
+  适用于「Key 映射到租户/组织」（distinct Key 数远小于用户数）的常见形态；`resolve_api_key` 返回 `None` 则回退到默认 Key/环境变量。**Key 切勿明文硬编码在源码中**——应从环境变量/密钥管理服务（Vault、云 KMS）读取后在 `resolve_api_key` 中返回。完整可运行示例见 `examples/multi_tenant_keys.py`。
 - **服务端确认**：高并发下避免交互式逐工具确认（会拖累吞吐）；如需确认，`AgentPool` 已保证等待确认期间不占用全局并发名额。
 
 ## 示例
 
-`examples/` 下按编号递进：`1. basic_llm` → `2. agent_basic` → `3. builtin_tools` → `5_mcp_tools` → `6_subagent` → `7_server_fastapi` → `multi_turn_chat` / `multi_user_chat`。
+`examples/` 下按编号递进：`1. basic_llm` → `2. agent_basic` → `3. builtin_tools` → `5_mcp_tools` → `6_subagent` → `7_server_fastapi` → `multi_turn_chat` / `multi_user_chat` / `multi_tenant_keys`。
 
 ```bash
 .venv/Scripts/python "examples/1. basic_llm.py"
