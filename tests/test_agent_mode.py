@@ -67,15 +67,6 @@ def _make_unsafe_tool():
     return danger_op
 
 
-def _make_high_risk_tool():
-    # 高危工具：requires_confirm=True → auto/manual 模式均需人工审批，talk 模式阻止
-    @tool(name="high_risk_op", description="高危操作", is_safe=False,
-          requires_confirm=True)
-    async def high_risk_op() -> str:
-        return "high_risk_done"
-    return high_risk_op
-
-
 def _make_mixed_tool():
     # 动态安全工具：is_safe=False 才会让 _is_safe_call 去咨询 safe_check
     # （与内置 shell_command 的 is_safe=False + safe_check 模式一致）
@@ -311,24 +302,6 @@ class TestTalkMode:
         assert write_result.is_error is True
         assert "talk 模式" in write_result.output
 
-    @pytest.mark.asyncio
-    async def test_talk_blocks_high_risk_tool(self):
-        """talk 模式应阻止高危工具（requires_confirm）"""
-        llm = _make_mock_llm("high_risk_op")
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.TALK, session_enabled=False,
-        )
-
-        events = []
-        async for event in agent.run("执行高危操作"):
-            events.append(event)
-
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is True
-        assert "talk 模式" in tool_results[0].output
-
 
 # ── Superwork 模式 ────────────────────────────────────────
 
@@ -365,35 +338,6 @@ class TestSuperworkMode:
         assert tool_results[0].is_error is False
         assert tool_results[0].output == "executed"
 
-    @pytest.mark.asyncio
-    async def test_superwork_skips_high_risk_confirm(self):
-        """superwork 模式应跳过高危工具（requires_confirm）的确认"""
-        llm = _make_mock_llm("high_risk_op")
-        confirm_called = False
-
-        async def mock_confirm(name, args):
-            nonlocal confirm_called
-            confirm_called = True
-            return True
-
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.SUPERWORK,
-            session_enabled=False,
-            on_confirm=mock_confirm,
-        )
-
-        events = []
-        async for event in agent.run("执行"):
-            events.append(event)
-
-        assert confirm_called is False
-
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is False
-        assert tool_results[0].output == "high_risk_done"
-
 
 # ── Manual 模式（人工审批，原 auto 行为）──────────────────
 
@@ -424,34 +368,6 @@ class TestManualMode:
         assert confirm_called is True
 
         # 同意后工具应正常执行
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is False
-
-    @pytest.mark.asyncio
-    async def test_manual_high_risk_triggers_confirm(self):
-        """manual 模式下高危工具（requires_confirm）也应触发确认"""
-        llm = _make_mock_llm("high_risk_op")
-        confirm_called = False
-
-        async def mock_confirm(name, args):
-            nonlocal confirm_called
-            confirm_called = True
-            return True
-
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.MANUAL,
-            session_enabled=False,
-            on_confirm=mock_confirm,
-        )
-
-        events = []
-        async for event in agent.run("执行"):
-            events.append(event)
-
-        assert confirm_called is True
-
         tool_results = [e for e in events if isinstance(e, ToolResult)]
         assert len(tool_results) == 1
         assert tool_results[0].is_error is False
@@ -509,79 +425,6 @@ class TestAutoMode:
         assert len(tool_results) == 1
         assert tool_results[0].is_error is False
         assert tool_results[0].output == "executed"
-
-    @pytest.mark.asyncio
-    async def test_auto_high_risk_triggers_confirm(self):
-        """auto 模式下高危工具（requires_confirm）应触发确认"""
-        llm = _make_mock_llm("high_risk_op")
-        confirm_called = False
-
-        async def mock_confirm(name, args):
-            nonlocal confirm_called
-            confirm_called = True
-            return True
-
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.AUTO,
-            session_enabled=False,
-            on_confirm=mock_confirm,
-        )
-
-        events = []
-        async for event in agent.run("执行"):
-            events.append(event)
-
-        assert confirm_called is True
-
-        # 同意后工具应正常执行
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is False
-        assert tool_results[0].output == "high_risk_done"
-
-    @pytest.mark.asyncio
-    async def test_auto_high_risk_rejected_blocks(self):
-        """auto 模式下高危工具被拒绝时不应执行"""
-        llm = _make_mock_llm("high_risk_op")
-
-        async def mock_confirm(name, args):
-            return False
-
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.AUTO,
-            session_enabled=False,
-            on_confirm=mock_confirm,
-        )
-
-        events = []
-        async for event in agent.run("执行"):
-            events.append(event)
-
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is True
-        assert "拒绝" in tool_results[0].output
-
-    @pytest.mark.asyncio
-    async def test_auto_high_risk_no_callback_rejected(self):
-        """auto 模式下高危工具无确认回调时应被拒绝（硬性门槛，不可静默放行）"""
-        llm = _make_mock_llm("high_risk_op")
-        agent = Agent(
-            llm=llm, tools=[_make_high_risk_tool()],
-            mode=AgentMode.AUTO,
-            session_enabled=False,
-        )
-
-        events = []
-        async for event in agent.run("执行"):
-            events.append(event)
-
-        tool_results = [e for e in events if isinstance(e, ToolResult)]
-        assert len(tool_results) == 1
-        assert tool_results[0].is_error is True
-        assert "高危" in tool_results[0].output
 
     @pytest.mark.asyncio
     async def test_auto_allows_all_tools(self):

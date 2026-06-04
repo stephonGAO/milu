@@ -9,19 +9,21 @@ class AgentMode(str, Enum):
     """Agent 操作模式
 
     四档权限递增：talk < manual < auto < superwork。
-    「高危工具」指 @tool(requires_confirm=True) 标记的工具（支付、删库等不可逆操作）。
 
-    | 模式      | 安全工具 | 不安全工具       | 高危工具(requires_confirm) |
-    |-----------|---------|-----------------|---------------------------|
-    | talk      | 执行     | 阻止            | 阻止                       |
-    | manual    | 执行     | 人工审批         | 人工审批                   |
-    | auto(默认) | 执行     | 自动执行(自主)   | 人工审批                   |
-    | superwork | 执行     | 自动执行         | 自动执行                   |
+    | 模式      | 安全工具 | 不安全工具                                      |
+    |-----------|---------|------------------------------------------------|
+    | talk      | 执行     | 阻止                                           |
+    | manual    | 执行     | 人工审批                                        |
+    | auto(默认) | 执行     | 自动执行；配 judge_llm 时由 AI 判定兜底         |
+    | superwork | 执行     | 自动执行（不经 AI 判定）                        |
+
+    auto 模式可选配 Agent(judge_llm=...) 启用 AI 安全判定器（见 judge.py）：
+    不安全工具调用交由小模型判定 allow（执行）/ confirm（转人工）/ deny（拒绝）。
     """
     TALK = "talk"             # 只读模式：仅允许安全工具，不可修改/执行
     MANUAL = "manual"         # 人工审批模式：安全工具直接执行，不安全工具需人工审批
-    AUTO = "auto"             # 自主模式（默认）：自主决策执行不安全工具，仅高危工具需人工审批
-    SUPERWORK = "superwork"   # 全权限模式：跳过所有安全检查（含高危工具）
+    AUTO = "auto"             # 自主模式（默认）：自主决策执行不安全工具，可选 AI 判定兜底
+    SUPERWORK = "superwork"   # 全权限模式：跳过所有安全检查（含 AI 判定）
 
 
 @dataclass

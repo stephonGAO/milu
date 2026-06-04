@@ -357,7 +357,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                 mode_desc = {
                     AgentMode.TALK: "只读模式（仅允许安全操作）",
                     AgentMode.MANUAL: "人工审批模式（不安全操作需确认）",
-                    AgentMode.AUTO: "自主模式（自主决策，仅高危操作需确认）",
+                    AgentMode.AUTO: "自主模式（自主决策，可选 AI 安全判定兜底）",
                     AgentMode.SUPERWORK: "全权限模式（无安全检查）",
                 }
                 lines = ["=== 操作模式 ===", "-" * 50]

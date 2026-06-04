@@ -45,6 +45,7 @@ from agent_framework.agent.subagent import (
     _current_subagent_events,
     _current_parent_mode,
     _current_parent_confirm,
+    _current_parent_judge,
 )
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,8 @@ class Agent:
         session_dir: "str | os.PathLike | None" = None,     # None→用户级 ~/.agent_framework/sessions
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
         subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
+        judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
+        judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
     ):
         self._llm = llm
         # 复制传入的 config，保证每个 Agent 持有独立 AgentConfig 实例（防御性隔离，
@@ -170,6 +173,18 @@ class Agent:
         self._mode = AgentMode(mode) if isinstance(mode, str) else mode
         self._session_enabled = session_enabled
         self._mcp_tools_active_by_default = mcp_tools_active_by_default
+        # AI 安全判定器（auto 模式兜底安全网）解析（与 tools/subagents 同一约定）：
+        #   None/True（默认）→ 复用主 llm（判定调用以低温度发起，见 judge.py）；
+        #   False → 关闭判定；BaseLLM 实例 → 指定判定模型（建议便宜快速模型）。
+        # judge_llm 为 AsyncOpenAI 封装，协程安全可跨 Agent 共享；
+        # judge_rules 为不可变字符串。均无跨用户串扰风险。
+        if judge_llm is None or judge_llm is True:
+            self._judge_llm = llm
+        elif judge_llm is False:
+            self._judge_llm = None
+        else:
+            self._judge_llm = judge_llm
+        self._judge_rules = judge_rules
         # session 根目录：None → 用户级默认（与 CWD 解耦）；否则用传入路径
         if session_dir is None:
             from agent_framework.resources import default_session_dir
@@ -573,8 +588,12 @@ class Agent:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
         mode_token = _current_parent_mode.set(self._mode)
         # 确认回调透传：子代理继承父的 on_confirm（manual 模式不安全工具、
-        # auto 模式高危工具同样走审批），委派不构成安全旁路
+        # auto 模式 AI 判定 confirm 的调用同样走审批），委派不构成安全旁路
         confirm_token = _current_parent_confirm.set(self._on_confirm)
+        # AI 安全判定器透传：子代理继承父的 judge_llm/judge_rules，委派不旁路判定
+        judge_token = _current_parent_judge.set(
+            (self._judge_llm, self._judge_rules) if self._judge_llm else None
+        )
         try:
             self._history.add(Message(role=MessageRole.USER, content=user_input))
 
@@ -824,7 +843,7 @@ class Agent:
                         continue
 
                 # ── 10a.7 talk 模式安全检查 ──
-                # talk 模式下，阻止所有不安全工具调用（高危工具 requires_confirm 一并阻止）
+                # talk 模式下，阻止所有不安全工具调用
                 if self._mode == AgentMode.TALK:
                     blocked = []
                     allowed = []
@@ -833,8 +852,7 @@ class Agent:
                         tool_name = fn.get("name", "")
                         tool_args = fn.get("arguments", "{}")
                         wrapper = self._registry.get_tool(tool_name)
-                        if (wrapper and self._is_safe_call(wrapper, tool_args)
-                                and not getattr(wrapper, "requires_confirm", False)):
+                        if wrapper and self._is_safe_call(wrapper, tool_args):
                             allowed.append(call)
                         else:
                             blocked.append(call)
@@ -863,6 +881,36 @@ class Agent:
                         # 部分被阻止，只执行允许的
                         resolved_calls = allowed
 
+                # ── 10a.8 auto 模式 AI 安全判定（批量一次调用）──
+                # 分层与 Claude Code 对齐：is_safe/safe_check 确定性快路径不经过 AI，
+                # 仅不安全调用的灰色地带交给判定器兜底。
+                # 判定失败一律 fail-open（回退为直接执行，记录警告）。
+                judge_verdicts: dict = {}
+                if self._mode == AgentMode.AUTO and self._judge_llm is not None:
+                    to_judge = []
+                    for call in resolved_calls:
+                        fn = call.get("function", {})
+                        j_name = fn.get("name", "")
+                        j_args = fn.get("arguments", "{}")
+                        j_wrapper = self._registry.get_tool(j_name)
+                        if j_wrapper is None:
+                            continue  # 未知工具交由执行器报错
+                        if self._is_safe_call(j_wrapper, j_args):
+                            continue  # 安全快路径，零 AI 开销
+                        to_judge.append(call)
+                    if to_judge:
+                        from agent_framework.agent.judge import judge_tool_calls
+                        try:
+                            judge_verdicts = await judge_tool_calls(
+                                self._judge_llm, user_input, to_judge,
+                                self._registry, self._judge_rules,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "安全判定器调用失败，fail-open 回退为直接执行: %s", e
+                            )
+                            judge_verdicts = {}
+
                 # ── 10b. 顺序发出 ToolCallStart + 不安全工具确认 ──
                 confirmed = []
                 for call in resolved_calls:
@@ -878,37 +926,63 @@ class Agent:
                         arguments=tool_args,
                     )
 
-                    # 不安全/高危工具确认检查：
-                    #   manual 模式：所有不安全工具（含高危）需人工审批
-                    #   auto   模式：不安全工具自主执行，仅高危工具（requires_confirm）需人工审批
+                    # 不安全工具确认检查：
+                    #   manual 模式：不安全工具需人工审批
+                    #   auto   模式：不安全工具自主执行（配 judge_llm 时经 AI 判定，见下）
                     #   superwork  ：全部直接执行，不走此分支
                     wrapper = self._registry.get_tool(tool_name)
-                    high_risk = bool(wrapper and getattr(wrapper, "requires_confirm", False))
                     needs_confirm = (
-                        (self._mode == AgentMode.MANUAL
-                         and (high_risk or not self._is_safe_call(wrapper, tool_args)))
-                        or (self._mode == AgentMode.AUTO and high_risk)
+                        self._mode == AgentMode.MANUAL
+                        and not self._is_safe_call(wrapper, tool_args)
                     )
-                    if needs_confirm and not self._on_confirm and high_risk:
-                        # 高危工具是硬性门槛：无审批回调时拒绝执行（不可静默放行）。
-                        # 普通不安全工具无回调时维持原行为（直接执行），不走此分支。
-                        reject_msg = (
-                            f"工具 {tool_name} 为高危操作（requires_confirm），"
-                            f"当前未配置人工确认回调，已拒绝执行。"
-                        )
-                        yield ToolResult(
-                            tool_name=tool_name,
-                            tool_call_id=tool_call_id,
-                            output=reject_msg,
-                            is_error=True,
-                        )
-                        self._history.add(Message(
-                            role=MessageRole.TOOL,
-                            content=reject_msg,
-                            tool_call_id=tool_call_id,
-                            name=tool_name,
-                        ))
-                        continue
+
+                    # AI 安全判定结果处理（仅 auto 模式的不安全调用有判定结果）：
+                    #   allow → 落下去直接执行；confirm → 并入人工审批流程；deny → 拒绝
+                    verdict = judge_verdicts.get(tool_call_id)
+                    if verdict is not None:
+                        if verdict.decision == "deny":
+                            reject_msg = (
+                                f"[安全判定] 工具 {tool_name} 调用被拒绝："
+                                f"{verdict.reason or '判定为高风险操作'}。"
+                                f"请调整方案或换用更安全的方式完成任务。"
+                            )
+                            yield ToolResult(
+                                tool_name=tool_name,
+                                tool_call_id=tool_call_id,
+                                output=reject_msg,
+                                is_error=True,
+                            )
+                            self._history.add(Message(
+                                role=MessageRole.TOOL,
+                                content=reject_msg,
+                                tool_call_id=tool_call_id,
+                                name=tool_name,
+                            ))
+                            continue
+                        if verdict.decision == "confirm":
+                            if self._on_confirm:
+                                needs_confirm = True  # 并入下方人工审批流程
+                            else:
+                                reject_msg = (
+                                    f"[安全判定] 工具 {tool_name} 需要人工确认"
+                                    f"（{verdict.reason or '影响范围不明'}），"
+                                    f"但当前未配置确认回调，已拒绝执行。"
+                                )
+                                yield ToolResult(
+                                    tool_name=tool_name,
+                                    tool_call_id=tool_call_id,
+                                    output=reject_msg,
+                                    is_error=True,
+                                )
+                                self._history.add(Message(
+                                    role=MessageRole.TOOL,
+                                    content=reject_msg,
+                                    tool_call_id=tool_call_id,
+                                    name=tool_name,
+                                ))
+                                continue
+                        # allow → 不设 needs_confirm，直接落到执行
+
                     if needs_confirm and self._on_confirm:
                         # 等待人工确认期间，通过守卫释放外部并发许可（无注入时为 no-op），
                         # 避免长时间确认阻塞占用全局并发名额。
@@ -1047,3 +1121,4 @@ class Agent:
                 _current_todo_plan_items.reset(plan_items_token)
             _current_parent_mode.reset(mode_token)
             _current_parent_confirm.reset(confirm_token)
+            _current_parent_judge.reset(judge_token)

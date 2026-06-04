@@ -196,42 +196,6 @@ class TestSubAgentConfirmPassthrough:
             pass
         assert executed
 
-    @pytest.mark.asyncio
-    async def test_auto_high_risk_walks_parent_confirm(self):
-        """AUTO 模式下，子代理内的高危工具（requires_confirm）应走父 Agent 的确认回调"""
-        executed = []
-        confirm_calls = []
-
-        @tool(name="danger_pay", description="高危支付", is_safe=False,
-              requires_confirm=True)
-        async def danger_pay() -> str:
-            executed.append(True)
-            return "paid"
-
-        async def parent_confirm(tool_name: str, args: str):
-            confirm_calls.append(tool_name)
-            return True
-
-        sub_llm = _make_seq_llm("danger_pay", {})
-        sub_tools = create_subagent_tools(
-            llm=sub_llm,
-            subagents=[SubAgentConfig(
-                name="worker3", description="测试子代理", tools=[danger_pay],
-            )],
-        )
-        parent = Agent(
-            llm=_make_seq_llm("worker3", {"task": "执行支付"}),
-            tools=sub_tools,
-            mode=AgentMode.AUTO,
-            on_confirm=parent_confirm,
-            session_enabled=False,
-            register_catalog=False, register_skills=False,
-        )
-        async for _ in parent.run("委派任务"):
-            pass
-        assert confirm_calls == ["danger_pay"], "高危工具应触发父 Agent 的确认回调"
-        assert executed, "批准后高危工具应已执行"
-
 
 # ── Agent 级全配默认（方案 A：默认策略下沉进 Agent）──────────
 
