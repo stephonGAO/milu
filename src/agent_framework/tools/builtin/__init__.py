@@ -36,6 +36,8 @@ from agent_framework.tools.builtin.memory_tool import memory_read, memory_write
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
 # 注意：todo 工具（todo_write / todo_read）依赖 Agent.run() 注入的 ContextVar（session_dir），
 #       在非 Agent 上下文中手动调用会抛 RuntimeError；正常通过 Agent 使用时无影响
+# 注意：memory 工具（memory_write / memory_read）不在此列表——长期记忆默认关闭，
+#       由 Agent(memory=True/"user_id") 开关启用时自动注册（见 agent.py）
 BUILTIN_TOOLS = [
     datetime_tool,
     http_request,
@@ -47,8 +49,6 @@ BUILTIN_TOOLS = [
     shell_command,
     todo_read,
     todo_write,
-    memory_read,
-    memory_write,
 ]
 
 __all__ = [

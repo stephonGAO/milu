@@ -42,8 +42,11 @@ from agent_framework.tools.builtin.todo_write import (
     _current_plan_items as _current_todo_plan_items,
 )
 from agent_framework.tools.builtin.memory_tool import (
-    _current_session_dir as _current_memory_session_dir,
-    _current_memory_items,
+    _current_memory_path,
+    memory_file_path,
+    memory_read,
+    memory_write,
+    render_memory_prompt,
 )
 from agent_framework.agent.subagent import (
     _current_subagent_events,
@@ -178,6 +181,7 @@ class Agent:
         session_dir: "str | os.PathLike | None" = None,     # None→用户级 ~/.agent_framework/sessions
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
         subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
+        memory: "bool | str" = False,                       # 长期记忆开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→启用并按该用户标识隔离存储
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
     ):
@@ -245,6 +249,19 @@ class Agent:
         if resolved_tools:
             self._registry.register_many(resolved_tools)
 
+        # ── 长期记忆（默认关闭，单开关启用）──
+        # memory=False → 关闭；True → 启用（身份 "default"）；字符串 → 启用并作为
+        # 用户标识（多用户场景传 user_id，按用户隔离）。存储与 session 解耦：
+        # 用户级文件 ~/.agent_framework/memory/{user_id}.json，同一标识跨会话共享。
+        # 启用时注册 memory 工具 + 每轮把条目渲染进 system prompt 末尾（见
+        # _build_system_prompt）；路径在 run() 入口经 ContextVar 注入工具层。
+        self._memory_path: Path | None = None
+        if memory:
+            self._memory_path = memory_file_path(
+                memory if isinstance(memory, str) else "default"
+            )
+            self._registry.register_many([memory_write, memory_read])
+
         # 子代理默认（同一约定）：
         #   None + 顶层 Agent → 内置三件套（researcher/reader/coder）；显式 [] → 无；
         #   显式列表 → 自定义 SubAgentConfig。子代理自身 register_catalog=False，
@@ -300,8 +317,6 @@ class Agent:
         # todo 计划的内存后端：无 session 时承载计划（同一 Agent 跨轮保留）。
         # 有 session 时不用它（计划落盘 session_dir/plan.json）。在 run() 入口择一注入。
         self._in_memory_plan: list[dict] = []
-        # 长期记忆的内存后端（同上模式）：无 session 时承载 memory_write 的条目
-        self._in_memory_memories: list[dict] = []
 
         # ── 技能（Skills）初始化 ──
         from agent_framework.skills.registry import SkillRegistry
@@ -506,6 +521,7 @@ class Agent:
         1. PromptBuilder 输出（prompt_dir 指定的文件目录）
         2. system_prompt 字符串（向后兼容的内联提示词）
         3. 技能目录元数据
+        4. 长期记忆条目（启用 memory 时，固定在最后）
         """
         parts: list[str] = []
 
@@ -527,6 +543,11 @@ class Agent:
         skill_catalog = self._skill_registry.describe_available()
         if skill_catalog:
             parts.append(f"\n\n## 可用技能\n{skill_catalog}")
+
+        # 4. 长期记忆（启用时注入在最后；每轮重读文件，同一用户其他
+        #    Agent/进程的新写入即时可见，与提示词热重载同理）
+        if self._memory_path is not None:
+            parts.append(render_memory_prompt(self._memory_path))
 
         self._history.set_system(
             Message(role=MessageRole.SYSTEM, content="".join(parts))
@@ -620,17 +641,16 @@ class Agent:
         """
         # 注入 per-run 状态到 ContextVar（asyncio 任务级隔离）：
         #   - todo 计划存储：有 session → 文件后端（session_dir）；无 session → 内存后端
+        #   - 长期记忆文件路径：未启用 memory 时注入 None（显式隔离，子代理不会
+        #     经 Context 继承父的记忆路径而意外写入）
         #   - 父 Agent 操作模式：供子代理工具继承（无需 get_parent_mode 回调）
         session_token = None
         plan_items_token = None
-        mem_dir_token = None
-        mem_items_token = None
         if self._session is not None:
             session_token = _current_todo_session_dir.set(self._session.dir_path)
-            mem_dir_token = _current_memory_session_dir.set(self._session.dir_path)
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
-            mem_items_token = _current_memory_items.set(self._in_memory_memories)
+        memory_token = _current_memory_path.set(self._memory_path)
         mode_token = _current_parent_mode.set(self._mode)
         # 确认回调透传：子代理继承父的 on_confirm（manual 模式不安全工具、
         # auto 模式 AI 判定 confirm 的调用同样走审批），委派不构成安全旁路
@@ -1164,10 +1184,7 @@ class Agent:
                 _safe_reset(_current_todo_session_dir, session_token)
             if plan_items_token is not None:
                 _safe_reset(_current_todo_plan_items, plan_items_token)
-            if mem_dir_token is not None:
-                _safe_reset(_current_memory_session_dir, mem_dir_token)
-            if mem_items_token is not None:
-                _safe_reset(_current_memory_items, mem_items_token)
+            _safe_reset(_current_memory_path, memory_token)
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)
             _safe_reset(_current_parent_judge, judge_token)

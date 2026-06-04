@@ -592,6 +592,13 @@ class AgentPool:
         派生的 session_id 透传给 Agent(session_id=...)，并把 self.shared_mcp_manager
         透传给 Agent(mcp_manager=...)。
         """
+        kwargs = dict(self._agent_kwargs)
+        # 长期记忆多用户安全：agent_kwargs={"memory": True} 在池上下文派生为
+        # 按 user_id 隔离的身份（~/.agent_framework/memory/{user_id}.json），
+        # 避免所有用户落到同一份 "default" 记忆造成跨用户串扰。
+        # 显式传字符串则尊重调用方（如多 Agent 共享一份团队记忆的场景）。
+        if kwargs.get("memory") is True:
+            kwargs["memory"] = user_id
         return Agent(
             llm=llm,
             config=self._agent_config,
@@ -599,7 +606,7 @@ class AgentPool:
             # 启用 shared_mcp 时注入共享 manager；否则为 None（per-agent 默认行为）
             mcp_manager=self._shared_mcp_manager,
             # 透传能力参数（mode / session_enabled / session_dir / tools / subagents 等）
-            **self._agent_kwargs,
+            **kwargs,
         )
 
     async def _get_or_create(

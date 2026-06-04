@@ -2,6 +2,24 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — memory 长期记忆升级为用户级存储（2026-06-04）
+
+### 变更（破坏性）
+
+- **存储位置**：`{session_dir}/memory.json` → `~/.agent_framework/memory/{user_id}.json`
+  （`AGENT_FRAMEWORK_HOME` 可覆盖）。与 session 彻底解耦——同一用户标识跨 session、
+  跨进程共享同一份记忆，解决「记忆锁在单个会话里，开新对话就丢」的问题。
+  旧的 session 内 memory.json 与无 session 内存后端**均已移除**。
+- **默认关闭，单开关启用**：`Agent(memory=False)`（默认）不注册 memory 工具；
+  `memory=True` 启用（身份 "default"）；`memory="user-123"` 启用并按用户隔离。
+  `memory_write` / `memory_read` 相应移出 `BUILTIN_TOOLS` 默认列表。
+- **记忆条目注入 system prompt 末尾**：启用时每轮把全部条目渲染进系统提示词最后的
+  「长期记忆」一节（每轮重读文件，跨进程新写入即时可见），LLM 无需调用 memory_read
+  即可看到；main 角色提示词中的静态记忆指引随之移除（指引并入动态注入段）。
+- **AgentPool 多用户安全**：默认工厂把 `agent_kwargs={"memory": True}` 自动派生为
+  `memory=user_id`，避免所有用户共享同一份 "default" 记忆；显式传字符串则尊重调用方
+  （团队共享记忆场景）。
+
 ## [Unreleased] — 移植 5 个热门开源技能（2026-06-05）
 
 ### 新增
