@@ -1,8 +1,9 @@
 ---
 name: code-review
-description: 代码审查专家，关注安全性、性能和可维护性
+description: 代码审查专家，从安全性、性能、可维护性三个维度审查代码并按严重程度输出问题清单。当用户要求审查代码、Code Review、检查代码质量或评估改动风险时使用此技能。
 triggers:
   - 审查
+  - 代码质量
   - review
   - CR
 ---

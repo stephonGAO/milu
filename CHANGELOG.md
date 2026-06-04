@@ -2,6 +2,24 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — 内置技能扩充 + MCP 推荐配置模板（2026-06-04）
+
+### 新增
+
+- **内置技能 `content-writing`**（中文内容创作）：公众号/小红书/邮件/文案/报告多体裁，
+  含平台风格速查与写作原则。C 端最高频需求，纯指令零依赖。
+- **内置技能 `doc-formatting`**（文档排版整理）：零散内容 → 规范 Markdown
+  （标题层级/表格/列表/目录），只重组不改写。轻量替代 office 文档类重依赖技能。
+- **MCP 推荐配置模板 `config/mcp_servers.example.json`**：按生态热度选型
+  （Playwright 浏览器自动化、Context7 文档检索、官方 Git/Filesystem/Sequential-Thinking），
+  重依赖能力走 MCP 而非内置工具，多用户场景配合 shared_mcp 整池共享。
+
+### 变更
+
+- **全部内置技能 description 按官方最佳实践重写**：第三人称、「做什么 + 何时用」、
+  嵌入用户会说的触发词（description 决定技能能否被正确触发）。
+  涉及 translator / code-review / deep-research。内置技能增至 6 个。
+
 ## [Unreleased] — memory 长期记忆工具（2026-06-04）
 
 ### 新增
