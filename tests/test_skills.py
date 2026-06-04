@@ -418,3 +418,52 @@ description: 目录测试技能
             assert "目录测试技能" in system_msg.content
             # 不应包含正文
             assert "目录测试指令" not in system_msg.content
+
+
+# ---------------------------------------------------------------------------
+# 第三方移植技能（anthropics/skills Apache-2.0 + obra/superpowers MIT）
+# ---------------------------------------------------------------------------
+
+_VENDORED = (
+    "frontend-design", "internal-comms", "mcp-builder",
+    "systematic-debugging", "test-driven-development",
+)
+
+
+class TestVendoredBuiltinSkills:
+    """移植技能加载 + 多文件技能目录注入"""
+
+    def _registry(self) -> SkillRegistry:
+        from agent_framework.resources import builtin_skills_dir
+        reg = SkillRegistry()
+        reg.load_from_directory(str(builtin_skills_dir()))
+        return reg
+
+    def test_vendored_skills_loaded(self):
+        """5 个移植技能均能从内置目录加载"""
+        names = set(self._registry().list_names())
+        for n in _VENDORED:
+            assert n in names, f"移植技能 {n} 未加载"
+
+    def test_multifile_skill_injects_dir(self):
+        """多文件技能：load_skill 注明技能目录绝对路径，且目录真实存在"""
+        import re
+        from pathlib import Path
+
+        out = self._registry().load_skill("internal-comms")
+        assert "[技能目录]" in out
+        m = re.search(r"\[技能目录\] (.+)", out)
+        skill_dir = Path(m.group(1).strip())
+        assert skill_dir.is_dir()
+        assert (skill_dir / "examples").is_dir(), "附属 examples/ 应一并移植"
+
+    def test_flat_skill_no_dir_note(self):
+        """平铺单文件技能不注入目录说明"""
+        out = self._registry().load_skill("translator")
+        assert "[技能目录]" not in out
+
+    def test_licenses_present(self):
+        """每个移植技能目录均保留上游 LICENSE.txt（合规要求）"""
+        from agent_framework.resources import builtin_skills_dir
+        for n in _VENDORED:
+            assert (builtin_skills_dir() / n / "LICENSE.txt").exists(), f"{n} 缺 LICENSE.txt"

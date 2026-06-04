@@ -2,6 +2,26 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — 移植 5 个热门开源技能（2026-06-05）
+
+### 新增
+
+- **从官方与社区仓库原样移植 5 个热门技能**（内置技能 6 → 11 个）：
+  - anthropics/skills（Apache-2.0 @ da20c92）：`frontend-design` 前端设计质量、
+    `internal-comms` 职场内部沟通写作（附 examples/）、`mcp-builder` MCP server 构建指南
+    （附 reference/ 与 scripts/）
+  - obra/superpowers（MIT @ 6fd4507）：`systematic-debugging` 系统化调试方法论、
+    `test-driven-development` TDD 纪律
+  - 各技能目录保留上游 LICENSE.txt；来源与移植说明见 `templates/skills/THIRD_PARTY_NOTICES.txt`
+- **load_skill 多文件技能增强**：目录式技能（含附属文件）在返回正文时自动注明
+  技能目录绝对路径，LLM 可据此用 file_read 读取 examples/reference/scripts 等附属资源
+
+### 说明
+
+- 官方 docx/pdf/pptx/xlsx 文档四件套为**专有许可**（禁止提取/复制/衍生/再分发），
+  依法不可移植进本包；未选 superpowers 的 brainstorming（其 "MUST use before any
+  creative work" 描述会劫持通用助手的创作类请求）
+
 ## [Unreleased] — 内置技能扩充 + MCP 推荐配置模板（2026-06-04）
 
 ### 新增

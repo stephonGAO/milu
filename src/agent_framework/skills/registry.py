@@ -101,13 +101,30 @@ class SkillRegistry:
             <skill name="code-review">
             正文内容...
             </skill>
+
+        多文件技能（目录式 skills/x/SKILL.md 且目录内有附属文件）会在正文前
+        注明技能目录的绝对路径——官方/社区技能常引用 examples/、reference/、
+        scripts/ 等相对路径附属资源，LLM 据此拼出绝对路径用 file_read 读取。
         """
         cfg = self._skills.get(name)
         if not cfg:
             known = ", ".join(sorted(self._skills)) or "(无)"
             return f"错误：未知技能 '{name}'。可用技能：{known}"
 
-        return f'<skill name="{cfg.name}">\n{cfg.content}\n</skill>'
+        # 多文件技能：注入附属文件目录（仅目录式且确有同级附属文件时）
+        dir_note = ""
+        if cfg.source:
+            src = Path(cfg.source)
+            if src.name.lower() == "skill.md" and src.parent.is_dir():
+                has_siblings = any(p != src for p in src.parent.iterdir())
+                if has_siblings:
+                    dir_note = (
+                        f"[技能目录] {src.parent}\n"
+                        f"（本技能含附属文件；正文中的相对路径基于上述目录，"
+                        f"读取时请拼为绝对路径）\n\n"
+                    )
+
+        return f'<skill name="{cfg.name}">\n{dir_note}{cfg.content}\n</skill>'
 
     def as_tool(self) -> ToolWrapper:
         """将 load_skill 包装为 ToolWrapper，可直接注册到 ToolRegistry。"""

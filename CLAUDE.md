@@ -82,7 +82,8 @@ pip install -e ".[dev,mcp]"
 ### 5. 提示词 & 技能层 (`src/agent_framework/prompts/`, `skills/`)
 
 - `PromptBuilder`（`prompts/builder.py`）：从 Markdown 目录**分层拼装** system prompt。每个 `.md` 是一个片段，YAML frontmatter 控制 `section`(safeguard/soul/agent/memory/custom) + `order` + `enabled`，`{{key}}` 变量插值，**每次 `build()` 重读文件支持热重载**。预置角色提示词随包分发在 `src/agent_framework/templates/prompts/{main,coder,researcher,reviewer}/`，通过 `agent_framework.builtin_prompts_dir(role)` 定位（内置技能同理用 `builtin_skills_dir()`）
-- `SkillRegistry`（`skills/registry.py`）：技能**元数据（name/description/triggers）始终注入 system prompt**，正文按需通过 `load_skill` 元工具拉取。无激活/卸载生命周期。支持平铺 `skills/x.md` 或子目录 `skills/x/SKILL.md`
+- `SkillRegistry`（`skills/registry.py`）：技能**元数据（name/description/triggers）始终注入 system prompt**，正文按需通过 `load_skill` 元工具拉取。无激活/卸载生命周期。支持平铺 `skills/x.md` 或子目录 `skills/x/SKILL.md`；**多文件技能**（目录内含 examples/reference/scripts 等附属文件）在 load_skill 返回时自动注明技能目录绝对路径，供 file_read 访问附属资源
+- **内置技能 11 个**：自研 6 个（translator/code-review/skill-creator/deep-research/content-writing/doc-formatting）+ 移植 5 个（官方 anthropics/skills Apache-2.0：frontend-design/internal-comms/mcp-builder；社区 obra/superpowers MIT：systematic-debugging/test-driven-development）。来源与许可见 `templates/skills/THIRD_PARTY_NOTICES.txt`。⚠️ 官方 docx/pdf/pptx/xlsx 四件套为专有许可禁止再分发，**不可移植**
 
 ### 6. 服务层 (`src/agent_framework/serving/`)
 

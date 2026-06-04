@@ -1,0 +1,33 @@
+# 第三方技能来源与许可声明
+
+以下内置技能从开源仓库原样移植（保留各自目录内的 LICENSE.txt），按要求保留版权与许可声明。
+未入选说明：官方 docx / pdf / pptx / xlsx 文档四件套为专有许可（明确禁止提取、复制、衍生与再分发），
+不可打包进本项目；如需文档处理能力请在 Anthropic 官方产品内使用，或自行基于开源库实现。
+
+## 来自 anthropics/skills（Apache License 2.0）
+
+来源：https://github.com/anthropics/skills @ da20c92
+版权：© Anthropic, PBC
+
+| 技能 | 用途 |
+|---|---|
+| frontend-design | 高质量前端界面设计（避免「AI 味」的网页/组件/落地页产出） |
+| internal-comms | 职场内部沟通写作（状态报告/公告/FAQ/事故通报，附 examples/） |
+| mcp-builder | 构建高质量 MCP server 的完整指南（Python/Node，附 reference/ 与 scripts/） |
+
+## 来自 obra/superpowers（MIT License）
+
+来源：https://github.com/obra/superpowers @ 6fd4507
+版权：© 2025 Jesse Vincent
+
+| 技能 | 用途 |
+|---|---|
+| systematic-debugging | 系统化调试方法论（先找根因再修复，附根因追踪等参考文档） |
+| test-driven-development | 测试驱动开发纪律（红-绿-重构，附反模式清单） |
+
+## 移植说明
+
+- SKILL.md 内容未做修改（frontmatter 的 name/description 与正文保持上游原样，英文正文对 LLM 无障碍）
+- 多文件技能的附属资源（examples/ reference/ scripts/ 等）一并移植；
+  框架的 load_skill 会在返回正文时注明技能目录绝对路径，供 file_read 读取附属文件
+- 仅剔除上游的创作过程产物（CREATION-LOG、技能自测文件等，非技能本体）
