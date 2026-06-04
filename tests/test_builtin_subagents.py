@@ -2,7 +2,7 @@
 
 覆盖：
 - builtin_subagent_configs()：默认集合、include 参数、未知名称报错、工具/技能/role 装配
-- on_confirm 透传：AUTO 模式下子代理内的不安全工具走父 Agent 的确认回调（批准/拒绝）
+- on_confirm 透传：MANUAL 模式下子代理内的不安全工具走父 Agent 的确认回调（批准/拒绝）
 - AgentPool 默认工厂：自动注册三件套；agent_kwargs={"subagents": []} 可关闭
 """
 from __future__ import annotations
@@ -115,10 +115,10 @@ def _make_seq_llm(first_tool_name: str, first_tool_args: dict):
 
 
 class TestSubAgentConfirmPassthrough:
-    """AUTO 模式下，子代理内的不安全工具应走父 Agent 的 on_confirm 回调。"""
+    """MANUAL 模式下，子代理内的不安全工具应走父 Agent 的 on_confirm 回调。"""
 
     def _build(self, approved: bool):
-        """构造 父Agent(AUTO+on_confirm) → 子代理 → 不安全工具 的链路。"""
+        """构造 父Agent(MANUAL+on_confirm) → 子代理 → 不安全工具 的链路。"""
         executed = []
         confirm_calls = []
 
@@ -143,7 +143,7 @@ class TestSubAgentConfirmPassthrough:
         parent = Agent(
             llm=parent_llm,
             tools=sub_tools,
-            mode=AgentMode.AUTO,
+            mode=AgentMode.MANUAL,
             on_confirm=parent_confirm,
             session_enabled=False,
             register_catalog=False, register_skills=False,
@@ -170,7 +170,7 @@ class TestSubAgentConfirmPassthrough:
 
     @pytest.mark.asyncio
     async def test_no_parent_confirm_keeps_old_behavior(self):
-        """父没有 on_confirm 时维持原行为：AUTO 模式直接执行（无回调可走）"""
+        """父没有 on_confirm 时维持原行为：AUTO 模式自主执行（不安全工具免审批）"""
         executed = []
 
         @tool(name="danger_write2", description="不安全写入", is_safe=False)
@@ -195,6 +195,42 @@ class TestSubAgentConfirmPassthrough:
         async for _ in parent.run("委派任务"):
             pass
         assert executed
+
+    @pytest.mark.asyncio
+    async def test_auto_high_risk_walks_parent_confirm(self):
+        """AUTO 模式下，子代理内的高危工具（requires_confirm）应走父 Agent 的确认回调"""
+        executed = []
+        confirm_calls = []
+
+        @tool(name="danger_pay", description="高危支付", is_safe=False,
+              requires_confirm=True)
+        async def danger_pay() -> str:
+            executed.append(True)
+            return "paid"
+
+        async def parent_confirm(tool_name: str, args: str):
+            confirm_calls.append(tool_name)
+            return True
+
+        sub_llm = _make_seq_llm("danger_pay", {})
+        sub_tools = create_subagent_tools(
+            llm=sub_llm,
+            subagents=[SubAgentConfig(
+                name="worker3", description="测试子代理", tools=[danger_pay],
+            )],
+        )
+        parent = Agent(
+            llm=_make_seq_llm("worker3", {"task": "执行支付"}),
+            tools=sub_tools,
+            mode=AgentMode.AUTO,
+            on_confirm=parent_confirm,
+            session_enabled=False,
+            register_catalog=False, register_skills=False,
+        )
+        async for _ in parent.run("委派任务"):
+            pass
+        assert confirm_calls == ["danger_pay"], "高危工具应触发父 Agent 的确认回调"
+        assert executed, "批准后高危工具应已执行"
 
 
 # ── Agent 级全配默认（方案 A：默认策略下沉进 Agent）──────────

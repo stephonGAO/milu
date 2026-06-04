@@ -51,10 +51,11 @@ pip install -e ".[dev,mcp]"
 - `Agent.run()` 核心循环（`agent.py`，~880 行）：每轮 `重建 system prompt → 自动压缩 → LLM 流式调用 → 解析文本/工具调用 → 安全检查 → 执行工具 → 回传结果`，返回 `AsyncIterator[AgentEvent]`
 - 事件类型（`events.py`）：`TextDelta`, `ReasoningDelta`, `ToolCallStart`, `ToolConfirmRequired`, `ToolResult`, `AgentDone`, `AgentError`, `SubAgentEvent`, `SubAgentDone`, `HistoryCompacted`, `SessionLoaded`
 - **Agent 构造（全配默认，开箱即用）**：`Agent(llm)` 即得完整体——顶层 Agent 各参数为 `None`（默认）时自动注入：内置 `main` 角色提示词（`prompt_dir`，传了 `system_prompt` 则只用它）、内置技能（`skills_dir`）、**全套内置工具 `BUILTIN_TOOLS`（`tools`，显式 `[]` 即无工具）、内置子代理三件套（`subagents`，显式 `[]` 即关闭）**。统一约定：`None`→内置默认、`[]`/显式值→覆盖；子代理 `register_catalog=False`，所有默认注入对其不生效（保持精简 + 结构性不嵌套）。**「全配默认」只在 Agent 一处实现——直接构造与经 AgentPool 构造拿到同规格实例**。能力参数 `mode` / `session_enabled` / `session_dir` / `mcp_tools_active_by_default` / `subagents` 是 `Agent.__init__` 的直接参数（`AgentConfig` 仅含运行限额 `max_turns`/`timeout`/`total_timeout`/`max_total_tokens`/`tool_call_limit`）。`session_dir` 默认 `~/.agent_framework/sessions`（与 CWD 解耦，可用环境变量 `AGENT_FRAMEWORK_HOME` 覆盖；见 `resources.user_data_dir()`）
-- **操作模式 `AgentMode`（枚举定义于 `config.py`，作为 `Agent(mode=...)` 直接参数）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换（写实例字段 `self._mode`，天然无跨用户串扰）：
-  - `talk`：只读，调用前用 `_is_safe_call()` 拦截所有不安全工具
-  - `auto`：标准，安全工具直接执行、不安全工具产出 `ToolConfirmRequired` 等待审批
-  - `superwork`：全权限，跳过所有安全检查
+- **操作模式 `AgentMode`（枚举定义于 `config.py`，作为 `Agent(mode=...)` 直接参数）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换（写实例字段 `self._mode`，天然无跨用户串扰）。「高危工具」指 `@tool(requires_confirm=True)` 标记的工具（支付、删库等不可逆操作）：
+  - `talk`：只读，调用前用 `_is_safe_call()` 拦截所有不安全工具（含高危）
+  - `manual`：人工审批，安全工具直接执行、不安全工具（含高危）产出 `ToolConfirmRequired` 等待审批
+  - `auto`（默认）：自主决策（类 Claude Code），不安全工具自动执行、仅高危工具需人工审批（无 `on_confirm` 回调时高危工具直接拒绝，硬性门槛）
+  - `superwork`：全权限，跳过所有安全检查（含高危工具）
 - **工具执行顺序**：todo 计划工具（`todo_write`/`todo_read`）必须单独成批调用（不可与其他工具混在一批）；普通工具一批内通过 `asyncio.gather` 并发执行。另有「跨轮次顺序守卫」：一旦开始执行非计划工具（`_work_started`），禁止再创建计划
 - `ConversationHistory`（`history.py`）：消息列表 + 4 种截断策略（`none`, `sliding_window`, `token_limit`, `head_tail`），内部持有 `Compactor`
 - `Session`（`session.py`）：会话持久化，每会话一个 `{session_dir}/{id}/` 目录（默认 `~/.agent_framework/sessions/`），`conversation.jsonl`（append-only 消息日志，SYSTEM 不记录）+ `session.json`（元数据）。支持 compaction 快照点恢复
@@ -64,7 +65,7 @@ pip install -e ".[dev,mcp]"
 
 ### 3. 工具层 (`src/agent_framework/tools/`)
 
-- `@tool(name, description, is_safe=True, safe_check=None)` 装饰器 → 生成 `ToolWrapper`（含自动 JSON Schema、`is_safe`、`safe_check` 动态判定、`meta` 元工具标记）。**注意：旧版的 `dangerous`/`priority` 参数已移除**
+- `@tool(name, description, is_safe=True, safe_check=None, requires_confirm=False)` 装饰器 → 生成 `ToolWrapper`（含自动 JSON Schema、`is_safe`、`safe_check` 动态判定、`requires_confirm` 高危标记、`meta` 元工具标记）。**注意：旧版的 `dangerous`/`priority` 参数已移除**
 - `ToolRegistry` 双池设计（`registry.py`）：active pool（schema 注入 LLM）+ dormant pool（MCP 工具待激活）
 - `catalog.py` 提供三个元工具（`list_catalog`, `search_tools`, `activate_tools`）供 LLM 自主发现/激活 dormant 工具
 - `ToolExecutor`（`executor.py`）安全执行：JSON 参数解析、async/sync 兼容、异常捕获

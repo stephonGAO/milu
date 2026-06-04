@@ -1,4 +1,4 @@
-"""测试非安全工具确认机制（AUTO 模式）"""
+"""测试非安全工具确认机制（MANUAL 人工审批模式，原 AUTO 行为）"""
 import pytest
 from unittest.mock import AsyncMock
 from agent_framework.agent import Agent, AgentConfig
@@ -69,7 +69,7 @@ def _make_llm_with_tool_call(tool_name: str, args: dict | None = None):
 
 @pytest.mark.asyncio
 async def test_unsafe_tool_triggers_confirm(unsafe_tool):
-    """AUTO 模式 + 非安全工具 + on_confirm 回调 → 触发确认"""
+    """MANUAL 模式 + 非安全工具 + on_confirm 回调 → 触发确认"""
     confirm_called = False
 
     async def on_confirm(tool_name, args_str):
@@ -81,6 +81,7 @@ async def test_unsafe_tool_triggers_confirm(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -103,6 +104,7 @@ async def test_confirm_approved_executes(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -140,6 +142,7 @@ async def test_confirm_rejected_skips_execution(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[tracked_unsafe_op],
         on_confirm=on_confirm,
     )
@@ -174,6 +177,7 @@ async def test_safe_tool_no_confirm(safe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[safe_tool],
         on_confirm=on_confirm,
     )
@@ -197,6 +201,7 @@ async def test_no_callback_executes_directly(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=None,  # 没有回调
     )
@@ -223,6 +228,7 @@ async def test_confirm_rejected_yields_correct_event(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -249,6 +255,7 @@ async def test_confirm_rejected_history_updated(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -278,6 +285,7 @@ async def test_confirm_response_approved(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -307,6 +315,7 @@ async def test_confirm_response_rejected_with_message(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -343,6 +352,7 @@ async def test_confirm_response_custom_message_in_history(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -369,6 +379,7 @@ async def test_confirm_response_rejected_no_message(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -392,6 +403,7 @@ async def test_backward_compat_bool_true(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )
@@ -415,6 +427,7 @@ async def test_backward_compat_bool_false(unsafe_tool):
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
+        mode="manual",  # 人工审批模式（原 auto 行为）
         tools=[unsafe_tool],
         on_confirm=on_confirm,
     )

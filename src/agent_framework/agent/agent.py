@@ -153,7 +153,7 @@ class Agent:
         session_id: str | None = None,
         mcp_manager: "MCPManager | None" = None,
         # ── Agent 能力参数（原属 AgentConfig，现为 Agent 直接参数）──
-        mode: "AgentMode | str" = AgentMode.AUTO,           # 操作模式：talk/auto/superwork
+        mode: "AgentMode | str" = AgentMode.AUTO,           # 操作模式：talk/manual/auto/superwork
         session_enabled: bool = True,                       # 是否自动创建会话（对话日志持久化）
         session_dir: "str | os.PathLike | None" = None,     # None→用户级 ~/.agent_framework/sessions
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
@@ -341,7 +341,7 @@ class Agent:
     def set_mode(self, mode: "AgentMode | str") -> None:
         """运行时切换操作模式。
 
-        :param mode: AgentMode 枚举或字符串（talk / auto / superwork）
+        :param mode: AgentMode 枚举或字符串（talk / manual / auto / superwork）
         """
         if isinstance(mode, str):
             mode = AgentMode(mode)
@@ -572,7 +572,8 @@ class Agent:
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
         mode_token = _current_parent_mode.set(self._mode)
-        # 确认回调透传：子代理继承父的 on_confirm，AUTO 模式下委派不构成安全旁路
+        # 确认回调透传：子代理继承父的 on_confirm（manual 模式不安全工具、
+        # auto 模式高危工具同样走审批），委派不构成安全旁路
         confirm_token = _current_parent_confirm.set(self._on_confirm)
         try:
             self._history.add(Message(role=MessageRole.USER, content=user_input))
@@ -823,7 +824,7 @@ class Agent:
                         continue
 
                 # ── 10a.7 talk 模式安全检查 ──
-                # talk 模式下，阻止所有不安全工具调用
+                # talk 模式下，阻止所有不安全工具调用（高危工具 requires_confirm 一并阻止）
                 if self._mode == AgentMode.TALK:
                     blocked = []
                     allowed = []
@@ -832,7 +833,8 @@ class Agent:
                         tool_name = fn.get("name", "")
                         tool_args = fn.get("arguments", "{}")
                         wrapper = self._registry.get_tool(tool_name)
-                        if wrapper and self._is_safe_call(wrapper, tool_args):
+                        if (wrapper and self._is_safe_call(wrapper, tool_args)
+                                and not getattr(wrapper, "requires_confirm", False)):
                             allowed.append(call)
                         else:
                             blocked.append(call)
@@ -876,11 +878,38 @@ class Agent:
                         arguments=tool_args,
                     )
 
-                    # 不安全工具确认检查（auto 模式下不安全工具需审批）
+                    # 不安全/高危工具确认检查：
+                    #   manual 模式：所有不安全工具（含高危）需人工审批
+                    #   auto   模式：不安全工具自主执行，仅高危工具（requires_confirm）需人工审批
+                    #   superwork  ：全部直接执行，不走此分支
                     wrapper = self._registry.get_tool(tool_name)
-                    if (self._mode == AgentMode.AUTO
-                            and not self._is_safe_call(wrapper, tool_args)
-                            and self._on_confirm):
+                    high_risk = bool(wrapper and getattr(wrapper, "requires_confirm", False))
+                    needs_confirm = (
+                        (self._mode == AgentMode.MANUAL
+                         and (high_risk or not self._is_safe_call(wrapper, tool_args)))
+                        or (self._mode == AgentMode.AUTO and high_risk)
+                    )
+                    if needs_confirm and not self._on_confirm and high_risk:
+                        # 高危工具是硬性门槛：无审批回调时拒绝执行（不可静默放行）。
+                        # 普通不安全工具无回调时维持原行为（直接执行），不走此分支。
+                        reject_msg = (
+                            f"工具 {tool_name} 为高危操作（requires_confirm），"
+                            f"当前未配置人工确认回调，已拒绝执行。"
+                        )
+                        yield ToolResult(
+                            tool_name=tool_name,
+                            tool_call_id=tool_call_id,
+                            output=reject_msg,
+                            is_error=True,
+                        )
+                        self._history.add(Message(
+                            role=MessageRole.TOOL,
+                            content=reject_msg,
+                            tool_call_id=tool_call_id,
+                            name=tool_name,
+                        ))
+                        continue
+                    if needs_confirm and self._on_confirm:
                         # 等待人工确认期间，通过守卫释放外部并发许可（无注入时为 no-op），
                         # 避免长时间确认阻塞占用全局并发名额。
                         wait_guard = (

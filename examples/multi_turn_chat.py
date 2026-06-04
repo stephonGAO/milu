@@ -93,7 +93,7 @@ def print_header():
     /tools     — 查看可用工具（含休眠工具）
     /skills    — 查看可用技能
     /plan      — 查看当前会话计划
-    /mode      — 查看/切换操作模式（talk/auto/superwork）
+    /mode      — 查看/切换操作模式（talk/manual/auto/superwork）
     /save      — 保存当前会话
     /sessions  — 查看所有会话
     /new       — 新建会话
@@ -404,7 +404,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
   /tools     — 查看可用工具
   /skills    — 查看可用技能
   /plan      — 查看当前会话计划
-  /mode      — 查看/切换操作模式（talk/auto/superwork）
+  /mode      — 查看/切换操作模式（talk/manual/auto/superwork）
   /prompt    — 查看当前系统提示词
   /compact   — 手动压缩对话历史
   /save      — 保存当前会话
@@ -419,12 +419,14 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
         mode = agent.mode
         mode_colors = {
             AgentMode.TALK: "cyan",
+            AgentMode.MANUAL: "yellow",
             AgentMode.AUTO: "green",
             AgentMode.SUPERWORK: "red",
         }
         mode_desc = {
             AgentMode.TALK: "只读模式（仅允许安全操作）",
-            AgentMode.AUTO: "标准模式（不安全操作需确认）",
+            AgentMode.MANUAL: "人工审批模式（不安全操作需确认）",
+            AgentMode.AUTO: "自主模式（自主决策，仅高危操作需确认）",
             AgentMode.SUPERWORK: "全权限模式（无安全检查）",
         }
         print(f"\n{DIVIDER}")
@@ -435,7 +437,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
             color = mode_colors.get(m, "reset")
             print(f"  {c(color, m.value):<20} {c('dim', mode_desc.get(m, ''))}{marker}")
         print(DIVIDER)
-        print(c("dim", "  用法: /mode <talk|auto|superwork>\n"))
+        print(c("dim", "  用法: /mode <talk|manual|auto|superwork>\n"))
 
     elif cmd.startswith("/mode "):
         new_mode = cmd.split(maxsplit=1)[1].strip()
@@ -443,13 +445,14 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
             agent.set_mode(new_mode)
             mode_colors = {
                 "talk": "cyan",
+                "manual": "yellow",
                 "auto": "green",
                 "superwork": "red",
             }
             color = mode_colors.get(new_mode, "reset")
             print(f"\n  {c('green', '模式已切换为:')} {c(color, c('bold', new_mode))}\n")
         except ValueError:
-            print(f"\n  {c('red', f'无效模式: {new_mode}')}（可选: talk, auto, superwork）\n")
+            print(f"\n  {c('red', f'无效模式: {new_mode}')}（可选: talk, manual, auto, superwork）\n")
 
     elif cmd == "/plan":
         items = _read_plan_items(agent)

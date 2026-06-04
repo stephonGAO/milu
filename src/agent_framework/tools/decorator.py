@@ -20,15 +20,23 @@ class ToolWrapper:
     parameters_schema: dict
     func: Callable
     is_async: bool
-    is_safe: bool = True                            # 工具是否安全（talk 模式可用，auto 模式免审批）
+    is_safe: bool = True                            # 工具是否安全（talk 模式可用，manual 模式免审批）
     safe_check: Callable[[dict], bool] | None = None  # 动态安全检查（每次调用时判定是否安全）
+    requires_confirm: bool = False  # 高危工具标记：auto/manual 模式下强制人工审批（仅 superwork 跳过）
     category: str = ""    # 工具分类（MCP 服务器名等，用于 Tool Catalog 分组显示）
     meta: bool = False    # 是否为元工具（元工具不可被停用）
 
 
 def tool(name: str, description: str, is_safe: bool = True,
-         safe_check: Callable[[dict], bool] | None = None):
-    """装饰器：将函数标记为 Agent 可调用的工具。"""
+         safe_check: Callable[[dict], bool] | None = None,
+         requires_confirm: bool = False):
+    """装饰器：将函数标记为 Agent 可调用的工具。
+
+    :param is_safe: 是否安全工具（talk 模式可用，manual 模式免审批）
+    :param safe_check: 动态安全检查函数（按调用参数判定是否安全）
+    :param requires_confirm: 高危工具标记。auto（自主）/manual 模式下强制走人工审批，
+        无审批回调时拒绝执行；仅 superwork 模式跳过。用于支付、删库等不可逆操作。
+    """
     def decorator(func: Callable) -> Callable:
         parameters_schema = generate_schema_from_function(func)
         is_async = asyncio.iscoroutinefunction(func)
@@ -40,6 +48,7 @@ def tool(name: str, description: str, is_safe: bool = True,
             is_async=is_async,
             is_safe=is_safe,
             safe_check=safe_check,
+            requires_confirm=requires_confirm,
         )
         # 相当于原方法里增加了一个_tool_wrapper变量，内部是包装后的整体。包装包里也有原方法，有所有信息。
         func._tool_wrapper = wrapper

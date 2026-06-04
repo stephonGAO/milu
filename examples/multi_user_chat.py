@@ -356,7 +356,8 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                 mode = agent.mode
                 mode_desc = {
                     AgentMode.TALK: "只读模式（仅允许安全操作）",
-                    AgentMode.AUTO: "标准模式（不安全操作需确认）",
+                    AgentMode.MANUAL: "人工审批模式（不安全操作需确认）",
+                    AgentMode.AUTO: "自主模式（自主决策，仅高危操作需确认）",
                     AgentMode.SUPERWORK: "全权限模式（无安全检查）",
                 }
                 lines = ["=== 操作模式 ===", "-" * 50]
@@ -364,7 +365,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                     marker = " → 当前" if m == mode else ""
                     lines.append(f"  {m.value:<20} {mode_desc.get(m, '')}{marker}")
                 lines.append("-" * 50)
-                lines.append("  用法: /mode <talk|auto|superwork>")
+                lines.append("  用法: /mode <talk|manual|auto|superwork>")
                 yield {"event": "CommandResult", "data": json.dumps(
                     {"type": "text", "text": "\n".join(lines)}, ensure_ascii=False)}
             else:
@@ -375,7 +376,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                         {"type": "info", "text": f"模式已切换为: {new_mode}"}, ensure_ascii=False)}
                 except ValueError:
                     yield {"event": "CommandResult", "data": json.dumps(
-                        {"type": "error", "text": f"无效模式: {new_mode}（可选: talk, auto, superwork）"},
+                        {"type": "error", "text": f"无效模式: {new_mode}（可选: talk, manual, auto, superwork）"},
                         ensure_ascii=False)}
 
         elif cmd == "/prompt":
@@ -478,7 +479,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                     "  /tools     — 查看可用工具",
                     "  /skills    — 查看可用技能",
                     "  /plan      — 查看当前会话计划",
-                    "  /mode      — 查看/切换操作模式（talk/auto/superwork）",
+                    "  /mode      — 查看/切换操作模式（talk/manual/auto/superwork）",
                     "  /prompt    — 查看当前系统提示词",
                     "  /compact   — 手动压缩对话历史",
                     "  /save      — 保存当前会话",

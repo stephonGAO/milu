@@ -41,8 +41,9 @@ _current_parent_mode: contextvars.ContextVar[AgentMode | None] = contextvars.Con
 # ── 父 Agent 确认回调注入（asyncio 任务级隔离）──────────
 #
 # Agent.run() 在入口把自身 on_confirm 写入此 ContextVar，子代理创建时继承它。
-# 由此，AUTO 模式下子代理内部的不安全工具（file_write / shell_command 等）会走与
-# 父 Agent 相同的人工确认流程，而不是因为子代理没接 on_confirm 而被静默放行——
+# 由此，manual 模式下子代理内部的不安全工具（file_write / shell_command 等）、
+# auto 模式下子代理内部的高危工具（requires_confirm）会走与父 Agent 相同的
+# 人工确认流程，而不是因为子代理没接 on_confirm 而被静默放行——
 # 「委派给子代理」不再成为绕过安全审批的旁路。
 # 注意：确认仍通过回调实时发生；但 ToolConfirmRequired 事件会随子代理事件列表在
 # 工具调用结束后才以 SubAgentEvent 形式回放（事件是事后记录，回调才是阻塞点）。
@@ -170,7 +171,7 @@ def builtin_subagent_configs(
                 "编码执行员：编写并运行 Python 代码完成计算、脚本、数据处理、文件生成。"
                 "当任务需要实际执行代码或产出文件时委派；"
                 "返回结果摘要 + 产物文件路径 + 复现方式。"
-                "注意：其中写文件等不安全操作仍走人工确认流程（继承父 Agent 的确认回调）。"
+                "注意：继承父 Agent 的操作模式与确认流程，委派不构成安全旁路。"
             ),
             role="coder",
             tools=[python_repl, file_read, file_write],
@@ -289,7 +290,7 @@ def _create_single_subagent_tool(
             config=sub_config,
             mode=sub_mode,            # 继承父 Agent 操作模式
             # 继承父 Agent 的人工确认回调（Agent.run 经 ContextVar 注入）：
-            # AUTO 模式下子代理的不安全工具同样需要审批，委派不构成安全旁路
+            # manual 模式不安全工具、auto 模式高危工具同样需要审批，委派不构成安全旁路
             on_confirm=_current_parent_confirm.get(),
             session_enabled=False,    # 子代理不创建独立 session，结果已在主 agent 日志中记录
             register_catalog=False,   # 子代理不注册 mcp 元工具，避免误导

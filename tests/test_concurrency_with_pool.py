@@ -272,7 +272,8 @@ async def test_confirm_wait_does_not_hold_concurrency_slot():
                 llm=_make_tool_call_llm("danger", {"x": "1"}),
                 tools=[danger],
                 on_confirm=on_confirm_a,
-                session_enabled=False,  # AUTO 模式（默认）
+                mode="manual",  # 人工审批模式（不安全工具需确认）
+                session_enabled=False,
             )
         return Agent(llm=echo_llm, session_enabled=False)
 
