@@ -30,9 +30,20 @@ pip install -e ".[dev,mcp]"
 .venv/Scripts/python "examples/1. basic_llm.py"
 .venv/Scripts/python examples/7_server_fastapi.py      # FastAPI 单 Agent 服务
 .venv/Scripts/python examples/multi_user_chat.py       # AgentPool 多用户并发
+
+# CLI 命令行（pip install 后注册入口点 agent-framework / 短别名 afx）
+agent-framework                       # 无子命令 → 进入交互式对话（chat）
+agent-framework chat -p deepseek      # 指定厂商进入对话
+agent-framework run "你好" -q          # 一次性执行，-q 只输出最终回答（可管道）
+echo "总结这段话" | agent-framework run # 从 stdin 读取指令
+agent-framework providers             # 列出 9 个厂商及 Key 配置状态
+agent-framework config set provider qwen   # 写入 ~/.agent_framework/config.json
+agent-framework sessions list         # 查看历史会话
+# 开发期未重装时也可：.venv/Scripts/python -m agent_framework.cli <args>
 ```
 
 > Windows 环境，虚拟环境解释器路径为 `.venv/Scripts/python`（非 `.venv/bin/python`）。
+> 新增/修改 `[project.scripts]` 入口点后需 `pip install -e .` 重装才能注册控制台脚本。
 
 ## 架构概览
 
@@ -83,13 +94,22 @@ pip install -e ".[dev,mcp]"
 
 - `PromptBuilder`（`prompts/builder.py`）：从 Markdown 目录**分层拼装** system prompt。每个 `.md` 是一个片段，YAML frontmatter 控制 `section`(safeguard/soul/agent/memory/custom) + `order` + `enabled`，`{{key}}` 变量插值，**每次 `build()` 重读文件支持热重载**。预置角色提示词随包分发在 `src/agent_framework/templates/prompts/{main,coder,researcher,reviewer}/`，通过 `agent_framework.builtin_prompts_dir(role)` 定位（内置技能同理用 `builtin_skills_dir()`）
 - `SkillRegistry`（`skills/registry.py`）：技能**元数据（name/description/triggers）始终注入 system prompt**，正文按需通过 `load_skill` 元工具拉取。无激活/卸载生命周期。支持平铺 `skills/x.md` 或子目录 `skills/x/SKILL.md`；**多文件技能**（目录内含 examples/reference/scripts 等附属文件）在 load_skill 返回时自动注明技能目录绝对路径，供 file_read 访问附属资源
-- **内置技能 11 个**：自研 6 个（translator/code-review/skill-creator/deep-research/content-writing/doc-formatting）+ 移植 5 个（官方 anthropics/skills Apache-2.0：frontend-design/internal-comms/mcp-builder；社区 obra/superpowers MIT：systematic-debugging/test-driven-development）。来源与许可见 `templates/skills/THIRD_PARTY_NOTICES.txt`。⚠️ 官方 docx/pdf/pptx/xlsx 四件套为专有许可禁止再分发，**不可移植**
+- **内置技能 9 个**：自研 4 个（skill-creator/deep-research/content-writing/doc-formatting）+ 移植 5 个（官方 anthropics/skills Apache-2.0：frontend-design/internal-comms/mcp-builder；社区 obra/superpowers MIT：systematic-debugging/test-driven-development）。来源与许可见 `templates/skills/THIRD_PARTY_NOTICES.txt`。⚠️ 官方 docx/pdf/pptx/xlsx 四件套为专有许可禁止再分发，**不可移植**。（translator/code-review 曾内置，已删）
 
 ### 6. 服务层 (`src/agent_framework/serving/`)
 
 - `AgentPool`（`pool.py`）：多用户并发资源池。**按 `(user_id, session_id)` 缓存独立 Agent 实例**，`async with pool.acquire(uid, sid) as h: h.agent.run(...)`。LRU + idle TTL 淘汰、全局 `Semaphore` 并发限流、后台 sweep 清理、`get_stats()` 监控（含 hit_rate）
 - 便利构造：**`AgentPool.from_llm(llm)`** 一行起池（共享同一 LLM 实例，AsyncOpenAI 协程安全）。「全配默认」由 Agent 自身提供（见 Agent 层），默认工厂只叠加服务层语义：确定性 session_id 派生 + 共享 MCP 注入；运行限额经 `agent_config=AgentConfig(...)`、其余 Agent 参数经 `agent_kwargs={"mode": ..., "tools": [...], "subagents": [...]}` 原样透传
 - 四个硬不变量：每个 `(user_id, session_id)` ≤1 实例；实例数 ≤ `max_agents`；并发 run ≤ `max_concurrent_runs`；空闲超 `idle_ttl_seconds` 被清理
+
+### 7. CLI 层 (`src/agent_framework/cli/`)
+
+- 入口点：`pyproject.toml` 的 `[project.scripts]` 注册 `agent-framework` 与短别名 `afx`，均解析到 `agent_framework.cli:main`；亦支持 `python -m agent_framework.cli`
+- `app.py`：argparse 命令面 + `main()`。子命令 `chat`（无子命令时的默认）/ `run`（一次性，支持 stdin 管道、`-q` 只输出最终文本）/ `config`（show/path/get/set/set-key）/ `sessions`（list/show）/ `providers` / `version`。全局选项（`-p/--provider`、`-m/--model`、`--api-key`、`--mode`、`--no-session/--no-mcp/--no-subagents`）写在子命令**之后**。`main()` 统一捕获 `AuthenticationError`/`ValueError`/`AgentFrameworkError` 给中文友好提示与退出码
+- `config.py`：`CLIConfig`（持久化于 `~/.agent_framework/config.json`，与会话同源、`AGENT_FRAMEWORK_HOME` 可覆盖）+ `DEFAULT_MODELS` 厂商默认模型表 + `resolve_settings()`。**解析优先级**：provider/model/mode = CLI 参数 > 配置文件 > 内置默认（默认厂商 `qwen`）；api_key = CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 `api_keys`。注意：配置里的 `model` 只在「未切换厂商」时沿用，避免给 deepseek 套上 qwen 的模型名
+- `builder.py`：`build_llm()` / `build_agent()`——**最简创建**，全部依托 Agent「全配默认」：tools/skills/prompt 不传 → 自动注入全套内置工具、内置技能、内置 main 提示词；`subagents=None` → 内置三件套 researcher/reader/coder（`--no-subagents` 时传 `[]` 关闭）；只显式传 `mode`/`session_enabled`/`on_confirm`
+- `render.py` / `repl.py`：终端渲染（ANSI 颜色、不安全工具确认回调、事件流渲染）与交互式 REPL（全部 `/命令`），**迁移并整理自 `examples/multi_turn_chat.py`**
+- Windows 注意：`main()` 启动时 `os.system("")` 启用 ANSI；stdin 管道按 `sys.stdin.buffer` 显式 UTF-8 解码（规避控制台代码页 + surrogateescape 把中文解成孤立代理字符）
 
 ## 关键设计约束（多用户并发 / 无状态化）
 

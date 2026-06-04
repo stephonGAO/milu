@@ -22,6 +22,11 @@ mcp = [
     "mcp>=1.0.0",
 ]
 
+[project.scripts]
+# 入口点（pip install 后可直接在终端调用）。命令名可按需改为最终 PyPI 包名。
+agent-framework = "agent_framework.cli:main"
+afx = "agent_framework.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

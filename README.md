@@ -22,6 +22,26 @@ ANTHROPIC_API_KEY=sk-xxx
 
 > 作为库被集成时，可设 `AGENT_FRAMEWORK_NO_DOTENV=1` 关闭对 .env 的自动加载，改由宿主应用通过 `agent_framework.load_env(path)` 或自身机制管理环境变量。
 
+## 命令行（CLI）
+
+`pip install` 后注册命令 `agent-framework`（短别名 `afx`），无需写代码即可使用：
+
+```bash
+agent-framework                      # 无子命令 → 进入交互式多轮对话
+agent-framework chat -p deepseek     # 指定厂商进入对话（默认厂商 qwen）
+agent-framework run "用一句话介绍你自己"   # 一次性执行
+agent-framework run "总结" -q          # -q 只输出最终回答（便于管道）
+echo "翻译成英文：你好" | agent-framework run   # 从 stdin 读取指令
+agent-framework providers            # 列出 9 个厂商及 API Key 配置状态
+agent-framework config set provider deepseek   # 持久化默认厂商
+agent-framework config set-key qwen sk-xxx     # 保存某厂商的 Key 到配置文件
+agent-framework sessions list        # 查看历史会话
+```
+
+- **配置**：`~/.agent_framework/config.json`（`config` 子命令管理）。解析优先级 **CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 > 内置默认**。
+- **能力**：交互式 `chat` 支持流式输出、工具调用可视化、内置子代理（researcher/reader/coder）、会话持久化、`/mode` 切换操作模式、MCP 自动接入，以及 `/help` 列出的全部 `/命令`。
+- 全局选项写在子命令之后：`-p/--provider`、`-m/--model`、`--api-key`、`--mode {talk,manual,auto,superwork}`、`--no-session`、`--no-mcp`、`--no-subagents`。
+
 ## 快速开始
 
 ### 1. 直接调用 LLM（流式）
