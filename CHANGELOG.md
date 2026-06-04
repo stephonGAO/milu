@@ -2,6 +2,18 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — web_search 可插拔后端（2026-06-04）
+
+### 变更
+
+- **`web_search` 后端可插拔**（解决 DuckDuckGo 中国大陆不可用的生产问题）：
+  环境变量 `WEB_SEARCH_PROVIDER` 选择后端——`ddg`（默认，无需 Key）/
+  `tavily`（`TAVILY_API_KEY`，为 LLM 设计）/ `bocha`（`BOCHA_API_KEY`，国内可直连）。
+  配置了 provider 却缺 Key 时明确报错（不静默回退）。
+  自定义通用 API（`SEARCH_API_URL`+`SEARCH_API_KEY`）保持向后兼容且优先级最高。
+- 国内部署亦可直接使用 LLM 自带联网搜索（如 Qwen `web_search=True`），不依赖本工具。
+- 各后端结果统一格式化（标题/摘要/链接编号列表）。
+
 ## [Unreleased] — 提示词体系完善（2026-06-04）
 
 ### 变更

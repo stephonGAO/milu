@@ -70,7 +70,7 @@ pip install -e ".[dev,mcp]"
 - `ToolRegistry` 双池设计（`registry.py`）：active pool（schema 注入 LLM）+ dormant pool（MCP 工具待激活）
 - `catalog.py` 提供三个元工具（`list_catalog`, `search_tools`, `activate_tools`）供 LLM 自主发现/激活 dormant 工具
 - `ToolExecutor`（`executor.py`）安全执行：JSON 参数解析、async/sync 兼容、异常捕获
-- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`（API/JSON 场景）、`web_fetch`（网页→Markdown 正文提取，阅读场景优先，省 token）、`web_search`、`datetime_tool`、`structured_output`、`todo_write`
+- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`（API/JSON 场景）、`web_fetch`（网页→Markdown 正文提取，阅读场景优先，省 token）、`web_search`（**可插拔后端**：环境变量 `WEB_SEARCH_PROVIDER`=ddg 默认/tavily/bocha + 对应 Key；DDG 国内不可用，国内部署配 bocha 或用 LLM 自带搜索）、`datetime_tool`、`structured_output`、`todo_write`
 
 ### 4. MCP 层 (`src/agent_framework/tools/mcp/`)
 
