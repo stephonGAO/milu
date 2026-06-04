@@ -30,6 +30,7 @@ from agent_framework.tools.builtin.structured_output import (
     create_structured_output_tool,
 )
 from agent_framework.tools.builtin.todo_write import todo_read, todo_write
+from agent_framework.tools.builtin.memory_tool import memory_read, memory_write
 
 # 所有内置工具列表，可直接传给 Agent(tools=BUILTIN_TOOLS)
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
@@ -46,6 +47,8 @@ BUILTIN_TOOLS = [
     shell_command,
     todo_read,
     todo_write,
+    memory_read,
+    memory_write,
 ]
 
 __all__ = [
@@ -62,5 +65,7 @@ __all__ = [
     "create_structured_output_tool",
     "todo_read",
     "todo_write",
+    "memory_read",
+    "memory_write",
     "BUILTIN_TOOLS",
 ]

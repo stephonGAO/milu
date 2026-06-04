@@ -41,6 +41,10 @@ from agent_framework.tools.builtin.todo_write import (
     _current_session_dir as _current_todo_session_dir,
     _current_plan_items as _current_todo_plan_items,
 )
+from agent_framework.tools.builtin.memory_tool import (
+    _current_session_dir as _current_memory_session_dir,
+    _current_memory_items,
+)
 from agent_framework.agent.subagent import (
     _current_subagent_events,
     _current_parent_mode,
@@ -281,6 +285,8 @@ class Agent:
         # todo 计划的内存后端：无 session 时承载计划（同一 Agent 跨轮保留）。
         # 有 session 时不用它（计划落盘 session_dir/plan.json）。在 run() 入口择一注入。
         self._in_memory_plan: list[dict] = []
+        # 长期记忆的内存后端（同上模式）：无 session 时承载 memory_write 的条目
+        self._in_memory_memories: list[dict] = []
 
         # ── 技能（Skills）初始化 ──
         from agent_framework.skills.registry import SkillRegistry
@@ -602,10 +608,14 @@ class Agent:
         #   - 父 Agent 操作模式：供子代理工具继承（无需 get_parent_mode 回调）
         session_token = None
         plan_items_token = None
+        mem_dir_token = None
+        mem_items_token = None
         if self._session is not None:
             session_token = _current_todo_session_dir.set(self._session.dir_path)
+            mem_dir_token = _current_memory_session_dir.set(self._session.dir_path)
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
+            mem_items_token = _current_memory_items.set(self._in_memory_memories)
         mode_token = _current_parent_mode.set(self._mode)
         # 确认回调透传：子代理继承父的 on_confirm（manual 模式不安全工具、
         # auto 模式 AI 判定 confirm 的调用同样走审批），委派不构成安全旁路
@@ -1139,6 +1149,10 @@ class Agent:
                 _current_todo_session_dir.reset(session_token)
             if plan_items_token is not None:
                 _current_todo_plan_items.reset(plan_items_token)
+            if mem_dir_token is not None:
+                _current_memory_session_dir.reset(mem_dir_token)
+            if mem_items_token is not None:
+                _current_memory_items.reset(mem_items_token)
             _current_parent_mode.reset(mode_token)
             _current_parent_confirm.reset(confirm_token)
             _current_parent_judge.reset(judge_token)

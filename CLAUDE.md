@@ -70,7 +70,7 @@ pip install -e ".[dev,mcp]"
 - `ToolRegistry` 双池设计（`registry.py`）：active pool（schema 注入 LLM）+ dormant pool（MCP 工具待激活）
 - `catalog.py` 提供三个元工具（`list_catalog`, `search_tools`, `activate_tools`）供 LLM 自主发现/激活 dormant 工具
 - `ToolExecutor`（`executor.py`）安全执行：JSON 参数解析、async/sync 兼容、异常捕获
-- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`（API/JSON 场景）、`web_fetch`（网页→Markdown 正文提取，阅读场景优先，省 token）、`web_search`（**可插拔后端**：环境变量 `WEB_SEARCH_PROVIDER`=ddg 默认/tavily/bocha + 对应 Key；DDG 国内不可用，国内部署配 bocha 或用 LLM 自带搜索）、`datetime_tool`、`structured_output`、`todo_write`
+- 内置工具（`builtin/`）：`file_tool`（read/write 分开）、`shell_command`、`python_repl`、`http_request`（API/JSON 场景）、`web_fetch`（网页→Markdown 正文提取，阅读场景优先，省 token）、`web_search`（**可插拔后端**：环境变量 `WEB_SEARCH_PROVIDER`=ddg 默认/tavily/bocha + 对应 Key；DDG 国内不可用，国内部署配 bocha 或用 LLM 自带搜索）、`datetime_tool`、`structured_output`、`todo_write`、`memory_write/memory_read`（长期记忆：用户偏好/重要事实/约定，跨压缩跨重启保留）
 
 ### 4. MCP 层 (`src/agent_framework/tools/mcp/`)
 
@@ -97,6 +97,7 @@ pip install -e ".[dev,mcp]"
 - **Agent 含实例级共享状态**（`history`、`session`、`_work_started`、`_mcp_manager`、`tools` 等），多用户**不能共享同一个 Agent**。唯一安全方案是 **per-user Agent**（`AgentPool` 即为此而生）。瓶颈是 MCP 子进程内存（每 Agent 3-5 个 server 占 15-50 MB），不是 Agent 本身
 - **todo 工具与 subagent 已无状态化**：不再用模块级单例/闭包变量，而是 Agent 在 `run()` 入口通过 **ContextVar** 注入 per-call 状态（`todo_write._current_session_dir` 注入 session 目录、`todo_write._current_plan_items` 注入内存计划、`subagent._current_subagent_events` 注入事件列表、`subagent._current_parent_mode` 注入父模式），实现 asyncio 任务级隔离。新增任何"跨调用共享"的工具状态时，沿用 ContextVar 模式，**切勿用模块级全局变量**
 - **todo 计划存储双后端**（已与 session 解耦）：有 session → 文件后端 `{session_dir}/plan.json`（持久化、per-user 天然隔离）；无 session → 内存后端（`_current_plan_items` ContextVar，同一 Agent 跨轮保留、进程退出即弃）。因此 `session_enabled=False`（含子代理、用户自管 history）时 todo 也能用，不再抛 `RuntimeError`。LLM 通过 `todo_read` 主动拉取
+- **memory 长期记忆同款双后端**（`memory_tool.py`）：有 session → `{session_dir}/memory.json`；无 session → 内存后端（`_current_memory_items`）。条目 {content, category, created_at}，上限 200 条丢弃最旧，内容级去重。与对话历史互补——历史会被压缩截断，记忆条目始终完整
 
 ## 代码风格约定
 

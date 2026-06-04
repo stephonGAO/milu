@@ -2,6 +2,17 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — memory 长期记忆工具（2026-06-04）
+
+### 新增
+
+- **内置工具 `memory_write` / `memory_read`**：LLM 主动记录跨轮次、跨重启的长期信息
+  （用户偏好 preference / 事实背景 fact / 长期约定 agreement）。与对话历史互补——
+  历史会被压缩截断，记忆条目始终完整保留。对标 MCP 官方 Memory reference server 的轻量实现。
+- 存储复用 todo 同款双后端模式：有 session → `{session_dir}/memory.json`（持久化、
+  per-user 隔离）；无 session → 内存后端（同一 Agent 跨轮保留）。
+- 上限 200 条自动丢弃最旧；内容级去重；main 角色提示词补充主动记忆指引。
+
 ## [Unreleased] — web_search 可插拔后端（2026-06-04）
 
 ### 变更
