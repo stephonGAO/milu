@@ -24,7 +24,7 @@ def test_builtin_prompts_dir_invalid_role():
 def test_builtin_skills_dir():
     d = builtin_skills_dir()
     assert d.is_dir()
-    assert (d / "code-review.md").exists()
+    assert (d / "deep-research.md").exists()
 
 
 def test_promptbuilder_builds_from_builtin():

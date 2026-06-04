@@ -459,7 +459,8 @@ class TestVendoredBuiltinSkills:
 
     def test_flat_skill_no_dir_note(self):
         """平铺单文件技能不注入目录说明"""
-        out = self._registry().load_skill("translator")
+        out = self._registry().load_skill("skill-creator")
+        assert not out.startswith("错误")  # 守卫：确认技能真实加载（未知技能返回错误文本而非抛异常）
         assert "[技能目录]" not in out
 
     def test_licenses_present(self):

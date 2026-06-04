@@ -78,5 +78,5 @@ def builtin_prompts_dir(role: str = "main") -> Path:
 
 
 def builtin_skills_dir() -> Path:
-    """返回内置技能目录（含 code-review / skill-creator / translator 等）。"""
+    """返回内置技能目录（含 skill-creator / deep-research / mcp-builder 等）。"""
     return _TEMPLATES_DIR / "skills"

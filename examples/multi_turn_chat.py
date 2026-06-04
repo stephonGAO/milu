@@ -84,7 +84,7 @@ def print_header():
   内置工具: {', '.join(_all_names)}
   子代理:   researcher（调研员）, reader（长内容阅读员）, coder（编码执行员）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
-  技能:     内置 translator / code-review / skill-creator / deep-research，LLM 按需 load_skill 加载
+  技能:     内置 skill-creator / deep-research / mcp-builder 等，LLM 按需 load_skill 加载
   计划文件: 每个会话独立保存（~/.agent_framework/sessions/{{session_id}}/plan.json）
 
   命令:
@@ -135,7 +135,7 @@ def build_agent() -> Agent:
         shell / datetime / todo）
       - 内置子代理三件套 researcher / reader / coder（操作模式与人工确认回调
         经 ContextVar 自动继承父 Agent）
-      - 内置 main 角色提示词 + 内置技能（translator / code-review / deep-research 等）
+      - 内置 main 角色提示词 + 内置技能（skill-creator / deep-research 等）
       - 会话持久化到 ~/.agent_framework/sessions（AGENT_FRAMEWORK_HOME 可覆盖）
 
     需要定制时显式传参覆盖，例如：

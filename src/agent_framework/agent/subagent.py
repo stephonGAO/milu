@@ -124,7 +124,7 @@ def builtin_subagent_configs(
       - coder      编码执行员：计算/脚本/数据处理（python_repl/file_read/file_write）
 
     可选（不在默认集）：
-      - reviewer   审查员：用干净上下文复查代码/成果（file_read/python_repl + code-review 技能）
+      - reviewer   审查员：用干净上下文复查代码/成果（file_read/python_repl，配内置 reviewer 角色提示词）
 
     :param include: 要启用的子代理名称集合，如 ("researcher", "reader", "coder", "reviewer")
     :return: list[SubAgentConfig]，传给 create_subagent_tools(llm, configs) 即可
@@ -147,7 +147,6 @@ def builtin_subagent_configs(
     )
 
     deep_research_md = builtin_skills_dir() / "deep-research.md"
-    code_review_md = builtin_skills_dir() / "code-review.md"
 
     presets: dict[str, SubAgentConfig] = {
         "researcher": SubAgentConfig(
@@ -194,8 +193,6 @@ def builtin_subagent_configs(
             ),
             role="reviewer",
             tools=[file_read, python_repl],
-            skills=[SkillConfig.from_file(str(code_review_md))]
-            if code_review_md.exists() else None,
         ),
     }
 
