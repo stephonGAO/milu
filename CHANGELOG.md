@@ -2,6 +2,37 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — 全配默认下沉进 Agent（2026-06-04）
+
+「开箱即用」策略从 AgentPool 默认工厂下沉到 `Agent.__init__` 本身——**直接构造 Agent
+与经池构造拿到同规格实例**，默认策略只有一份。Pool 仍只用于多用户服务场景；
+单用户/脚本/嵌入场景直接 `Agent(llm)` 即全配，两个入口都是一等公民。
+
+### 变更（含行为变更）
+
+- **`Agent(tools=None)`（顶层）→ 默认注入全套 `BUILTIN_TOOLS`**；显式 `[]` = 无工具，显式列表 = 该列表。
+- **新增 `Agent(subagents=...)` 参数**：`None`（顶层）→ 默认注册内置子代理三件套；`[]` = 关闭；`list[SubAgentConfig]` = 自定义。子代理 `register_catalog=False` 不触发默认 → 结构上保证不嵌套。
+- AgentPool 默认工厂随之**简化**：不再自带 tools/subagents 默认逻辑，仅注入 session_id 派生与共享 MCP；`agent_kwargs` 的 `"subagents"` 从特殊键转为正式 Agent 参数（外部用法不变）。
+- `examples/multi_turn_chat.py` 的 `build_agent()` 由 ~100 行手工组装简化为零配置构造；`examples/multi_user_chat.py` 同步精简。
+
+## [Unreleased] — 内置子代理三件套 + 确认回调透传（2026-06-04）
+
+### 新增
+
+- **内置子代理预设 `builtin_subagent_configs()`**（按「上下文隔离/权限收窄/可并行」选型）：
+  - `researcher` 调研员：web_search + http_request + datetime_tool（只读），配 `deep-research` 内置技能；
+  - `reader` 长内容阅读员（**新增角色**，含内置提示词 `templates/prompts/reader/`）：file_read + http_request（只读），长文档/日志/网页定向提取；
+  - `coder` 编码执行员：python_repl + file_read + file_write；
+  - 可选 `reviewer` 审查员：file_read + python_repl，配 `code-review` 技能（`include` 加入，不在默认集）。
+- **确认回调透传**：`Agent.run()` 经 ContextVar `_current_parent_confirm` 把 `on_confirm` 注入子代理——AUTO 模式下子代理内的不安全工具（file_write 等）同样走父 Agent 的人工确认，**委派不再是安全审批的旁路**。
+- **AgentPool 默认工厂自动注册三件套子代理**；`agent_kwargs={"subagents": []}` 关闭、传 `list[SubAgentConfig]` 自定义（特殊键，非 Agent 参数）。
+- 新增内置技能 `deep-research`；`PROMPT_ROLES` 加入 `reader`。
+
+### 变更
+
+- `researcher`/`coder` 角色提示词补充**返回契约**（最终回复即交付物：只回传蒸馏结论/产物路径，不回传过程）；researcher 流程修正为使用 `web_search`（原文误写为 http_request）。
+- `examples/multi_user_chat.py` 改为消费 `builtin_subagent_configs()`，子代理工具创建一次、整池共享（无状态化后 `get_parent_mode` 闭包限制已不存在）。
+
 ## [Unreleased] — 默认极简化 / 能力参数归位（2026-06-03）
 
 围绕「C 端开箱即用 + 技术人员可覆盖」的规范化整理。**含破坏性 API 变更**，迁移见下。

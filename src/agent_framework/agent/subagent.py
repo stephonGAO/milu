@@ -38,6 +38,18 @@ _current_parent_mode: contextvars.ContextVar[AgentMode | None] = contextvars.Con
     "current_parent_mode", default=None
 )
 
+# ── 父 Agent 确认回调注入（asyncio 任务级隔离）──────────
+#
+# Agent.run() 在入口把自身 on_confirm 写入此 ContextVar，子代理创建时继承它。
+# 由此，AUTO 模式下子代理内部的不安全工具（file_write / shell_command 等）会走与
+# 父 Agent 相同的人工确认流程，而不是因为子代理没接 on_confirm 而被静默放行——
+# 「委派给子代理」不再成为绕过安全审批的旁路。
+# 注意：确认仍通过回调实时发生；但 ToolConfirmRequired 事件会随子代理事件列表在
+# 工具调用结束后才以 SubAgentEvent 形式回放（事件是事后记录，回调才是阻塞点）。
+_current_parent_confirm: contextvars.ContextVar["Callable | None"] = contextvars.ContextVar(
+    "current_parent_confirm", default=None
+)
+
 
 # ── 数据模型 ──────────────────────────────────────────────
 
@@ -86,6 +98,103 @@ _DEFAULT_SUBAGENT_CONFIG = AgentConfig(
     total_timeout=600,
     tool_call_limit=50,
 )
+
+
+# ── 内置子代理预设 ────────────────────────────────────────
+
+
+def builtin_subagent_configs(
+    include: "tuple[str, ...] | list[str]" = ("researcher", "reader", "coder"),
+) -> list[SubAgentConfig]:
+    """返回内置子代理配置列表（生产级预设，配套内置角色提示词与技能）。
+
+    默认三件套（按「上下文隔离 / 权限收窄 / 可并行」标准选型）：
+      - researcher 调研员：开放网络信息获取（web_search/http_request/datetime），只读
+      - reader     长内容阅读员：长文档/日志/网页定向提取（file_read/http_request），只读
+      - coder      编码执行员：计算/脚本/数据处理（python_repl/file_read/file_write）
+
+    可选（不在默认集）：
+      - reviewer   审查员：用干净上下文复查代码/成果（file_read/python_repl + code-review 技能）
+
+    :param include: 要启用的子代理名称集合，如 ("researcher", "reader", "coder", "reviewer")
+    :return: list[SubAgentConfig]，传给 create_subagent_tools(llm, configs) 即可
+
+    用法：
+        from agent_framework import builtin_subagent_configs, create_subagent_tools
+        tools = create_subagent_tools(llm, builtin_subagent_configs())
+        agent = Agent(llm=llm, tools=[*BUILTIN_TOOLS, *tools])
+    """
+    # 延迟导入：避免 import 包时就拉起全部内置工具依赖
+    from agent_framework.resources import builtin_skills_dir
+    from agent_framework.skills.config import SkillConfig
+    from agent_framework.tools.builtin import (
+        datetime_tool,
+        file_read,
+        file_write,
+        http_request,
+        python_repl,
+        web_search,
+    )
+
+    deep_research_md = builtin_skills_dir() / "deep-research.md"
+    code_review_md = builtin_skills_dir() / "code-review.md"
+
+    presets: dict[str, SubAgentConfig] = {
+        "researcher": SubAgentConfig(
+            name="researcher",
+            description=(
+                "调研员：开放网络信息获取与多源交叉验证。"
+                "当需要搜索资料、对比方案、汇总时效性信息时委派；"
+                "返回带来源 URL 和可信度的精炼结论。"
+                "简单常识问题不要委派，直接回答。"
+            ),
+            role="researcher",
+            tools=[web_search, http_request, datetime_tool],
+            skills=[SkillConfig.from_file(str(deep_research_md))]
+            if deep_research_md.exists() else None,
+        ),
+        "reader": SubAgentConfig(
+            name="reader",
+            description=(
+                "长内容阅读员：定向消化长文档/日志/代码文件/网页，只回传与问题相关的结论。"
+                "当需要「读完某个大文件或网页后回答特定问题」时委派（可同批委派多个并行阅读）；"
+                "返回结构化答案 + 出处定位（文件:行号 / URL）。"
+                "短内容（几十行以内）不要委派，自己读。"
+            ),
+            role="reader",
+            tools=[file_read, http_request],
+        ),
+        "coder": SubAgentConfig(
+            name="coder",
+            description=(
+                "编码执行员：编写并运行 Python 代码完成计算、脚本、数据处理、文件生成。"
+                "当任务需要实际执行代码或产出文件时委派；"
+                "返回结果摘要 + 产物文件路径 + 复现方式。"
+                "注意：其中写文件等不安全操作仍走人工确认流程（继承父 Agent 的确认回调）。"
+            ),
+            role="coder",
+            tools=[python_repl, file_read, file_write],
+        ),
+        "reviewer": SubAgentConfig(
+            name="reviewer",
+            description=(
+                "审查员：用独立干净的上下文复查代码或工作成果（正确性/安全性/可维护性）。"
+                "当需要对已完成的代码或方案做无偏审查时委派；"
+                "返回问题清单（按严重程度排序）+ 改进建议。"
+            ),
+            role="reviewer",
+            tools=[file_read, python_repl],
+            skills=[SkillConfig.from_file(str(code_review_md))]
+            if code_review_md.exists() else None,
+        ),
+    }
+
+    unknown = [n for n in include if n not in presets]
+    if unknown:
+        raise ValueError(
+            f"未知的内置子代理: {', '.join(unknown)}。可选：{', '.join(presets)}"
+        )
+    return [presets[n] for n in include]
 
 
 # ── 工厂函数 ──────────────────────────────────────────────
@@ -179,6 +288,9 @@ def _create_single_subagent_tool(
             history=sub_history,
             config=sub_config,
             mode=sub_mode,            # 继承父 Agent 操作模式
+            # 继承父 Agent 的人工确认回调（Agent.run 经 ContextVar 注入）：
+            # AUTO 模式下子代理的不安全工具同样需要审批，委派不构成安全旁路
+            on_confirm=_current_parent_confirm.get(),
             session_enabled=False,    # 子代理不创建独立 session，结果已在主 agent 日志中记录
             register_catalog=False,   # 子代理不注册 mcp 元工具，避免误导
             skills=cfg.skills,

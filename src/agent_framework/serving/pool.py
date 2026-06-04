@@ -258,9 +258,10 @@ class AgentPool:
             不传则用默认工厂（注入 llm + agent_config + agent_kwargs）。
         :param config: 池配置。
         :param agent_config: 给默认 agent_factory 使用的 AgentConfig（运行限额）。
-        :param agent_kwargs: 给默认 agent_factory 透传的 Agent 能力参数字典，如
+        :param agent_kwargs: 给默认 agent_factory 透传的 Agent 参数字典，如
             {"mode": "auto", "session_enabled": False, "session_dir": "...",
-             "tools": [...], "mcp_tools_active_by_default": True}。
+             "tools": [...], "subagents": [...], "mcp_tools_active_by_default": True}。
+            tools/subagents 的「None→内置默认、[]→关闭」语义由 Agent 自身实现。
             默认工厂已显式控制 session_id 与 mcp_manager，勿在此重复传入。
         """
         self._llm_factory = llm_factory
@@ -330,8 +331,8 @@ class AgentPool:
         所有用户共享同一 LLM 实例是安全的（AsyncOpenAI 协程安全），省去手写
         llm_factory。等价于 AgentPool(llm_factory=lambda uid, sid: llm, ...)。
 
-        默认工厂会给每个 per-user Agent 配齐 BUILTIN_TOOLS + 内置 main 提示词/技能，
-        真正一行起服务：
+        每个 per-user Agent 自带全配默认（BUILTIN_TOOLS + 内置 main 提示词/技能 +
+        内置子代理三件套，由 Agent 默认值提供），真正一行起服务：
 
             pool = AgentPool.from_llm(ModelRegistry.create("qwen", model="qwen-plus"))
             await pool.start()
@@ -576,31 +577,27 @@ class AgentPool:
     def _default_agent_factory(
         self, user_id: str, session_id: str, llm: BaseLLM
     ) -> Agent:
-        """默认 Agent 工厂：开箱即用——内置全套工具 + 内置 main 提示词/技能 + 确定性 session_id。
+        """默认 Agent 工厂：在 Agent 自身「开箱即用」默认之上，仅叠加服务层关注点。
 
-        - 默认注入 BUILTIN_TOOLS（file/python/http/web_search/shell/datetime/todo），
-          可在 agent_kwargs={"tools": [...]} 覆盖（传空列表即无工具）。
-        - 提示词与技能由 Agent 默认值接管（顶层 Agent → 内置 main + 内置技能）。
-        - 传入的是池级共享的 self._agent_config 模板，但 Agent.__init__ 会对其
-          做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置。
-        - session_id 由 (user_id, session_id) 确定性派生，使历史在淘汰/重启后可恢复。
+        「全配默认」（BUILTIN_TOOLS + 内置提示词/技能 + 内置子代理三件套）由
+        Agent.__init__ 自己负责——默认策略只有一份，直接构造 Agent 与经池构造
+        拿到的是同规格实例。本工厂只注入服务层语义：
+        - session_id 由 (user_id, session_id) 确定性派生，使历史在淘汰/重启后可恢复；
+        - 启用 shared_mcp 时注入整池共享的 MCPManager；
+        - agent_kwargs 原样透传（tools / subagents / mode / session_* 等均为 Agent 参数）。
 
         注：自定义 agent_factory 若也想要历史可恢复 / 复用共享 MCP，应自行把
         派生的 session_id 透传给 Agent(session_id=...)，并把 self.shared_mcp_manager
         透传给 Agent(mcp_manager=...)。
         """
-        from agent_framework.tools.builtin import BUILTIN_TOOLS
-
-        kwargs = dict(self._agent_kwargs)
-        kwargs.setdefault("tools", BUILTIN_TOOLS)  # 默认带全套内置工具，可被 agent_kwargs 覆盖
         return Agent(
             llm=llm,
             config=self._agent_config,
             session_id=self._derive_session_id(user_id, session_id),
             # 启用 shared_mcp 时注入共享 manager；否则为 None（per-agent 默认行为）
             mcp_manager=self._shared_mcp_manager,
-            # 透传能力参数（mode / session_enabled / session_dir / tools 等）
-            **kwargs,
+            # 透传能力参数（mode / session_enabled / session_dir / tools / subagents 等）
+            **self._agent_kwargs,
         )
 
     async def _get_or_create(

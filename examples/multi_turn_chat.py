@@ -18,25 +18,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from agent_framework import (
-    Agent, AgentConfig, AgentMode, ConversationHistory, ConfirmResponse,
+    Agent, AgentMode, ConfirmResponse,
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolConfirmRequired, ToolResult,
     AgentDone, AgentError,
-    SubAgentConfig, create_subagent_tools,
     SubAgentEvent, SubAgentDone,
     HistoryCompacted, SessionLoaded,
-    Session,
-    SkillConfig,
-    templates_dir,
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
-    http_request,
-    file_read,
-    file_write,
-    python_repl,
 )
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -90,10 +82,10 @@ def print_header():
     _all_names = [t._tool_wrapper.name for t in [*BUILTIN_TOOLS, create_structured_output_tool()]]
     print(f"""
   内置工具: {', '.join(_all_names)}
-  子代理:   researcher（调研助手）, coder（编程助手）
+  子代理:   researcher（调研员）, reader（长内容阅读员）, coder（编码执行员）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
-  技能:     内置 translator / code-review / skill-creator，LLM 按需 load_skill 加载
-  计划文件: 每个会话独立保存（.sessions/{{session_id}}/plan.json）
+  技能:     内置 translator / code-review / skill-creator / deep-research，LLM 按需 load_skill 加载
+  计划文件: 每个会话独立保存（~/.agent_framework/sessions/{{session_id}}/plan.json）
 
   命令:
     /history   — 查看对话历史
@@ -136,110 +128,32 @@ async def confirm_unsafe(tool_name: str, args_str: str) -> ConfirmResponse:
 # ── Agent 构建 ──────────────────────────────────────────
 
 def build_agent() -> Agent:
-    """构建带全部内置工具和子代理的 Agent"""
+    """构建 Agent —— 展示「全配默认」：几乎零配置。
+
+    顶层 Agent 不传 tools / subagents / prompt_dir / skills_dir 时自动获得：
+      - 全套内置工具 BUILTIN_TOOLS（file / python_repl / http / web_search /
+        shell / datetime / todo）
+      - 内置子代理三件套 researcher / reader / coder（操作模式与人工确认回调
+        经 ContextVar 自动继承父 Agent）
+      - 内置 main 角色提示词 + 内置技能（translator / code-review / deep-research 等）
+      - 会话持久化到 ~/.agent_framework/sessions（AGENT_FRAMEWORK_HOME 可覆盖）
+
+    需要定制时显式传参覆盖，例如：
+      tools=[...]                                # 覆盖默认全套工具（[] 即无工具）
+      subagents=builtin_subagent_configs(include=("reader",))   # 只要部分子代理
+      prompt_dir=... / system_prompt="..."       # 自定义提示词
+    """
     llm = ModelRegistry.create("qwen", model="qwen-plus", web_search=True, enable_thinking=False)
 
+    # structured_output 需注入 LLM 做自修复，须经工厂创建后追加；
+    # 显式传 tools 会覆盖默认全套，因此这里自带 BUILTIN_TOOLS
     so_tool = create_structured_output_tool()
 
-    # 提示词目录：使用随包分发的内置模板（pip 安装后亦可用）
-    prompts_base = templates_dir() / "prompts"
-
-    # 创建子代理工具
-    subagent_tools = create_subagent_tools(
+    return Agent(
         llm=llm,
-        subagents=[
-            SubAgentConfig(
-                name="researcher",
-                description=(
-                    "调研助手：擅长搜索和整理信息。"
-                    "当需要查找资料、对比分析、总结报告时委派此代理。"
-                ),
-                prompt_dir=prompts_base / "researcher",
-                # 不传 DuckDuckGo web_search 工具（国内不可用），
-                # 依靠共享 LLM 的 Qwen 内置搜索（web_search=True）
-                tools=[file_read, http_request],
-                config=AgentConfig(),
-                # 演示 skills 参数：编程方式直接传入 SkillConfig
-                skills=[
-                    SkillConfig(
-                        name="deep-research",
-                        description="深度调研专家，擅长多角度分析和系统性总结",
-                        triggers=["调研", "研究", "分析"],
-                        content=(
-                            "你是一位深度调研专家。请按以下流程工作：\n\n"
-                            "## 调研流程\n"
-                            "1. **明确问题** — 拆解用户问题为 2-3 个子问题\n"
-                            "2. **多源搜索** — 从不同角度搜索信息\n"
-                            "3. **交叉验证** — 对比多个来源，标注可信度\n"
-                            "4. **系统总结** — 按重要性排序，给出结论\n\n"
-                            "## 输出格式\n"
-                            "- 关键发现：编号列表\n"
-                            "- 信息来源：标注 URL 或出处\n"
-                            "- 可信度评级：[高/中/低]\n"
-                        ),
-                    ),
-                ],
-            ),
-            SubAgentConfig(
-                name="coder",
-                description=(
-                    "编程助手：擅长写代码和调试。"
-                    "当需要编写、修改、测试代码或解决编程问题时委派此代理。"
-                ),
-                prompt_dir=prompts_base / "coder",
-                tools=[file_read, file_write, python_repl],
-                config=AgentConfig(),
-            ),
-            # ── skills 参数演示 ──
-            # skills: 编程方式，直接传入 SkillConfig 实例列表（适合动态生成的技能）
-            # skills_dir: 声明式，扫描目录下的 .md 文件（适合预定义的技能文件）
-            # 两者可同时使用，技能会合并到同一个注册表中
-            SubAgentConfig(
-                name="reviewer",
-                description=(
-                    "代码审查专家：擅长代码审查与建议提出。"
-                    "当需要审查、修改、优化代码时委派此代理。"
-                ),
-                prompt_dir=prompts_base / "reviewer",
-                tools=[file_read, python_repl],
-                config=AgentConfig(),
-                # 手动加载 code-review.md 技能文件，通过 skills 参数传入
-                skills=[
-                    SkillConfig.from_file(
-                        str(templates_dir() / "skills" / "code-review.md")
-                    ),
-                ],
-
-                # skills_dir: 声明式，扫描目录下的 .md 文件（适合预定义的技能文件）
-                # skills_dir=str(Path(__file__).resolve().parent.parent / "skills"),
-            ),
-        ],
-        get_parent_mode=lambda: agent.mode,
-    )
-
-    all_tools = [*BUILTIN_TOOLS, so_tool, *subagent_tools]
-
-    # history = ConversationHistory(
-    #     strategy="auto_compact",
-    #     max_turns=50,
-    #     llm=llm,
-    # )
-
-    agent = Agent(
-        llm=llm,
-        prompt_dir=prompts_base / "main",
-        tools=all_tools,
-        # 技能目录：使用随包分发的内置技能（translator / code-review / skill-creator），
-        # 元数据注入 system prompt，LLM 按需 load_skill 加载正文。
-        # 不传则只会自动扫描 CWD 的 ./skills（本仓库无此目录 → /skills 为空）。
-        skills_dir=str(templates_dir() / "skills"),
-        # history=history,
-        # config=AgentConfig(max_turns=8, timeout=60, total_timeout=300),
-        config=AgentConfig(),
+        tools=[*BUILTIN_TOOLS, so_tool],
         on_confirm=confirm_unsafe,
     )
-
-    return agent
 
 
 # ── 事件处理 ──────────────────────────────────────────────
@@ -446,7 +360,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
                 print(f"  {c('cyan', name):<30} {desc}")
 
         # 子代理工具
-        subagent_names = {"researcher", "coder"}
+        subagent_names = {"researcher", "reader", "coder"}
         for name in subagent_names:
             if name in active_tools:
                 wrapper = agent.tools.get_tool(name)

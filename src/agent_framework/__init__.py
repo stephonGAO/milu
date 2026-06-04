@@ -47,7 +47,11 @@ from agent_framework.agent.events import (
 )
 from agent_framework.llm.providers import ModelRegistry
 from agent_framework.agent import Agent, AgentConfig, AgentMode, CompactConfig, ConversationHistory, Session
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
+from agent_framework.agent.subagent import (
+    SubAgentConfig,
+    builtin_subagent_configs,
+    create_subagent_tools,
+)
 from agent_framework.tools.builtin.todo_write import todo_read, todo_write
 from agent_framework.skills.config import SkillConfig
 from agent_framework.skills.registry import SkillRegistry
@@ -120,6 +124,7 @@ __all__ = [
     "Session",
     # SubAgent
     "SubAgentConfig",
+    "builtin_subagent_configs",
     "create_subagent_tools",
     # Todo
     "todo_read",

@@ -50,7 +50,7 @@ pip install -e ".[dev,mcp]"
 
 - `Agent.run()` 核心循环（`agent.py`，~880 行）：每轮 `重建 system prompt → 自动压缩 → LLM 流式调用 → 解析文本/工具调用 → 安全检查 → 执行工具 → 回传结果`，返回 `AsyncIterator[AgentEvent]`
 - 事件类型（`events.py`）：`TextDelta`, `ReasoningDelta`, `ToolCallStart`, `ToolConfirmRequired`, `ToolResult`, `AgentDone`, `AgentError`, `SubAgentEvent`, `SubAgentDone`, `HistoryCompacted`, `SessionLoaded`
-- **Agent 构造（开箱即用）**：`Agent(llm)` 即可用——顶层 Agent 在 `prompt_dir`/`skills_dir` 为 `None`（默认）时自动套用内置 `main` 角色提示词 + 内置技能；传了 `system_prompt` 则只用它（不接内置 prompt_dir）；子代理 `register_catalog=False`，`None` 时不注入内置、保持精简。**能力参数 `mode` / `session_enabled` / `session_dir` / `mcp_tools_active_by_default` 是 `Agent.__init__` 的直接参数**（不再属于 `AgentConfig`——后者现仅含运行限额 `max_turns`/`timeout`/`total_timeout`/`max_total_tokens`/`tool_call_limit`）。`session_dir` 默认 `~/.agent_framework/sessions`（与 CWD 解耦，可用环境变量 `AGENT_FRAMEWORK_HOME` 覆盖；见 `resources.user_data_dir()`）
+- **Agent 构造（全配默认，开箱即用）**：`Agent(llm)` 即得完整体——顶层 Agent 各参数为 `None`（默认）时自动注入：内置 `main` 角色提示词（`prompt_dir`，传了 `system_prompt` 则只用它）、内置技能（`skills_dir`）、**全套内置工具 `BUILTIN_TOOLS`（`tools`，显式 `[]` 即无工具）、内置子代理三件套（`subagents`，显式 `[]` 即关闭）**。统一约定：`None`→内置默认、`[]`/显式值→覆盖；子代理 `register_catalog=False`，所有默认注入对其不生效（保持精简 + 结构性不嵌套）。**「全配默认」只在 Agent 一处实现——直接构造与经 AgentPool 构造拿到同规格实例**。能力参数 `mode` / `session_enabled` / `session_dir` / `mcp_tools_active_by_default` / `subagents` 是 `Agent.__init__` 的直接参数（`AgentConfig` 仅含运行限额 `max_turns`/`timeout`/`total_timeout`/`max_total_tokens`/`tool_call_limit`）。`session_dir` 默认 `~/.agent_framework/sessions`（与 CWD 解耦，可用环境变量 `AGENT_FRAMEWORK_HOME` 覆盖；见 `resources.user_data_dir()`）
 - **操作模式 `AgentMode`（枚举定义于 `config.py`，作为 `Agent(mode=...)` 直接参数）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换（写实例字段 `self._mode`，天然无跨用户串扰）：
   - `talk`：只读，调用前用 `_is_safe_call()` 拦截所有不安全工具
   - `auto`：标准，安全工具直接执行、不安全工具产出 `ToolConfirmRequired` 等待审批
@@ -59,7 +59,8 @@ pip install -e ".[dev,mcp]"
 - `ConversationHistory`（`history.py`）：消息列表 + 4 种截断策略（`none`, `sliding_window`, `token_limit`, `head_tail`），内部持有 `Compactor`
 - `Session`（`session.py`）：会话持久化，每会话一个 `{session_dir}/{id}/` 目录（默认 `~/.agent_framework/sessions/`），`conversation.jsonl`（append-only 消息日志，SYSTEM 不记录）+ `session.json`（元数据）。支持 compaction 快照点恢复
 - `Compactor`（`compactor.py`）：上下文自动压缩流水线，**0/1 次 API 调用分层**：L1 消息数裁剪 → 轮次分层工具结果压缩（旧轮→占位符、中间轮→截断、近期轮→保留，均带 session 文件指针）→ L4 超 `trigger_ratio` 时 LLM 摘要。阈值随 `max_context_window` 动态计算。另提供 `compact` 元工具供 LLM 主动触发
-- `SubAgent`（`subagent.py`）：`create_subagent_tools()` 工厂为每个 `SubAgentConfig` 生成一个 `@tool` 闭包；调用时**每次新建独立 Agent + 干净历史**，`register_catalog=False`/不嵌套子 Agent（结构性保证）。**模式继承通过 ContextVar `_current_parent_mode`**（`Agent.run()` 入口注入），无需再传 `get_parent_mode` 回调、子代理工具可在 Agent 之前创建；`SubAgentConfig.role`（main/coder/researcher/reviewer）便利字段自动套用对应内置角色提示词
+- `SubAgent`（`subagent.py`）：`create_subagent_tools()` 工厂为每个 `SubAgentConfig` 生成一个 `@tool` 闭包；调用时**每次新建独立 Agent + 干净历史**，`register_catalog=False`/不嵌套子 Agent（结构性保证）。**模式与确认回调均通过 ContextVar 继承**（`_current_parent_mode` / `_current_parent_confirm`，`Agent.run()` 入口注入）——无需 `get_parent_mode` 回调、子代理工具可在 Agent 之前创建且跨 Agent 共享；AUTO 模式下子代理内的不安全工具同样走父的人工确认（**委派不构成安全旁路**）。`SubAgentConfig.role`（main/coder/researcher/reader/reviewer）便利字段自动套用对应内置角色提示词
+- **内置子代理三件套**：`builtin_subagent_configs()` 返回生产级预设——`researcher` 调研员（web_search/http_request/datetime + deep-research 技能，只读）、`reader` 长内容阅读员（file_read/http_request，定向提取，只读）、`coder` 编码执行员（python_repl/file_read/file_write）；可选 `reviewer` 审查员（include 加入）。选型标准：上下文隔离 / 权限收窄 / 可并行
 
 ### 3. 工具层 (`src/agent_framework/tools/`)
 
@@ -84,7 +85,7 @@ pip install -e ".[dev,mcp]"
 ### 6. 服务层 (`src/agent_framework/serving/`)
 
 - `AgentPool`（`pool.py`）：多用户并发资源池。**按 `(user_id, session_id)` 缓存独立 Agent 实例**，`async with pool.acquire(uid, sid) as h: h.agent.run(...)`。LRU + idle TTL 淘汰、全局 `Semaphore` 并发限流、后台 sweep 清理、`get_stats()` 监控（含 hit_rate）
-- 便利构造：**`AgentPool.from_llm(llm)`** 一行起池（共享同一 LLM 实例，AsyncOpenAI 协程安全）。默认工厂给每个 per-user Agent 配齐 `BUILTIN_TOOLS` + 内置提示词/技能（开箱即用）；运行限额经 `agent_config=AgentConfig(...)`、能力参数经 `agent_kwargs={"mode": ..., "session_enabled": ..., "tools": [...]}` 透传（`tools` 可覆盖默认全套）
+- 便利构造：**`AgentPool.from_llm(llm)`** 一行起池（共享同一 LLM 实例，AsyncOpenAI 协程安全）。「全配默认」由 Agent 自身提供（见 Agent 层），默认工厂只叠加服务层语义：确定性 session_id 派生 + 共享 MCP 注入；运行限额经 `agent_config=AgentConfig(...)`、其余 Agent 参数经 `agent_kwargs={"mode": ..., "tools": [...], "subagents": [...]}` 原样透传
 - 四个硬不变量：每个 `(user_id, session_id)` ≤1 实例；实例数 ≤ `max_agents`；并发 run ≤ `max_concurrent_runs`；空闲超 `idle_ttl_seconds` 被清理
 
 ## 关键设计约束（多用户并发 / 无状态化）

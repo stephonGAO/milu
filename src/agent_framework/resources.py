@@ -21,7 +21,7 @@ from pathlib import Path
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 # 内置角色提示词
-PROMPT_ROLES = ("main", "coder", "researcher", "reviewer")
+PROMPT_ROLES = ("main", "coder", "researcher", "reader", "reviewer")
 
 
 def templates_dir() -> Path:
@@ -66,7 +66,7 @@ def default_mcp_config_path() -> Path:
 def builtin_prompts_dir(role: str = "main") -> Path:
     """返回内置角色提示词目录。
 
-    :param role: 角色名，可选 main / coder / researcher / reviewer。
+    :param role: 角色名，可选 main / coder / researcher / reader / reviewer。
     :raises FileNotFoundError: 角色不存在时。
     """
     d = _TEMPLATES_DIR / "prompts" / role

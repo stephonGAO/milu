@@ -41,7 +41,11 @@ from agent_framework.tools.builtin.todo_write import (
     _current_session_dir as _current_todo_session_dir,
     _current_plan_items as _current_todo_plan_items,
 )
-from agent_framework.agent.subagent import _current_subagent_events, _current_parent_mode
+from agent_framework.agent.subagent import (
+    _current_subagent_events,
+    _current_parent_mode,
+    _current_parent_confirm,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +139,7 @@ class Agent:
         self,
         llm: BaseLLM,
         system_prompt: str = "",
-        tools: list | None = None,
+        tools: list | None = None,  # None→全套内置工具（顶层）；[]→无工具；列表→该列表
         history: ConversationHistory | None = None,
         config: AgentConfig | None = None,
         on_confirm: Callable[[str, str], Awaitable[Union[bool, ConfirmResponse]]] | None = None,
@@ -153,6 +157,7 @@ class Agent:
         session_enabled: bool = True,                       # 是否自动创建会话（对话日志持久化）
         session_dir: "str | os.PathLike | None" = None,     # None→用户级 ~/.agent_framework/sessions
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
+        subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
     ):
         self._llm = llm
         # 复制传入的 config，保证每个 Agent 持有独立 AgentConfig 实例（防御性隔离，
@@ -195,9 +200,29 @@ class Agent:
             else:
                 self._history.attach_session(self._session)
 
+        # 工具默认（与 prompt_dir/skills_dir 同一约定）：
+        #   None + 顶层 Agent → 全套内置工具（开箱即用）；显式 [] → 无工具；显式列表 → 该列表
+        #   子代理（register_catalog=False）传 None 时保持精简，不注入内置工具
+        resolved_tools = tools
+        if resolved_tools is None and register_catalog:
+            from agent_framework.tools.builtin import BUILTIN_TOOLS
+            resolved_tools = BUILTIN_TOOLS
         self._registry = ToolRegistry()
-        if tools:
-            self._registry.register_many(tools)
+        if resolved_tools:
+            self._registry.register_many(resolved_tools)
+
+        # 子代理默认（同一约定）：
+        #   None + 顶层 Agent → 内置三件套（researcher/reader/coder）；显式 [] → 无；
+        #   显式列表 → 自定义 SubAgentConfig。子代理自身 register_catalog=False，
+        #   不会触发此默认 → 结构上保证子代理不嵌套子代理。
+        #   mode / 确认回调由 run() 经 ContextVar 注入，子代理工具与本 Agent 同 llm。
+        resolved_subagents = subagents
+        if resolved_subagents is None and register_catalog:
+            from agent_framework.agent.subagent import builtin_subagent_configs
+            resolved_subagents = builtin_subagent_configs()
+        if resolved_subagents:
+            from agent_framework.agent.subagent import create_subagent_tools
+            self._registry.register_many(create_subagent_tools(llm, resolved_subagents))
 
         # 注册元工具（用于发现和激活休眠工具）
         # register_catalog=False 时跳过（如 SubAgent，避免 LLM 被无用的元工具误导）
@@ -547,6 +572,8 @@ class Agent:
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
         mode_token = _current_parent_mode.set(self._mode)
+        # 确认回调透传：子代理继承父的 on_confirm，AUTO 模式下委派不构成安全旁路
+        confirm_token = _current_parent_confirm.set(self._on_confirm)
         try:
             self._history.add(Message(role=MessageRole.USER, content=user_input))
 
@@ -990,3 +1017,4 @@ class Agent:
             if plan_items_token is not None:
                 _current_todo_plan_items.reset(plan_items_token)
             _current_parent_mode.reset(mode_token)
+            _current_parent_confirm.reset(confirm_token)

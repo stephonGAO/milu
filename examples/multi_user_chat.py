@@ -4,7 +4,7 @@
   - 多用户隔离：每个 user_id 通过 AgentPool 自动得到独立 Agent 实例
   - 多轮对话记忆：同 user_id+session_id 复用 Agent，history 跨轮保持
   - 全部内置工具：file / python_repl / http_request / datetime / todo_write ...
-  - 子代理：researcher / coder / reviewer
+  - 子代理：researcher / reader / coder（框架内置三件套）
   - 全部命令：/history /reset /tools /skills /plan /mode /prompt /compact
               /save /sessions /new /load /help /quit
   - 工具自动调用 + 危险工具确认（Web 弹窗）
@@ -34,7 +34,7 @@ from typing import Any, AsyncIterator
 
 from dotenv import load_dotenv
 
-from agent_framework.agent.config import AgentConfig, AgentMode
+from agent_framework.agent.config import AgentMode
 from agent_framework.agent.events import (
     AgentDone,
     AgentError,
@@ -46,18 +46,8 @@ from agent_framework.serving import AgentPool, AgentPoolConfig
 from agent_framework.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
-    file_read,
-    file_write,
-    http_request,
-    python_repl,
 )
-from agent_framework import (
-    Agent,
-    SubAgentConfig,
-    create_subagent_tools,
-    SkillConfig,
-    templates_dir,
-)
+from agent_framework import Agent
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 logger = logging.getLogger("multi_user_chat")
@@ -89,81 +79,24 @@ def _read_plan_items(agent) -> list[dict]:
 def make_agent_factory(llm, shared_mcp_manager=None):
     """返回一个 agent_factory：每次新建 Agent 时由 AgentPool 调用。
 
-    这里把 multi_turn_chat.py:build_agent() 的逻辑原样搬过来，
-    并在闭包里持有 LLM，确保每个 user 都拿到带全套工具/子代理/技能的 Agent。
-
-    注意：子代理工具必须在 agent_factory 内部创建（不能用闭包外共享），
-    因为 get_parent_mode=lambda: agent.mode 需要引用「正在创建的」agent 自身。
-    跨用户共享同一组 subagent_tools 会让所有用户的 mode 锁定为第一个用户。
+    「全配默认」由 Agent 自身提供，本工厂几乎不用配置：
+      - 提示词/技能：不传 → 内置 main 角色 + 内置技能
+      - 子代理：不传 subagents → 内置三件套 researcher/reader/coder
+        （模式与确认回调经 ContextVar 自动继承父 Agent——AUTO 模式下
+        子代理内的不安全工具同样触发本用户的确认弹窗，委派不构成安全旁路）
+      - 工具：此处显式传列表，仅为追加 structured_output（显式列表会覆盖
+        默认全套，因此需要自带 BUILTIN_TOOLS）
 
     :param shared_mcp_manager: 共享的、已连接的 MCPManager（可为 None）。注入后，
         每个 per-user Agent 复用同一组 MCP 子进程，MCP 内存不再随用户数线性增长。
         （这是 P1-5「共享 MCP」的手动用法；若用默认 factory，则直接
         AgentPoolConfig(shared_mcp=True) 即可。）
     """
-    prompts_base = templates_dir() / "prompts"
-    skills_dir = templates_dir() / "skills"
     so_tool = create_structured_output_tool()
 
-    def _build_subagent_tools(agent):
-        return create_subagent_tools(
-            llm=llm,
-            subagents=[
-                SubAgentConfig(
-                    name="researcher",
-                    description=(
-                        "调研助手：擅长搜索和整理信息。"
-                        "当需要查找资料、对比分析、总结报告时委派此代理。"
-                    ),
-                    prompt_dir=prompts_base / "researcher",
-                    tools=[file_read, http_request],
-                    config=AgentConfig(),
-                    skills=[
-                        SkillConfig(
-                            name="deep-research",
-                            description="深度调研专家，擅长多角度分析和系统性总结",
-                            triggers=["调研", "研究", "分析"],
-                            content=(
-                                "你是一位深度调研专家。请按以下流程工作：\n\n"
-                                "## 调研流程\n"
-                                "1. **明确问题** — 拆解用户问题为 2-3 个子问题\n"
-                                "2. **多源搜索** — 从不同角度搜索信息\n"
-                                "3. **交叉验证** — 对比多个来源，标注可信度\n"
-                                "4. **系统总结** — 按重要性排序，给出结论\n\n"
-                                "## 输出格式\n"
-                                "- 关键发现：编号列表\n"
-                                "- 信息来源：标注 URL 或出处\n"
-                                "- 可信度评级：[高/中/低]\n"
-                            ),
-                        ),
-                    ],
-                ),
-                SubAgentConfig(
-                    name="coder",
-                    description="编程助手：擅长写代码和调试。",
-                    prompt_dir=prompts_base / "coder",
-                    tools=[file_read, file_write, python_repl],
-                    config=AgentConfig(),
-                ),
-                SubAgentConfig(
-                    name="reviewer",
-                    description="代码审查专家：擅长代码审查与建议提出。",
-                    prompt_dir=prompts_base / "reviewer",
-                    tools=[file_read, python_repl],
-                    config=AgentConfig(),
-                    skills=[
-                        SkillConfig.from_file(str(skills_dir / "code-review.md")),
-                    ] if (skills_dir / "code-review.md").exists() else [],
-                ),
-            ],
-            get_parent_mode=lambda: agent.mode,
-        )
-
     def agent_factory(user_id: str, session_id: str, llm_for_user: Any):
-        # 每次新建时创建一个新的 Agent + 自己的子代理工具集
-        agent = Agent(
+        return Agent(
             llm=llm_for_user,
-            prompt_dir=prompts_base / "main",
             tools=[*BUILTIN_TOOLS, so_tool],
             # mode/session 等能力参数现为 Agent 直接参数（原属 AgentConfig）
             session_enabled=True,
@@ -172,10 +105,6 @@ def make_agent_factory(llm, shared_mcp_manager=None):
             # 复用整池共享的一组 MCP 子进程（省内存）；None 时各 Agent 自建
             mcp_manager=shared_mcp_manager,
         )
-        # 子代理工具必须在 Agent 创建后绑定（get_parent_mode 闭包要拿 agent）
-        for tool in _build_subagent_tools(agent):
-            agent.tools.register(tool)
-        return agent
 
     return agent_factory
 
@@ -350,12 +279,12 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                     wrapper = agent.tools.get_tool(name)
                     desc = wrapper.description[:40] if wrapper else ""
                     lines.append(f"  {name:<30} {desc}")
-            for name in ("researcher", "coder", "reviewer"):
+            for name in ("researcher", "reader", "coder"):
                 if name in active_tools:
                     wrapper = agent.tools.get_tool(name)
                     desc = wrapper.description[:40] if wrapper else ""
                     lines.append(f"  {name + ' [SubAgent]':<30} {desc}")
-            all_special = builtin_names | meta_names | {"researcher", "coder", "reviewer"}
+            all_special = builtin_names | meta_names | {"researcher", "reader", "coder"}
             activated_mcp = [n for n in active_tools if n not in all_special]
             if activated_mcp:
                 lines.append("-" * 50)
