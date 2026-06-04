@@ -58,6 +58,8 @@ class SubAgentConfig:
     :param llm_kwargs: 传递给子代理 LLM 的额外参数（如 web_search=True, enable_thinking=True）
     :param skills: 子代理可用的技能列表（SkillConfig 实例）
     :param skills_dir: 子代理技能目录路径（None 时不自动扫描）
+    :param role: 内置角色名（main/coder/researcher/reviewer）。设置后自动套用该角色的
+        内置提示词目录——便利写法，免去手写 prompt_dir；显式 prompt_dir 优先于 role。
     :param prompt_dir: 提示词文件目录路径（None 时不使用文件化提示词）
     :param prompt_variables: 提示词变量，替换文件中的 {{key}}
     """
@@ -71,6 +73,7 @@ class SubAgentConfig:
     llm_kwargs: dict = field(default_factory=dict)
     skills: list | None = None
     skills_dir: str | None = None
+    role: str | None = None
     prompt_dir: "str | None" = None
     prompt_variables: dict[str, str] | None = None
 
@@ -163,6 +166,12 @@ def _create_single_subagent_tool(
             max_tokens=cfg.history_max_tokens,
         )
 
+        # role 便利字段：未显式给 prompt_dir 时，套用该内置角色的提示词目录
+        prompt_dir = cfg.prompt_dir
+        if prompt_dir is None and cfg.role:
+            from agent_framework.resources import builtin_prompts_dir
+            prompt_dir = builtin_prompts_dir(cfg.role)
+
         sub_agent = Agent(
             llm=llm,
             system_prompt=cfg.system_prompt,
@@ -175,7 +184,7 @@ def _create_single_subagent_tool(
             skills=cfg.skills,
             skills_dir=cfg.skills_dir,
             register_skills=bool(cfg.skills or cfg.skills_dir),
-            prompt_dir=cfg.prompt_dir,
+            prompt_dir=prompt_dir,
             prompt_variables=cfg.prompt_variables,
         )
         # 不调用 create_subagent_tools → 子代理不能嵌套子代理（结构性保证）

@@ -50,15 +50,16 @@ pip install -e ".[dev,mcp]"
 
 - `Agent.run()` 核心循环（`agent.py`，~880 行）：每轮 `重建 system prompt → 自动压缩 → LLM 流式调用 → 解析文本/工具调用 → 安全检查 → 执行工具 → 回传结果`，返回 `AsyncIterator[AgentEvent]`
 - 事件类型（`events.py`）：`TextDelta`, `ReasoningDelta`, `ToolCallStart`, `ToolConfirmRequired`, `ToolResult`, `AgentDone`, `AgentError`, `SubAgentEvent`, `SubAgentDone`, `HistoryCompacted`, `SessionLoaded`
-- **操作模式 `AgentMode`（`config.py`）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换：
+- **Agent 构造（开箱即用）**：`Agent(llm)` 即可用——顶层 Agent 在 `prompt_dir`/`skills_dir` 为 `None`（默认）时自动套用内置 `main` 角色提示词 + 内置技能；传了 `system_prompt` 则只用它（不接内置 prompt_dir）；子代理 `register_catalog=False`，`None` 时不注入内置、保持精简。**能力参数 `mode` / `session_enabled` / `session_dir` / `mcp_tools_active_by_default` 是 `Agent.__init__` 的直接参数**（不再属于 `AgentConfig`——后者现仅含运行限额 `max_turns`/`timeout`/`total_timeout`/`max_total_tokens`/`tool_call_limit`）。`session_dir` 默认 `~/.agent_framework/sessions`（与 CWD 解耦，可用环境变量 `AGENT_FRAMEWORK_HOME` 覆盖；见 `resources.user_data_dir()`）
+- **操作模式 `AgentMode`（枚举定义于 `config.py`，作为 `Agent(mode=...)` 直接参数）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换（写实例字段 `self._mode`，天然无跨用户串扰）：
   - `talk`：只读，调用前用 `_is_safe_call()` 拦截所有不安全工具
   - `auto`：标准，安全工具直接执行、不安全工具产出 `ToolConfirmRequired` 等待审批
   - `superwork`：全权限，跳过所有安全检查
 - **工具执行顺序**：todo 计划工具（`todo_write`/`todo_read`）必须单独成批调用（不可与其他工具混在一批）；普通工具一批内通过 `asyncio.gather` 并发执行。另有「跨轮次顺序守卫」：一旦开始执行非计划工具（`_work_started`），禁止再创建计划
 - `ConversationHistory`（`history.py`）：消息列表 + 4 种截断策略（`none`, `sliding_window`, `token_limit`, `head_tail`），内部持有 `Compactor`
-- `Session`（`session.py`）：会话持久化，每会话一个 `.sessions/{id}/` 目录，`conversation.jsonl`（append-only 消息日志，SYSTEM 不记录）+ `session.json`（元数据）。支持 compaction 快照点恢复
+- `Session`（`session.py`）：会话持久化，每会话一个 `{session_dir}/{id}/` 目录（默认 `~/.agent_framework/sessions/`），`conversation.jsonl`（append-only 消息日志，SYSTEM 不记录）+ `session.json`（元数据）。支持 compaction 快照点恢复
 - `Compactor`（`compactor.py`）：上下文自动压缩流水线，**0/1 次 API 调用分层**：L1 消息数裁剪 → 轮次分层工具结果压缩（旧轮→占位符、中间轮→截断、近期轮→保留，均带 session 文件指针）→ L4 超 `trigger_ratio` 时 LLM 摘要。阈值随 `max_context_window` 动态计算。另提供 `compact` 元工具供 LLM 主动触发
-- `SubAgent`（`subagent.py`）：`create_subagent_tools()` 工厂为每个 `SubAgentConfig` 生成一个 `@tool` 闭包；调用时**每次新建独立 Agent + 干净历史**，`register_catalog=False`/不嵌套子 Agent（结构性保证），可继承父 Agent 的 mode
+- `SubAgent`（`subagent.py`）：`create_subagent_tools()` 工厂为每个 `SubAgentConfig` 生成一个 `@tool` 闭包；调用时**每次新建独立 Agent + 干净历史**，`register_catalog=False`/不嵌套子 Agent（结构性保证）。**模式继承通过 ContextVar `_current_parent_mode`**（`Agent.run()` 入口注入），无需再传 `get_parent_mode` 回调、子代理工具可在 Agent 之前创建；`SubAgentConfig.role`（main/coder/researcher/reviewer）便利字段自动套用对应内置角色提示词
 
 ### 3. 工具层 (`src/agent_framework/tools/`)
 
@@ -73,7 +74,7 @@ pip install -e ".[dev,mcp]"
 - 支持三种传输：`stdio`, `streamable_http`, `sse`
 - `MCPManager` 多服务器编排：`asyncio.gather` 并行连接，错误隔离
 - `converter.py` 将 MCP Tool 转为 `ToolWrapper`，工具名加 `{server_name}__` 前缀避免冲突
-- 配置文件：`config/mcp_servers.json`
+- 配置文件搜索顺序（未显式传 `mcp_config_path` 时）：`./config/mcp_servers.json`（项目级，相对 CWD）→ `~/.agent_framework/mcp_servers.json`（用户级，可用 `AGENT_FRAMEWORK_HOME` 覆盖）；亦可用环境变量 `MCP_CONFIG_PATH` 指定绝对路径
 
 ### 5. 提示词 & 技能层 (`src/agent_framework/prompts/`, `skills/`)
 
@@ -83,6 +84,7 @@ pip install -e ".[dev,mcp]"
 ### 6. 服务层 (`src/agent_framework/serving/`)
 
 - `AgentPool`（`pool.py`）：多用户并发资源池。**按 `(user_id, session_id)` 缓存独立 Agent 实例**，`async with pool.acquire(uid, sid) as h: h.agent.run(...)`。LRU + idle TTL 淘汰、全局 `Semaphore` 并发限流、后台 sweep 清理、`get_stats()` 监控（含 hit_rate）
+- 便利构造：**`AgentPool.from_llm(llm)`** 一行起池（共享同一 LLM 实例，AsyncOpenAI 协程安全）。默认工厂给每个 per-user Agent 配齐 `BUILTIN_TOOLS` + 内置提示词/技能（开箱即用）；运行限额经 `agent_config=AgentConfig(...)`、能力参数经 `agent_kwargs={"mode": ..., "session_enabled": ..., "tools": [...]}` 透传（`tools` 可覆盖默认全套）
 - 四个硬不变量：每个 `(user_id, session_id)` ≤1 实例；实例数 ≤ `max_agents`；并发 run ≤ `max_concurrent_runs`；空闲超 `idle_ttl_seconds` 被清理
 
 ## 关键设计约束（多用户并发 / 无状态化）
@@ -90,8 +92,8 @@ pip install -e ".[dev,mcp]"
 这是近期重构的核心，改动相关代码前必读 `serving/pool.py` 顶部的长注释：
 
 - **Agent 含实例级共享状态**（`history`、`session`、`_work_started`、`_mcp_manager`、`tools` 等），多用户**不能共享同一个 Agent**。唯一安全方案是 **per-user Agent**（`AgentPool` 即为此而生）。瓶颈是 MCP 子进程内存（每 Agent 3-5 个 server 占 15-50 MB），不是 Agent 本身
-- **todo 工具与 subagent 已无状态化**：不再用模块级单例/闭包变量，而是 Agent 在 `run()` 入口通过 **ContextVar** 注入 per-call 状态（`todo_write._current_session_dir` 注入 session 目录、`subagent._current_subagent_events` 注入事件列表），实现 asyncio 任务级隔离。新增任何"跨调用共享"的工具状态时，沿用 ContextVar 模式，**切勿用模块级全局变量**
-- todo 计划持久化在 session 目录的 `plan.json`（per-user 天然隔离），LLM 通过 `todo_read` 主动拉取
+- **todo 工具与 subagent 已无状态化**：不再用模块级单例/闭包变量，而是 Agent 在 `run()` 入口通过 **ContextVar** 注入 per-call 状态（`todo_write._current_session_dir` 注入 session 目录、`todo_write._current_plan_items` 注入内存计划、`subagent._current_subagent_events` 注入事件列表、`subagent._current_parent_mode` 注入父模式），实现 asyncio 任务级隔离。新增任何"跨调用共享"的工具状态时，沿用 ContextVar 模式，**切勿用模块级全局变量**
+- **todo 计划存储双后端**（已与 session 解耦）：有 session → 文件后端 `{session_dir}/plan.json`（持久化、per-user 天然隔离）；无 session → 内存后端（`_current_plan_items` ContextVar，同一 Agent 跨轮保留、进程退出即弃）。因此 `session_enabled=False`（含子代理、用户自管 history）时 todo 也能用，不再抛 `RuntimeError`。LLM 通过 `todo_read` 主动拉取
 
 ## 代码风格约定
 

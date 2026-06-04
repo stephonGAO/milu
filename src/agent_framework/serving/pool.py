@@ -313,6 +313,40 @@ class AgentPool:
         # 最近 run 时延样本（秒），用于估算 p50/p95
         self._run_durations: "deque[float]" = deque(maxlen=1000)
 
+    # ── 便利构造器 ────────────────────────────────────────
+
+    @classmethod
+    def from_llm(
+        cls,
+        llm: BaseLLM,
+        *,
+        config: Optional[AgentPoolConfig] = None,
+        agent_config: Optional[AgentConfig] = None,
+        agent_kwargs: Optional[dict] = None,
+        agent_factory: Optional[AgentFactory] = None,
+    ) -> "AgentPool":
+        """用单个共享 LLM 实例快速创建池（最常见场景）。
+
+        所有用户共享同一 LLM 实例是安全的（AsyncOpenAI 协程安全），省去手写
+        llm_factory。等价于 AgentPool(llm_factory=lambda uid, sid: llm, ...)。
+
+        默认工厂会给每个 per-user Agent 配齐 BUILTIN_TOOLS + 内置 main 提示词/技能，
+        真正一行起服务：
+
+            pool = AgentPool.from_llm(ModelRegistry.create("qwen", model="qwen-plus"))
+            await pool.start()
+            async with pool.acquire(user_id, session_id) as h:
+                async for evt in h.agent.run(text):
+                    ...
+        """
+        return cls(
+            llm_factory=lambda uid, sid: llm,
+            agent_factory=agent_factory,
+            config=config,
+            agent_config=agent_config,
+            agent_kwargs=agent_kwargs,
+        )
+
     # ── 公开 API ──────────────────────────────────────────
 
     @property
@@ -542,17 +576,23 @@ class AgentPool:
     def _default_agent_factory(
         self, user_id: str, session_id: str, llm: BaseLLM
     ) -> Agent:
-        """默认 Agent 工厂：注入 LLM + AgentConfig 模板 + 确定性 session_id。
+        """默认 Agent 工厂：开箱即用——内置全套工具 + 内置 main 提示词/技能 + 确定性 session_id。
 
+        - 默认注入 BUILTIN_TOOLS（file/python/http/web_search/shell/datetime/todo），
+          可在 agent_kwargs={"tools": [...]} 覆盖（传空列表即无工具）。
+        - 提示词与技能由 Agent 默认值接管（顶层 Agent → 内置 main + 内置技能）。
         - 传入的是池级共享的 self._agent_config 模板，但 Agent.__init__ 会对其
-          做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置，
-          set_mode() 等运行时修改不会跨用户串扰。
+          做浅拷贝（dataclasses.replace），因此每个 Agent 持有独立配置。
         - session_id 由 (user_id, session_id) 确定性派生，使历史在淘汰/重启后可恢复。
 
         注：自定义 agent_factory 若也想要历史可恢复 / 复用共享 MCP，应自行把
         派生的 session_id 透传给 Agent(session_id=...)，并把 self.shared_mcp_manager
         透传给 Agent(mcp_manager=...)。
         """
+        from agent_framework.tools.builtin import BUILTIN_TOOLS
+
+        kwargs = dict(self._agent_kwargs)
+        kwargs.setdefault("tools", BUILTIN_TOOLS)  # 默认带全套内置工具，可被 agent_kwargs 覆盖
         return Agent(
             llm=llm,
             config=self._agent_config,
@@ -560,7 +600,7 @@ class AgentPool:
             # 启用 shared_mcp 时注入共享 manager；否则为 None（per-agent 默认行为）
             mcp_manager=self._shared_mcp_manager,
             # 透传能力参数（mode / session_enabled / session_dir / tools 等）
-            **self._agent_kwargs,
+            **kwargs,
         )
 
     async def _get_or_create(
