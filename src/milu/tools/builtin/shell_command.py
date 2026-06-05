@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shlex
 
 from milu.tools.decorator import tool
+from milu.tools._selfguard import is_protected_path
 
 # 输出最大字符数
 _MAX_OUTPUT_CHARS = 8192
@@ -86,6 +88,11 @@ _DANGEROUS_PATTERNS = [
     r"\bdd\s+.*of=/dev/",                        # dd 写设备
     r">\s*/dev/sd",                              # 重定向到磁盘设备
     r">\s*/dev/nvme",                            # 重定向到 NVMe 设备
+    # 自我保护：包管理器操作（可能覆盖 milu 自身）
+    r"\bpip\s+(install|uninstall|download)\b",   # pip 安装/卸载
+    r"\bpip3\s+(install|uninstall|download)\b",
+    r"\buv\s+add\b|\buv\s+remove\b",            # uv 包管理
+    r"\bpoetry\s+(add|remove|update)\b",        # poetry 包管理
 ]
 
 
@@ -119,6 +126,17 @@ async def shell_command(command: str, timeout: int = 30) -> str:
     matched = _is_dangerous_command(command)
     if matched:
         return f"错误: 危险命令被拦截（匹配规则: {matched}），该命令禁止执行"
+
+    # 自我保护：检测命令中是否包含对受保护路径的写操作
+    if _WRITE_INDICATORS.search(command):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        for token in tokens:
+            if os.path.sep in token or "/" in token or token.startswith("."):
+                if is_protected_path(token):
+                    return f"错误: 安全限制——命令中包含对 milu 受保护路径的写操作，已拦截: {token}"
 
     try:
         proc = await asyncio.create_subprocess_shell(

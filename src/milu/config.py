@@ -83,6 +83,9 @@ def _builtin_defaults() -> dict:
         },
         "compact": asdict(CompactConfig()),
         "pool": {k: getattr(pool_defaults, k) for k in _POOL_KEYS},
+        "security": {
+            "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
+        },
         "default_models": dict(DEFAULT_MODELS),
     }
 
@@ -160,6 +163,10 @@ class MiluConfig:
     @property
     def pool(self) -> dict:
         return self.data["pool"]
+
+    @property
+    def security(self) -> dict:
+        return self.data.get("security", {})
 
     @property
     def default_models(self) -> dict:

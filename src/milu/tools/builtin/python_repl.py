@@ -13,6 +13,7 @@ import traceback
 from contextlib import redirect_stdout
 
 from milu.tools.decorator import tool
+from milu.tools._selfguard import is_protected_path
 
 # 执行超时（秒）
 _EXEC_TIMEOUT = 30
@@ -48,13 +49,37 @@ if sys.platform == "win32" and not getattr(sys.flags, "utf8_mode", False):
                 pass
 
 
+def _make_guarded_open():
+    """返回一个覆盖了自我保护检查的 open 函数。"""
+    _real_open = open
+
+    def _guarded_open(file, mode="r", *args, **kwargs):
+        if isinstance(file, (str, bytes, os.PathLike)):
+            str_file = os.fsdecode(file) if isinstance(file, bytes) else str(file)
+            # 写保护：milu 自身源码和配置
+            if any(c in str(mode) for c in ("w", "a", "x")) and is_protected_path(str_file):
+                raise PermissionError(
+                    f"安全限制：禁止在 python_repl 中写入 milu 受保护路径: {str_file}"
+                )
+            # 读保护：与写保护共用同一套受保护路径（含 .env 等凭据文件）
+            if is_protected_path(str_file):
+                raise PermissionError(
+                    f"安全限制：禁止在 python_repl 中读取受保护文件: {str_file}"
+                )
+        return _real_open(file, mode, *args, **kwargs)
+
+    return _guarded_open
+
+
 def _exec_code(code: str) -> str:
     """在受限环境中执行代码并返回输出"""
     stdout_capture = io.StringIO()
 
-    # 构建受限的全局命名空间
+    # 构建受限的全局命名空间，覆盖 open 以拦截对保护路径的写操作
+    builtins_copy = dict(__builtins__) if isinstance(__builtins__, dict) else vars(__builtins__).copy()
+    builtins_copy["open"] = _make_guarded_open()
     restricted_globals = {
-        "__builtins__": __builtins__,
+        "__builtins__": builtins_copy,
         "__name__": "__main__",
     }
 

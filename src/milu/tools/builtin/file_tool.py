@@ -17,6 +17,7 @@ import tempfile
 from typing import Literal, Optional
 
 from milu.tools.decorator import tool
+from milu.tools._selfguard import is_protected_path, selfguard_error
 
 # ── 常量 ─────────────────────────────────────────────────
 _MAX_READ_LINES = 200          # 单次读取最大行数
@@ -403,6 +404,10 @@ async def file_read(
             "available": ["index", "read", "grep"],
         }, ensure_ascii=False)
 
+    # 读保护：与写保护共用同一套受保护路径（含 .env 等凭据文件）
+    if is_protected_path(path):
+        return json.dumps(selfguard_error(path, "配置"), ensure_ascii=False)
+
     # 专用二进制格式引导（文档→doc_read，图片→image_read）
     redirect = _binary_redirect_hint(path)
     if redirect is not None:
@@ -466,6 +471,11 @@ async def file_write(
             "error": f"未知 action: {action}",
             "available": ["write", "append", "replace", "insert", "delete"],
         }, ensure_ascii=False)
+
+    # 自我保护：禁止写入 milu 源码和程序配置文件
+    if is_protected_path(path):
+        reason = "配置" if path.endswith((".json", ".toml", ".cfg", ".env", ".ini")) else "源码"
+        return json.dumps(selfguard_error(path, reason), ensure_ascii=False)
 
     try:
         result = handler(

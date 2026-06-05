@@ -43,6 +43,7 @@ class Settings:
     use_mcp: bool = True
     use_subagents: bool = True
     session_id: str | None = None
+    selfguard_enabled: bool = True
     # 运行限额 / 压缩分节（供 builder 构造 AgentConfig / CompactConfig）
     agent: dict = field(default_factory=dict)
     compact: dict = field(default_factory=dict)
@@ -85,6 +86,7 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
     if getattr(args, "no_session", False):
         session_enabled = False
 
+    security = config.security
     return Settings(
         provider=provider,
         model=model,
@@ -96,6 +98,7 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         use_mcp=not getattr(args, "no_mcp", False),
         use_subagents=not getattr(args, "no_subagents", False),
         session_id=getattr(args, "session", None),
+        selfguard_enabled=bool(security.get("selfguard_enabled", True)),
         agent=dict(agent),
         compact=dict(config.compact),
     )

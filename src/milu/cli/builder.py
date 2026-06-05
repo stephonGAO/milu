@@ -25,6 +25,12 @@ def build_llm(s: Settings) -> BaseLLM:
     return ModelRegistry.create(s.provider, **kwargs)
 
 
+def apply_security(s: Settings) -> None:
+    """按配置应用安全设置（在 build_agent 之前调用）。"""
+    from milu.tools._selfguard import set_enabled
+    set_enabled(s.selfguard_enabled)
+
+
 def build_agent(s: Settings) -> Agent:
     """按设置构建顶层 Agent（最简创建，其余全部交给 Agent 的「全配默认」）。
 
@@ -36,6 +42,7 @@ def build_agent(s: Settings) -> Agent:
     from milu.agent.config import AgentConfig, CompactConfig
     from milu.agent.history import ConversationHistory
 
+    apply_security(s)
     llm = build_llm(s)
     # s.agent 含 mode/session_enabled（非 AgentConfig 字段），故只取运行限额字段构造
     agent_config = AgentConfig(
