@@ -25,6 +25,25 @@ _MAX_READ_LINES = 200          # 单次读取最大行数
 _LANDMARK_INTERVAL = 50         # 索引路标间隔（行）
 _MAX_GREP_RESULTS = 20         # grep 最大返回条数
 _MAX_GREP_CONTEXT = 10         # grep 上下文最大行数
+
+# 二进制文件引导：file_read 只处理文本，专用格式转交专用工具
+_DOC_EXTENSIONS = {".docx", ".xlsx", ".xlsm", ".xls", ".pdf", ".pptx",
+                   ".doc", ".ppt", ".wps"}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+
+def _binary_redirect_hint(path: str) -> dict | None:
+    """专用二进制格式的引导提示（非此类格式返回 None）。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _DOC_EXTENSIONS:
+        return {"success": False,
+                "error": f"{ext} 是二进制文档格式，file_read 无法按文本读取",
+                "hint": "请改用 doc_read 工具提取文档内容"}
+    if ext in _IMAGE_EXTENSIONS:
+        return {"success": False,
+                "error": f"{ext} 是图片格式，file_read 无法按文本读取",
+                "hint": "请改用 image_read 工具查看图片内容"}
+    return None
 _STRUCTURAL_PATTERNS = re.compile(
     r"^\s*(def |class |async def )"     # Python 函数/类
     r"|^#{1,6}\s"                        # Markdown 标题
@@ -460,12 +479,23 @@ async def file_read(
             "available": ["index", "read", "grep"],
         }, ensure_ascii=False)
 
+    # 专用二进制格式引导（文档→doc_read，图片→image_read）
+    redirect = _binary_redirect_hint(path)
+    if redirect is not None:
+        return json.dumps(redirect, ensure_ascii=False)
+
     try:
         result = handler(
             path=path, start=start, end=end,
             pattern=pattern, context_lines=context_lines,
         )
         return json.dumps(result, ensure_ascii=False)
+    except UnicodeDecodeError:
+        return json.dumps({
+            "success": False,
+            "error": "文件不是 UTF-8 文本（疑似二进制文件），file_read 无法读取",
+            "hint": "Office/PDF 文档用 doc_read，图片用 image_read",
+        }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({
             "success": False,

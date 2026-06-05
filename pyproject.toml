@@ -11,6 +11,12 @@ dependencies = [
     "ddgs>=8.0.0",
     "pyyaml>=6.0",
     "markdownify>=0.13.0",
+    # doc_read 文档读取（docx/xlsx/xls/pdf/pptx）
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "pypdf>=4.0.0",
+    "python-pptx>=1.0.0",
+    "xlrd>=2.0.0",
 ]
 
 [project.optional-dependencies]
