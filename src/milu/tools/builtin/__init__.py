@@ -33,6 +33,13 @@ from milu.tools.builtin.structured_output import (
 )
 from milu.tools.builtin.todo_write import todo_read, todo_write
 from milu.tools.builtin.memory_tool import memory_read, memory_write
+from milu.tools.builtin.schedule_tool import (
+    schedule_create,
+    schedule_list,
+    schedule_delete,
+    schedule_toggle,
+    schedule_run_now,
+)
 
 # 所有内置工具列表，可直接传给 Agent(tools=BUILTIN_TOOLS)
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
@@ -53,6 +60,11 @@ BUILTIN_TOOLS = [
     shell_command,
     todo_read,
     todo_write,
+    schedule_create,
+    schedule_list,
+    schedule_delete,
+    schedule_toggle,
+    schedule_run_now,
 ]
 
 __all__ = [
@@ -73,5 +85,10 @@ __all__ = [
     "todo_write",
     "memory_read",
     "memory_write",
+    "schedule_create",
+    "schedule_list",
+    "schedule_delete",
+    "schedule_toggle",
+    "schedule_run_now",
     "BUILTIN_TOOLS",
 ]

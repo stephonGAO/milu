@@ -280,22 +280,49 @@ async def handle_command(agent, cmd: str) -> bool:
         except Exception as e:
             print(f"\n  {c('red', f'加载失败: {e}')}\n")
 
+    elif cmd == "/schedule" or cmd.startswith("/schedule "):
+        from milu.resources import user_data_dir
+        from milu.scheduler.store import ScheduleStore
+
+        store = ScheduleStore(user_data_dir() / "schedules.json")
+        tasks = store.list_all()
+        if not tasks:
+            print(f"\n  {c('dim', '暂无定时任务。可在对话中让 Agent 调用 schedule_create 创建。')}\n")
+            return True
+        print(f"\n{DIVIDER}")
+        print(c("bold", "  定时任务") + c("dim", f" ({len(tasks)} 个)"))
+        print(DIVIDER)
+        for t in tasks:
+            status_color = "green" if t.enabled else "dim"
+            status_str = "启用" if t.enabled else "禁用"
+            last = t.last_run[:16].replace("T", " ") if t.last_run else "从未"
+            nxt = t.next_run[:16].replace("T", " ") if t.next_run else "待计算"
+            print(
+                f"  {c('cyan', t.name)}  {c(status_color, f'[{status_str}]')}  "
+                f"{c('dim', f'运行 {t.run_count} 次')}\n"
+                f"    触发: {c('yellow', t.trigger_desc())}\n"
+                f"    下次: {c('dim', nxt)}  上次: {c('dim', last)}"
+            )
+        print(DIVIDER)
+        print(c("dim", "  milu scheduler start  — 启动调度守护进程\n"))
+
     elif cmd == "/help":
         print("""
-  /history   — 查看对话历史
-  /reset     — 重置对话（清空上下文）
-  /tools     — 查看可用工具（含休眠工具）
-  /skills    — 查看可用技能
-  /plan      — 查看当前会话计划
-  /mode      — 查看/切换操作模式（talk/manual/auto/superwork）
-  /prompt    — 查看当前系统提示词
-  /compact   — 手动压缩对话历史
-  /save      — 保存当前会话
-  /sessions  — 查看所有会话
-  /new       — 新建会话（自动保存当前）
-  /load <id> — 加载历史会话
-  /help      — 显示帮助
-  /quit      — 退出
+  /history    — 查看对话历史
+  /reset      — 重置对话（清空上下文）
+  /tools      — 查看可用工具（含休眠工具）
+  /skills     — 查看可用技能
+  /plan       — 查看当前会话计划
+  /schedule   — 查看定时任务列表
+  /mode       — 查看/切换操作模式（talk/manual/auto/superwork）
+  /prompt     — 查看当前系统提示词
+  /compact    — 手动压缩对话历史
+  /save       — 保存当前会话
+  /sessions   — 查看所有会话
+  /new        — 新建会话（自动保存当前）
+  /load <id>  — 加载历史会话
+  /help       — 显示帮助
+  /quit       — 退出
 """)
 
     else:

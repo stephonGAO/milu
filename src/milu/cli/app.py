@@ -7,6 +7,8 @@
     sessions [list|show] 查看历史会话
     providers            列出支持的厂商及 Key 配置状态
     version              显示版本
+    schedule             定时任务管理（list/run/delete/enable/disable）
+    scheduler            调度守护进程（start）
 
 全局选项（厂商/模型/模式等）写在子命令之后，例如：
     milu chat -p deepseek -m deepseek-chat --mode superwork
@@ -94,6 +96,24 @@ def build_parser() -> argparse.ArgumentParser:
     # providers / version
     sub.add_parser("providers", help="列出支持的厂商及 Key 配置状态")
     sub.add_parser("version", help="显示版本")
+
+    # schedule — 定时任务管理
+    p_sch = sub.add_parser("schedule", help="定时任务管理（list/run/delete/enable/disable）")
+    sch_sub = p_sch.add_subparsers(dest="schedule_action")
+    sch_sub.add_parser("list", help="列出所有定时任务（默认）")
+    sr = sch_sub.add_parser("run", help="立即同步执行指定任务")
+    sr.add_argument("name", help="任务名称")
+    sd = sch_sub.add_parser("delete", help="删除指定任务")
+    sd.add_argument("name", help="任务名称")
+    se = sch_sub.add_parser("enable", help="启用指定任务")
+    se.add_argument("name", help="任务名称")
+    sdi = sch_sub.add_parser("disable", help="禁用指定任务")
+    sdi.add_argument("name", help="任务名称")
+
+    # scheduler — 调度守护进程
+    p_sched = sub.add_parser("scheduler", help="调度守护进程管理（start）")
+    sched_sub = p_sched.add_subparsers(dest="scheduler_action")
+    sched_sub.add_parser("start", help="启动调度守护进程（前台运行，Ctrl+C 停止）")
 
     return parser
 
@@ -261,6 +281,126 @@ def _cmd_version(_args) -> int:
     return 0
 
 
+def _cmd_schedule(args) -> int:
+    """定时任务 CRUD 管理（list/run/delete/enable/disable）。"""
+    from milu.resources import user_data_dir
+    from milu.scheduler.store import ScheduleStore
+
+    action = getattr(args, "schedule_action", None) or "list"
+    store = ScheduleStore(user_data_dir() / "schedules.json")
+
+    if action == "list":
+        tasks = store.list_all()
+        if not tasks:
+            print(c("dim", "暂无定时任务。可在对话中让 Agent 调用 schedule_create 工具创建。"))
+            return 0
+        print(f"{DIVIDER}\n  定时任务 ({len(tasks)} 个)\n{DIVIDER}")
+        for t in tasks:
+            status_color = "green" if t.enabled else "dim"
+            status_str = "启用" if t.enabled else "禁用"
+            last = t.last_run[:16].replace("T", " ") if t.last_run else "从未"
+            nxt = t.next_run[:16].replace("T", " ") if t.next_run else "待计算"
+            print(
+                f"  {c('cyan', t.name)}  {c(status_color, f'[{status_str}]')}  "
+                f"运行 {t.run_count} 次\n"
+                f"    触发: {c('yellow', t.trigger_desc())}\n"
+                f"    说明: {t.description or t.prompt[:60]}\n"
+                f"    上次: {c('dim', last)}  下次: {c('dim', nxt)}"
+            )
+        print(DIVIDER)
+        return 0
+
+    if action == "run":
+        from milu._env import ensure_dotenv_loaded
+        from milu.scheduler.engine import ScheduleEngine
+
+        ensure_dotenv_loaded()
+        task = store.get(args.name)
+        if not task:
+            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            return 1
+        print(c("cyan", f"  正在执行任务 '{args.name}'..."))
+        engine = ScheduleEngine(store)
+        try:
+            result = asyncio.run(engine.run_task_now(args.name))
+            print(f"\n{DIVIDER}")
+            print(c("green", f"  任务 '{args.name}' 执行完成"))
+            print(DIVIDER)
+            print(result)
+            print(DIVIDER)
+        except Exception as e:
+            print(c("red", f"  执行失败: {e}"), file=sys.stderr)
+            return 1
+        return 0
+
+    if action == "delete":
+        if not store.remove(args.name):
+            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            return 1
+        print(c("green", f"  任务 '{args.name}' 已删除"))
+        return 0
+
+    if action in ("enable", "disable"):
+        task = store.get(args.name)
+        if not task:
+            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            return 1
+        task.enabled = action == "enable"
+        store.update(task)
+        verb = "已启用" if task.enabled else "已禁用"
+        print(c("green", f"  任务 '{args.name}' {verb}"))
+        return 0
+
+    # 默认 list
+    return _cmd_schedule_list(store)
+
+
+def _cmd_schedule_list(store) -> int:
+    tasks = store.list_all()
+    if not tasks:
+        print(c("dim", "暂无定时任务。"))
+    return 0
+
+
+def _cmd_scheduler(args) -> int:
+    """调度守护进程（start）。"""
+    from milu._env import ensure_dotenv_loaded
+    from milu.resources import user_data_dir
+    from milu.scheduler.engine import ScheduleEngine
+    from milu.scheduler.store import ScheduleStore
+
+    action = getattr(args, "scheduler_action", None) or "start"
+
+    if action == "start":
+        ensure_dotenv_loaded()
+        data_dir = user_data_dir()
+        store = ScheduleStore(data_dir / "schedules.json")
+        log_dir = data_dir / "scheduler_logs"
+        engine = ScheduleEngine(store, log_dir=log_dir)
+
+        tasks = store.list_all()
+        enabled = [t for t in tasks if t.enabled]
+        print(f"{DIVIDER}")
+        print(c("bold", c("cyan", "  milu 调度守护进程")))
+        print(DIVIDER)
+        print(f"  任务文件: {c('dim', str(data_dir / 'schedules.json'))}")
+        print(f"  日志目录: {c('dim', str(log_dir))}")
+        print(f"  已启用任务: {c('yellow', str(len(enabled)))} / {len(tasks)} 个")
+        if enabled:
+            for t in enabled:
+                print(f"    {c('cyan', t.name):<20} {t.trigger_desc()}")
+        print(DIVIDER + "\n")
+
+        try:
+            asyncio.run(engine.start())
+        except KeyboardInterrupt:
+            print(c("dim", "\n  调度器已停止。"))
+        return 0
+
+    print(c("red", f"未知操作: {action}（可用: start）"), file=sys.stderr)
+    return 2
+
+
 # ── main ─────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -281,11 +421,16 @@ def main(argv: list[str] | None = None) -> int:
         "sessions": _cmd_sessions,
         "providers": _cmd_providers,
         "version": _cmd_version,
+        "schedule": _cmd_schedule,
+        "scheduler": _cmd_scheduler,
     }
-    handler = handlers[command]
+    handler = handlers.get(command)
+    if handler is None:
+        print(c("red", f"未知子命令: {command}"), file=sys.stderr)
+        return 2
 
     try:
-        return handler(args) or 0
+        return handler(args) or 0  # type: ignore[misc]
     except KeyboardInterrupt:
         print(c("dim", "\n已中断。"))
         return 130
