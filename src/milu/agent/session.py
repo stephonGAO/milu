@@ -45,6 +45,17 @@ def _segment_index(filename: str) -> int | None:
     return int(m.group(1)) if m.group(1) else 1
 
 
+def _serialize_content(content) -> str | list:
+    """序列化消息 content 供 JSONL 记录。
+
+    str 原样；list（多模态轻量块，如 image_path / text，不含 base64）原样存为
+    JSON 数组，load 时经 _dict_to_message 透传恢复为 list；其余类型 str() 兜底。
+    """
+    if isinstance(content, (str, list)):
+        return content
+    return str(content or "")
+
+
 # ── 跨进程文件锁（写入健壮性）────────────────────────────────
 #
 # 多 worker 部署下，若同一会话日志被多个进程写入（未做粘性路由），裸 append
@@ -185,7 +196,7 @@ class Session:
             "line": self._line_counter,
             "round": self._round_counter,
             "role": message.role.value,
-            "content": message.content if isinstance(message.content, str) else str(message.content or ""),
+            "content": _serialize_content(message.content),
             "timestamp": time.time(),
         }
 
@@ -219,7 +230,7 @@ class Session:
                 continue
             entry: dict[str, Any] = {
                 "role": msg.role.value,
-                "content": msg.content if isinstance(msg.content, str) else str(msg.content or ""),
+                "content": _serialize_content(msg.content),
             }
             if msg.tool_calls:
                 entry["tool_calls"] = msg.tool_calls

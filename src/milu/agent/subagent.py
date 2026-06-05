@@ -141,6 +141,7 @@ def builtin_subagent_configs(
         datetime_tool,
         file_read,
         file_write,
+        image_read,
         python_repl,
         web_fetch,
         web_search,
@@ -171,7 +172,7 @@ def builtin_subagent_configs(
                 "短内容（几十行以内）不要委派，自己读。"
             ),
             role="reader",
-            tools=[file_read, web_fetch],
+            tools=[file_read, web_fetch, image_read],
         ),
         "coder": SubAgentConfig(
             name="coder",

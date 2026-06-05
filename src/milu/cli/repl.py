@@ -76,6 +76,13 @@ async def handle_command(agent, cmd: str) -> bool:
         for msg in messages:
             role = msg.role.value.upper()
             raw = msg.content or ""
+            if isinstance(raw, list):
+                # 多模态消息：图片块显示摘要，文本块拼接
+                images = sum(1 for b in raw if isinstance(b, dict)
+                             and b.get("type") in ("image_path", "image_url"))
+                texts = " ".join(b.get("text", "") for b in raw
+                                 if isinstance(b, dict) and b.get("type") == "text")
+                raw = (f"[图片×{images}] " if images else "") + texts
             content = (raw[:500] + "...") if len(raw) > 500 else raw
             content = content.replace("\n", " ")
             print(f"  {c('cyan', f'[{role:<9}]')} {c('dim', content)}")

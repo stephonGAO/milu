@@ -79,7 +79,10 @@ class ChatGPTLLM(BaseLLM):
                 instructions = msg.content if isinstance(msg.content, str) else None
 
             elif msg.role == MessageRole.USER:
-                input_items.append({"role": "user", "content": msg.content})
+                input_items.append({
+                    "role": "user",
+                    "content": self._convert_user_content(msg.content),
+                })
 
             elif msg.role == MessageRole.ASSISTANT:
                 if msg.tool_calls:
@@ -111,6 +114,34 @@ class ChatGPTLLM(BaseLLM):
                 })
 
         return instructions, input_items
+
+    @staticmethod
+    def _convert_user_content(content):
+        """将 user 消息 content 转为 Responses API 格式。
+
+        多模态 list content：先物化 image_path 块（base64 data URL），
+        再映射为 Responses 的 input_text / input_image 块。
+        纯文本 content 原样返回。
+        """
+        if not isinstance(content, list):
+            return content
+
+        from milu.llm.base.vision import materialize_content
+
+        items = []
+        for block in materialize_content(content):
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                items.append({"type": "input_text", "text": block.get("text", "")})
+            elif btype == "image_url":
+                url = block.get("image_url", {}).get("url", "")
+                items.append({"type": "input_image", "image_url": url})
+            else:
+                # 未知块类型原样透传，交给 API 校验
+                items.append(block)
+        return items
 
     def _convert_tools_to_responses_format(self, tools: list[dict]) -> list[dict]:
         """将 Chat Completions 格式的工具定义转换为 Responses API 格式。

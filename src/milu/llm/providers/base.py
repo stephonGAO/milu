@@ -201,5 +201,18 @@ class BaseLLM(ABC):
         return validated
 
     def _messages_to_dicts(self, messages: list[Message]) -> list[dict]:
-        """将Message对象列表转换为API兼容的字典列表"""
-        return [msg.to_dict() for msg in messages]
+        """将Message对象列表转换为API兼容的字典列表。
+
+        多模态：content 为 list 时在此单点物化——轻量 image_path 引用块
+        转为 base64 data URL 的 image_url 块（见 llm/base/vision.py）。
+        历史/会话日志中始终只保留轻量块，base64 仅存在于出站请求中。
+        """
+        from milu.llm.base.vision import materialize_content
+
+        result = []
+        for msg in messages:
+            d = msg.to_dict()
+            if isinstance(d.get("content"), list):
+                d["content"] = materialize_content(d["content"])
+            result.append(d)
+        return result

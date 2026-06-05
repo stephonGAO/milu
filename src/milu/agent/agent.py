@@ -48,6 +48,11 @@ from milu.tools.builtin.memory_tool import (
     memory_write,
     render_memory_prompt,
 )
+from milu.tools.builtin.image_tool import (
+    _current_pending_images,
+    _current_vision_support,
+)
+from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
     _current_subagent_events,
     _current_parent_mode,
@@ -634,12 +639,16 @@ class Agent:
     async def run(
         self,
         user_input: str,
+        images: list[str] | None = None,
         **llm_kwargs,
     ) -> AsyncIterator[AgentEvent]:
         """运行 Agent 循环。
 
         Args:
             user_input: 用户输入
+            images: 随消息附带的本地图片路径列表（可选）。需要 LLM 支持视觉
+                （capabilities.supports_vision），不支持时降级为纯文本并记录警告。
+                历史中只存轻量 image_path 引用块，发送 API 时才物化为 base64。
             **llm_kwargs: 传递给 LLM 的额外参数
 
         Yields:
@@ -665,8 +674,27 @@ class Agent:
         judge_token = _current_parent_judge.set(
             (self._judge_llm, self._judge_rules) if self._judge_llm else None
         )
+        # 图片注入通路：image_read 工具把校验通过的路径 append 到此列表，
+        # Agent 在工具批次结束后注入多模态 user 消息（见步骤 10e）
+        pending_images: list[str] = []
+        images_token = _current_pending_images.set(pending_images)
+        vision_supported = bool(getattr(
+            self._llm.capabilities, "supports_vision", False
+        ))
+        vision_token = _current_vision_support.set(vision_supported)
         try:
-            self._history.add(Message(role=MessageRole.USER, content=user_input))
+            if images and vision_supported:
+                self._history.add(Message(
+                    role=MessageRole.USER,
+                    content=build_user_content(user_input, images),
+                ))
+            else:
+                if images:
+                    logger.warning(
+                        "当前模型不支持视觉输入，已忽略 %d 张图片，降级为纯文本",
+                        len(images),
+                    )
+                self._history.add(Message(role=MessageRole.USER, content=user_input))
 
             total_usage = TokenUsage()
             turn_count = 0
@@ -1183,6 +1211,20 @@ class Agent:
                             name=tool_name,
                         ))
 
+                # ── 10e. 注入 image_read 加载的图片（多模态 user 消息）──
+                # 协议顺序合法：assistant(tool_calls) → tool 消息×N → user 消息。
+                # 历史中只存轻量 image_path 引用块（不含 base64），
+                # 下一轮发送 API 时由 provider 层物化为 base64 data URL。
+                if pending_images:
+                    self._history.add(Message(
+                        role=MessageRole.USER,
+                        content=build_user_content(
+                            "[image_read] 以上为工具加载的图片，请直接查看并继续任务",
+                            pending_images,
+                        ),
+                    ))
+                    pending_images.clear()
+
                 # 11. 继续循环，LLM 将看到工具结果
 
         finally:
@@ -1194,3 +1236,5 @@ class Agent:
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)
             _safe_reset(_current_parent_judge, judge_token)
+            _safe_reset(_current_pending_images, images_token)
+            _safe_reset(_current_vision_support, vision_token)

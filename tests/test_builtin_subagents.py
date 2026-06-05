@@ -63,7 +63,7 @@ class TestBuiltinSubagentConfigs:
         assert tool_names(by_name["researcher"]) == {
             "web_search", "web_fetch", "datetime_tool",
         }
-        assert tool_names(by_name["reader"]) == {"file_read", "web_fetch"}
+        assert tool_names(by_name["reader"]) == {"file_read", "web_fetch", "image_read"}
         assert tool_names(by_name["coder"]) == {
             "python_repl", "file_read", "file_write",
         }

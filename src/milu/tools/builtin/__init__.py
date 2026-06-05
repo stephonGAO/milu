@@ -21,6 +21,7 @@
 from milu.tools.builtin.datetime_tool import datetime_tool, get_current_time
 from milu.tools.builtin.http_request import http_request
 from milu.tools.builtin.file_tool import file_read, file_write
+from milu.tools.builtin.image_tool import image_read
 from milu.tools.builtin.python_repl import python_repl
 from milu.tools.builtin.web_search import web_search
 from milu.tools.builtin.web_fetch import web_fetch
@@ -44,6 +45,7 @@ BUILTIN_TOOLS = [
     web_fetch,
     file_read,
     file_write,
+    image_read,
     python_repl,
     web_search,
     shell_command,
@@ -57,6 +59,7 @@ __all__ = [
     "http_request",
     "file_read",
     "file_write",
+    "image_read",
     "python_repl",
     "web_search",
     "web_fetch",
