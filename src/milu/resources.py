@@ -88,6 +88,23 @@ def default_mcp_config_path() -> Path:
     return user_data_dir() / "mcp_servers.json"
 
 
+def user_config_path() -> Path:
+    """用户级配置文件路径（「写数据」）：user_data_dir()/config.json。
+
+    由 `milu config set` 写入，覆盖项目级配置（见 milu.config 分层合并）。
+    """
+    return user_data_dir() / "config.json"
+
+
+def project_config_path() -> Path:
+    """项目级配置文件路径（「读配置」）：project_dir()/config/milu.json。
+
+    提交进仓库、写出全量默认参数；优先级低于用户级配置（见 milu.config）。
+    与 mcp_servers.json 同放 config/ 下集中管理。
+    """
+    return project_dir() / "config" / "milu.json"
+
+
 def builtin_prompts_dir(role: str = "main") -> Path:
     """返回内置角色提示词目录。
 

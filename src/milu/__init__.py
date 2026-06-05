@@ -9,7 +9,10 @@ from milu.resources import (
     project_dir,
     default_session_dir,
     default_mcp_config_path,
+    user_config_path,
+    project_config_path,
 )
+from milu.config import MiluConfig, load_config
 from milu.exceptions import MiluError
 from milu.llm.base.exceptions import (
     AuthenticationError,
@@ -83,6 +86,11 @@ __all__ = [
     "project_dir",
     "default_session_dir",
     "default_mcp_config_path",
+    "user_config_path",
+    "project_config_path",
+    # 分层配置体系
+    "MiluConfig",
+    "load_config",
     # Root Exception
     "MiluError",
     # LLM Exceptions

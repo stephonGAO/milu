@@ -1,0 +1,42 @@
+{
+  "agent": {
+    "mode": "auto",
+    "session_enabled": true,
+    "llm": {
+      "provider": "minimax",
+      "model": "MiniMax-M3",
+      "web_search": true,
+      "enable_thinking": false
+    },
+    "max_turns": 100,
+    "timeout": 300.0,
+    "total_timeout": 3600.0,
+    "max_total_tokens": null,
+    "tool_call_limit": 100
+  },
+  "compact": {
+    "enabled": true,
+    "trigger_ratio": 0.7,
+    "recent_rounds": 5,
+    "max_messages": 300
+  },
+  "pool": {
+    "max_agents": 200,
+    "max_concurrent_runs": 50,
+    "idle_ttl_seconds": 300.0,
+    "sweep_interval_seconds": 60.0,
+    "acquire_timeout": null,
+    "shared_mcp": false
+  },
+  "default_models": {
+    "qwen": "qwen3.6-plus",
+    "deepseek": "deepseek-v4-flash",
+    "kimi": "kimi-k2.6",
+    "glm": "glm-5",
+    "minimax": "MiniMax-M3",
+    "doubao": "doubao-pro",
+    "openai": "gpt-4o-mini",
+    "gemini": "gemini-3.5-flash",
+    "anthropic": "claude-sonnet-4.6"
+  }
+}

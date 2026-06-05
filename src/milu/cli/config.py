@@ -1,60 +1,27 @@
-"""CLI 配置：~/.milu/config.json 的读写，及厂商/模型/Key 的解析。
+"""CLI 参数层：把文件配置（MiluConfig）与命令行参数合并为一次运行的 Settings。
 
-配置文件落在 user_data_dir()（默认 ~/.milu，可被环境变量
-MILU_HOME 覆盖），与会话目录同源、与 CWD 解耦。
+文件配置的分层合并（项目 config/milu.json ← 用户 ~/.milu/config.json）在 milu.config
+完成；本模块只负责在其之上叠加 CLI 参数，并解析 API Key（CLI 参数 > 环境变量）。
+
+优先级（高 → 低）：
+  provider / model / mode / 各参数：CLI 参数 > 文件配置（用户级 > 项目级）> 内置默认
+  api_key：CLI 参数 > 环境变量 {PROVIDER}_API_KEY（密钥不再落 config.json）
 """
 from __future__ import annotations
 
-import json
 import os
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field
 
-from milu.resources import user_data_dir
+from milu.config import DEFAULT_MODELS, DEFAULT_PROVIDER, MiluConfig, load_config
 
-# 默认厂商（用户未显式指定 --provider 且配置文件未设置时）
-DEFAULT_PROVIDER = "qwen"
-
-# 各厂商的默认模型。已核对可用：qwen / deepseek / openai / gemini / anthropic / doubao；
-# kimi / glm / minimax 给的是合理默认值，按需用 `config set model <名>` 或 --model 覆盖。
-DEFAULT_MODELS: dict[str, str] = {
-    "qwen": "qwen3.6-plus",
-    "deepseek": "deepseek-v4-flash",
-    "kimi": "kimi-k2.6",
-    "glm": "glm-5",
-    "minimax": "MiniMax-M3",
-    "doubao": "doubao-pro",
-    "openai": "gpt-4o-mini",
-    "gemini": "gemini-3.5-flash",
-    "anthropic": "claude-sonnet-4.6",
-}
-
-# config.json 中允许通过 `config set <key> <value>` 修改的标量字段及其类型，
-# 用于命令行字符串值的类型转换。
-SCALAR_FIELDS: dict[str, type] = {
-    "provider": str,
-    "model": str,
-    "mode": str,
-    "session_enabled": bool,
-    "web_search": bool,
-    "enable_thinking": bool,
-}
-
-_TRUTHY = {"1", "true", "yes", "on", "y"}
-_FALSY = {"0", "false", "no", "off", "n"}
-
-
-def coerce_scalar(key: str, value: str):
-    """把命令行传入的字符串值转换为字段的目标类型。"""
-    typ = SCALAR_FIELDS.get(key)
-    if typ is bool:
-        low = value.strip().lower()
-        if low in _TRUTHY:
-            return True
-        if low in _FALSY:
-            return False
-        raise ValueError(f"'{key}' 需要布尔值（true/false），收到：{value!r}")
-    return value
+__all__ = [
+    "DEFAULT_MODELS",
+    "DEFAULT_PROVIDER",
+    "Settings",
+    "env_key_name",
+    "load_config",
+    "resolve_settings",
+]
 
 
 def env_key_name(provider: str) -> str:
@@ -63,52 +30,8 @@ def env_key_name(provider: str) -> str:
 
 
 @dataclass
-class CLIConfig:
-    """持久化的 CLI 配置（~/.milu/config.json）。"""
-
-    provider: str | None = None
-    model: str | None = None
-    mode: str = "auto"
-    session_enabled: bool = True
-    web_search: bool = True
-    enable_thinking: bool = False
-    api_keys: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def path(cls) -> Path:
-        """配置文件绝对路径。"""
-        return user_data_dir() / "config.json"
-
-    @classmethod
-    def load(cls) -> "CLIConfig":
-        """读取配置文件。不存在→默认实例；损坏→默认实例 + 告警。"""
-        p = cls.path()
-        if not p.exists():
-            return cls()
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            print(f"[警告] 配置文件读取失败，将使用默认值：{p} — {e}")
-            return cls()
-        # 只采用已知字段，忽略陌生键，避免 __init__ 报错
-        known = set(cls().__dataclass_fields__)
-        filtered = {k: v for k, v in data.items() if k in known}
-        return cls(**filtered)
-
-    def save(self) -> Path:
-        """写回配置文件（自动创建父目录），返回路径。"""
-        p = self.path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(
-            json.dumps(asdict(self), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return p
-
-
-@dataclass
 class Settings:
-    """一次运行最终生效的设置（CLI 参数 / 环境变量 / 配置文件 / 默认值合并后的结果）。"""
+    """一次运行最终生效的设置（文件配置 + CLI 参数 + 环境变量密钥 合并后的结果）。"""
 
     provider: str
     model: str
@@ -120,46 +43,45 @@ class Settings:
     use_mcp: bool = True
     use_subagents: bool = True
     session_id: str | None = None
+    # 运行限额 / 压缩分节（供 builder 构造 AgentConfig / CompactConfig）
+    agent: dict = field(default_factory=dict)
+    compact: dict = field(default_factory=dict)
 
 
-def resolve_settings(config: CLIConfig, args) -> Settings:
-    """合并 CLI 参数 / 环境变量 / 配置文件 / 内置默认，得到最终 Settings。
-
-    优先级（高 → 低）：
-      provider / model / mode：CLI 参数 > 配置文件 > 内置默认
-      api_key：CLI 参数 > 环境变量 {PROVIDER}_API_KEY > 配置文件 api_keys
-               （均无则为 None，交由 BaseLLM 在首次调用时从环境变量兜底/报错）
+def resolve_settings(config: MiluConfig, args) -> Settings:
+    """在合并后的文件配置上叠加 CLI 参数，得到最终 Settings。
 
     :raises ValueError: 厂商无内置默认模型且未显式指定 model 时。
     """
-    provider = getattr(args, "provider", None) or config.provider or DEFAULT_PROVIDER
+    llm = config.llm
+    agent = config.agent
+    default_models = config.default_models
 
-    # 模型解析：CLI 显式 model 始终优先；否则配置文件里的 model 只在「未切换厂商」
-    # （解析出的 provider == 配置 model 所属的厂商）时才沿用，避免给 deepseek 套上
+    provider = getattr(args, "provider", None) or llm.get("provider") or DEFAULT_PROVIDER
+
+    # 模型解析：CLI 显式 model 始终优先；否则配置里的 model 只在「未切换厂商」
+    # （解析出的 provider == 配置 llm.provider）时沿用，避免给 deepseek 套上
     # qwen 的模型名；都没有则回退到厂商的内置默认模型。
     cli_model = getattr(args, "model", None)
-    config_model_provider = config.provider or DEFAULT_PROVIDER
+    config_provider = llm.get("provider") or DEFAULT_PROVIDER
+    config_model = llm.get("model")
     if cli_model:
         model = cli_model
-    elif config.model and provider == config_model_provider:
-        model = config.model
+    elif config_model and provider == config_provider:
+        model = config_model
     else:
-        model = DEFAULT_MODELS.get(provider)
+        model = default_models.get(provider)
     if not model:
         raise ValueError(
             f"厂商 '{provider}' 没有内置默认模型，请用 --model 指定，"
-            f"或运行 `config set model <模型名>`。"
+            f"或在 config.json 的 default_models 中补充。"
         )
 
-    api_key = (
-        getattr(args, "api_key", None)
-        or os.environ.get(env_key_name(provider))
-        or config.api_keys.get(provider)
-    )
+    api_key = getattr(args, "api_key", None) or os.environ.get(env_key_name(provider))
 
-    mode = getattr(args, "mode", None) or config.mode or "auto"
+    mode = getattr(args, "mode", None) or agent.get("mode") or "auto"
 
-    session_enabled = config.session_enabled
+    session_enabled = bool(agent.get("session_enabled", True))
     if getattr(args, "no_session", False):
         session_enabled = False
 
@@ -169,9 +91,11 @@ def resolve_settings(config: CLIConfig, args) -> Settings:
         api_key=api_key,
         mode=mode,
         session_enabled=session_enabled,
-        web_search=config.web_search,
-        enable_thinking=config.enable_thinking,
+        web_search=bool(llm.get("web_search", True)),
+        enable_thinking=bool(llm.get("enable_thinking", False)),
         use_mcp=not getattr(args, "no_mcp", False),
         use_subagents=not getattr(args, "no_subagents", False),
         session_id=getattr(args, "session", None),
+        agent=dict(agent),
+        compact=dict(config.compact),
     )

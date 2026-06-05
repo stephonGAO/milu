@@ -28,14 +28,35 @@ def build_llm(s: Settings) -> BaseLLM:
 def build_agent(s: Settings) -> Agent:
     """按设置构建顶层 Agent（最简创建，其余全部交给 Agent 的「全配默认」）。
 
+    - 运行限额 / 压缩参数来自分层配置（settings.agent / settings.compact）
     - tools / skills / prompt 不传 → 自动注入全套内置工具、内置技能、内置 main 角色提示词
     - subagents：None → 内置三件套（researcher/reader/coder）；--no-subagents → [] 关闭
     - on_confirm：manual 模式人工审批 + auto 模式 AI 判定器转人工时的交互式确认
     """
+    from milu.agent.config import AgentConfig, CompactConfig
+    from milu.agent.history import ConversationHistory
+
+    llm = build_llm(s)
+    # s.agent 含 mode/session_enabled（非 AgentConfig 字段），故只取运行限额字段构造
+    agent_config = AgentConfig(
+        max_turns=s.agent.get("max_turns", 100),
+        timeout=s.agent.get("timeout", 300.0),
+        total_timeout=s.agent.get("total_timeout", 3600.0),
+        max_total_tokens=s.agent.get("max_total_tokens"),
+        tool_call_limit=s.agent.get("tool_call_limit", 100),
+    )
+    history = ConversationHistory(
+        strategy="auto_compact",
+        max_tokens=agent_config.max_total_tokens,
+        llm=llm,
+        compact_config=CompactConfig(**s.compact) if s.compact else None,
+    )
     return Agent(
-        llm=build_llm(s),
+        llm=llm,
         mode=s.mode,
         session_enabled=s.session_enabled,
+        config=agent_config,
+        history=history,
         subagents=None if s.use_subagents else [],
         on_confirm=confirm_unsafe,
     )

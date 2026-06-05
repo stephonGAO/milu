@@ -341,7 +341,18 @@ class AgentPool:
             async with pool.acquire(user_id, session_id) as h:
                 async for evt in h.agent.run(text):
                     ...
+
+        作为应用层便利构造，未显式传 config / agent_config 时从分层配置
+        （项目 config/milu.json ← 用户 ~/.milu/config.json）加载默认；裸 AgentPool(...)
+        构造则保持纯净，仅用 dataclass 默认值。
         """
+        if config is None or agent_config is None:
+            from milu.config import load_config
+            mc = load_config()
+            if config is None:
+                config = mc.to_pool_config()
+            if agent_config is None:
+                agent_config = mc.to_agent_config()
         return cls(
             llm_factory=lambda uid, sid: llm,
             agent_factory=agent_factory,

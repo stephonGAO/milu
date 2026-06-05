@@ -25,12 +25,10 @@ from milu.exceptions import MiluError
 from milu.llm.base.exceptions import AuthenticationError
 from milu.llm.providers import ModelRegistry
 
+from milu.config import load_config, set_user_value, write_project_template
 from milu.cli.config import (
     DEFAULT_MODELS,
     DEFAULT_PROVIDER,
-    SCALAR_FIELDS,
-    CLIConfig,
-    coerce_scalar,
     env_key_name,
     resolve_settings,
 )
@@ -77,16 +75,14 @@ def build_parser() -> argparse.ArgumentParser:
     # config
     p_cfg = sub.add_parser("config", help="查看/修改配置")
     cfg_sub = p_cfg.add_subparsers(dest="config_action")
-    cfg_sub.add_parser("show", help="打印当前配置")
-    cfg_sub.add_parser("path", help="打印配置文件路径")
-    g = cfg_sub.add_parser("get", help="读取某个配置项")
-    g.add_argument("key", choices=sorted(SCALAR_FIELDS))
-    st = cfg_sub.add_parser("set", help="设置某个配置项")
-    st.add_argument("key", choices=sorted(SCALAR_FIELDS))
+    cfg_sub.add_parser("show", help="打印合并后的生效配置及各文件路径")
+    cfg_sub.add_parser("path", help="打印项目级 / 用户级配置文件路径")
+    cfg_sub.add_parser("init", help="在项目 config/milu.json 生成全量默认配置模板")
+    g = cfg_sub.add_parser("get", help="读取配置项（点号路径，如 agent.max_turns）")
+    g.add_argument("key")
+    st = cfg_sub.add_parser("set", help="设置配置项到用户级配置（点号路径）")
+    st.add_argument("key")
     st.add_argument("value")
-    sk = cfg_sub.add_parser("set-key", help="保存某厂商的 API Key 到配置文件")
-    sk.add_argument("provider")
-    sk.add_argument("api_key")
 
     # sessions
     p_sess = sub.add_parser("sessions", help="查看历史会话")
@@ -136,7 +132,7 @@ def _cmd_chat(args) -> int:
     from milu.cli.builder import build_agent
     from milu.cli.repl import run_chat
 
-    config = CLIConfig.load()
+    config = load_config()
     settings = resolve_settings(config, args)
     agent = build_agent(settings)
     asyncio.run(run_chat(agent, settings))
@@ -144,7 +140,7 @@ def _cmd_chat(args) -> int:
 
 
 def _cmd_run(args) -> int:
-    config = CLIConfig.load()
+    config = load_config()
     settings = resolve_settings(config, args)
     prompt = args.prompt
     if not prompt:
@@ -160,39 +156,41 @@ def _cmd_run(args) -> int:
 
 
 def _cmd_config(args) -> int:
+    from milu.resources import project_config_path, user_config_path
+
     action = getattr(args, "config_action", None)
-    config = CLIConfig.load()
 
     if action == "path":
-        print(CLIConfig.path())
+        print(f"项目级: {project_config_path()}")
+        print(f"用户级: {user_config_path()}")
+        return 0
+    if action == "init":
+        p = write_project_template()
+        print(c("green", f"已生成项目配置模板 → {p}"))
         return 0
     if action == "get":
-        print(getattr(config, args.key))
+        try:
+            print(load_config().get(args.key))
+        except KeyError:
+            print(c("red", f"未知配置项：{args.key}"), file=sys.stderr)
+            return 2
         return 0
     if action == "set":
         try:
-            value = coerce_scalar(args.key, args.value)
+            p, value = set_user_value(args.key, args.value)
         except ValueError as e:
             print(c("red", f"错误：{e}"), file=sys.stderr)
             return 2
-        setattr(config, args.key, value)
-        p = config.save()
         print(c("green", f"已设置 {args.key} = {value!r}") + c("dim", f"  → {p}"))
         return 0
-    if action == "set-key":
-        config.api_keys[args.provider] = args.api_key
-        p = config.save()
-        print(c("green", f"已保存 {args.provider} 的 API Key") + c("dim", f"  → {p}"))
-        return 0
 
-    # 默认 / show
+    # 默认 / show：打印合并后的生效配置
     import json as _json
-    from dataclasses import asdict
-    data = asdict(config)
-    # 脱敏 api_keys
-    data["api_keys"] = {k: (v[:6] + "***") if v else v for k, v in data["api_keys"].items()}
-    print(f"配置文件: {CLIConfig.path()}")
-    print(_json.dumps(data, ensure_ascii=False, indent=2))
+    cfg = load_config()
+    print(f"项目级: {project_config_path()}")
+    print(f"用户级: {user_config_path()}")
+    print(c("dim", "（生效 = 内置默认 ← 项目级 ← 用户级；CLI 参数运行时再叠加）"))
+    print(_json.dumps(cfg.data, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -236,21 +234,20 @@ def _cmd_sessions(args) -> int:
 
 def _cmd_providers(_args) -> int:
     ensure_dotenv_loaded()
-    config = CLIConfig.load()
+    cfg = load_config()
+    default_models = cfg.default_models
+    default_provider = cfg.llm.get("provider") or DEFAULT_PROVIDER
     providers = ModelRegistry.list_providers()
     print(f"{DIVIDER}\n  支持的厂商 ({len(providers)} 个)\n{DIVIDER}")
     for name in providers:
         env_name = env_key_name(name)
         has_env = bool(os.environ.get(env_name))
-        has_cfg = bool(config.api_keys.get(name))
         if has_env:
             status = c("green", f"已配置 (env {env_name})")
-        elif has_cfg:
-            status = c("green", "已配置 (config)")
         else:
-            status = c("dim", f"未配置（设 {env_name} 或 config set-key {name} <key>）")
-        default_model = DEFAULT_MODELS.get(name, "—")
-        mark = c("bold", " *默认") if name == DEFAULT_PROVIDER else ""
+            status = c("dim", f"未配置（在 .env 设置 {env_name}）")
+        default_model = default_models.get(name, "—")
+        mark = c("bold", " *默认") if name == default_provider else ""
         print(f"  {c('cyan', name):<22} 默认模型 {c('dim', default_model):<32} {status}{mark}")
     return 0
 
@@ -293,10 +290,10 @@ def main(argv: list[str] | None = None) -> int:
         print(c("dim", "\n已中断。"))
         return 130
     except AuthenticationError as e:
-        provider = getattr(args, "provider", None) or CLIConfig.load().provider or DEFAULT_PROVIDER
+        provider = (getattr(args, "provider", None)
+                    or load_config().llm.get("provider") or DEFAULT_PROVIDER)
         print(c("red", f"\n鉴权失败：{e}"), file=sys.stderr)
-        print(c("dim", f"请设置环境变量 {env_key_name(provider)}，"
-                       f"或运行 `milu config set-key {provider} <你的key>`。"),
+        print(c("dim", f"请在 .env 或环境变量中设置 {env_key_name(provider)}。"),
               file=sys.stderr)
         return 1
     except ValueError as e:
