@@ -335,6 +335,9 @@ async def handle_command(agent, cmd: str) -> bool:
 
 async def run_chat(agent, settings: Settings) -> None:
     """运行交互式聊天 REPL。"""
+    from milu.tools.mcp.connection import suppress_mcp_asyncgen_errors
+    suppress_mcp_asyncgen_errors()
+
     print_header(agent, settings)
 
     # 连接 MCP（如启用且存在配置文件）

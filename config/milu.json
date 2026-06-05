@@ -3,8 +3,8 @@
     "mode": "auto",
     "session_enabled": true,
     "llm": {
-      "provider": "minimax",
-      "model": "MiniMax-M3",
+      "provider": "qwen",
+      "model": "qwen3.6-plus",
       "web_search": true,
       "enable_thinking": false
     },

@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import AsyncExitStack
 
@@ -12,6 +13,41 @@ from milu.tools.mcp.config import MCPServerConfig
 from milu.tools.mcp.converter import convert_mcp_tool
 
 logger = logging.getLogger(__name__)
+
+
+def suppress_mcp_asyncgen_errors() -> None:
+    """屏蔽 MCP stdio_client 异步生成器在事件循环关闭阶段产生的噪声错误。
+
+    asyncio.run() 结束时调用 shutdown_asyncgens() 关闭残留的异步生成器。
+    MCP 的 stdio_client 内部使用 anyio TaskGroup，在此阶段关闭时 cancel scope
+    跨任务退出会抛出 RuntimeError，asyncio 默认将其打印到 stderr。
+    本函数在当前运行的事件循环上安装过滤器，对来自 mcp 包的 asyncgen 错误静默处理。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    original = loop.get_exception_handler()
+
+    def _handler(loop, context):
+        if "asyncgen" in context:
+            agen = context.get("asyncgen")
+            if agen is not None:
+                try:
+                    code = getattr(agen, "ag_code", None)
+                    filename = getattr(code, "co_filename", "") or ""
+                    name = getattr(code, "co_name", "") or ""
+                    if "mcp" in filename.lower() or name == "stdio_client":
+                        return
+                except Exception:
+                    pass
+        if original:
+            original(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
 
 
 class MCPServerConnection:

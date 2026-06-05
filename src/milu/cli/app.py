@@ -122,7 +122,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def _run_once(settings, prompt: str, quiet: bool) -> int:
     from milu.cli.builder import build_agent
+    from milu.tools.mcp.connection import suppress_mcp_asyncgen_errors
 
+    suppress_mcp_asyncgen_errors()
     agent = build_agent(settings)
     if settings.use_mcp:
         await agent.connect_mcp()
