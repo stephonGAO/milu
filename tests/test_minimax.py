@@ -22,9 +22,9 @@ class TestMiniMaxCapabilities:
         assert caps.supports_streaming is True
         assert caps.supports_function_calling is True
         assert caps.supports_json_mode is True
-        # MiniMax 不支持联网搜索和思考模式
+        # MiniMax 不支持联网搜索，但支持思考模式
         assert caps.supports_web_search is False
-        assert caps.supports_thinking is False
+        assert caps.supports_thinking is True
         assert caps.supports_embedding is True
 
         # 多模态理解能力
@@ -95,11 +95,10 @@ class TestMiniMaxAvailableParams:
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
 
-        # MiniMax 不支持联网搜索和思考模式参数
+        # MiniMax 不支持联网搜索参数，但支持思考模式参数
         assert "web_search" not in params
         assert "web_search_strategy" not in params
-        assert "enable_thinking" not in params
-        assert "thinking_level" not in params
+        assert "enable_thinking" in params
 
 
 class TestMiniMaxChat:

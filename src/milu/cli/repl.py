@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +19,88 @@ from milu.tools.builtin import BUILTIN_TOOLS
 # 内置子代理名（Agent 全配默认注入的三件套，用于 /tools 展示分类）
 _SUBAGENT_NAMES = {"researcher", "reader", "coder"}
 _META_NAMES = {"list_catalog", "search_tools", "activate_tools", "load_skill"}
+
+
+# ── ESC 键中断 ────────────────────────────────────────────
+
+def _start_esc_watcher(
+    loop: asyncio.AbstractEventLoop,
+    task: "asyncio.Task[str]",
+    stop_event: threading.Event,
+) -> threading.Thread:
+    """后台线程：监听 ESC 键，检测到后取消指定 asyncio Task。
+
+    Windows 用 msvcrt（无需修改终端模式）。
+    Unix 用 termios 关闭 ICANON/ECHO（保留 OPOST，print 输出不受影响）。
+    """
+
+    def _watch_win32() -> None:
+        import msvcrt
+        import time
+        while not stop_event.is_set():
+            if msvcrt.kbhit():
+                ch = msvcrt.getch()
+                if ch == b"\x1b":
+                    loop.call_soon_threadsafe(task.cancel)
+                    return
+            time.sleep(0.05)
+
+    def _watch_unix() -> None:
+        import select
+        try:
+            import termios
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            new = list(old)
+            # 只关 ICANON/ECHO，不动 OPOST（保证 print 换行正常）
+            new[3] = new[3] & ~(termios.ICANON | termios.ECHO)
+            new[6][termios.VMIN] = 1   # type: ignore[index]
+            new[6][termios.VTIME] = 0  # type: ignore[index]
+            termios.tcsetattr(fd, termios.TCSAFLUSH, new)
+            try:
+                while not stop_event.is_set():
+                    r, _, _ = select.select([sys.stdin], [], [], 0.05)
+                    if r:
+                        ch = sys.stdin.buffer.read(1)
+                        if ch == b"\x1b":
+                            loop.call_soon_threadsafe(task.cancel)
+                            return
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except Exception:
+            # 非 tty 场景（如 stdin 重定向）静默退出
+            import time
+            while not stop_event.is_set():
+                time.sleep(0.1)
+
+    target = _watch_win32 if sys.platform == "win32" else _watch_unix
+    t = threading.Thread(target=target, daemon=True)
+    t.start()
+    return t
+
+
+async def _render_with_esc(agent, user_input: str) -> str:
+    """运行 render_turn，同时监听 ESC 键中断。
+
+    检测到 ESC 时立即取消当前轮次，并回滚历史到本轮开始前的状态，
+    使用户可以继续输入新消息。
+    """
+    loop = asyncio.get_running_loop()
+    # 快照历史：中断后回滚，避免半截的 assistant/tool 消息破坏下一次 LLM 调用
+    snapshot = list(agent.history._messages)
+
+    task: asyncio.Task[str] = asyncio.create_task(render_turn(agent, user_input))
+    stop_event = threading.Event()
+    _start_esc_watcher(loop, task, stop_event)
+
+    try:
+        return await task
+    except asyncio.CancelledError:
+        agent.history.replace_all(snapshot)
+        print(c("yellow", "\n  [已中断]"), flush=True)
+        return ""
+    finally:
+        stop_event.set()
 
 
 def _read_plan_items(agent) -> list[dict]:
@@ -393,10 +478,10 @@ async def run_chat(agent, settings: Settings) -> None:
                 continue
 
             turn_count += 1
-            print(c("blue", f"\n  [Turn {turn_count}]"))
+            print(c("blue", f"\n  [Turn {turn_count}]") + c("dim", "  ESC 中断"))
             print(DIVIDER)
             try:
-                await render_turn(agent, user_input)
+                await _render_with_esc(agent, user_input)
             except Exception as e:  # noqa: BLE001 — REPL 兜底，单轮异常不退出
                 print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
     finally:
