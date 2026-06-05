@@ -80,6 +80,7 @@ class BaseLLM(ABC):
         self.model = model
         self._extra_kwargs = kwargs
         self._client: AsyncOpenAI | None = None
+        self._warned_params: set[str] = set()
 
     @property
     @abstractmethod
@@ -197,7 +198,9 @@ class BaseLLM(ABC):
             if key in available:
                 validated[key] = value
             else:
-                logger.warning(f"[{self.provider_name}] 参数 '{key}' 不被支持，已忽略")
+                if key not in self._warned_params:
+                    logger.warning(f"[{self.provider_name}] 参数 '{key}' 不被支持，已忽略")
+                    self._warned_params.add(key)
         return validated
 
     def _messages_to_dicts(self, messages: list[Message]) -> list[dict]:
