@@ -2,8 +2,8 @@
 MiniMaxLLM - MiniMax（MiniMax AI）模型实现。
 
 支持能力：流式输出、函数调用、JSON模式、文本嵌入、
-图片理解、音频理解、图片生成、音频生成
-不支持：联网搜索、思考模式
+图片理解、音频理解、图片生成、音频生成、思考模式（MiniMax-M3）
+不支持：联网搜索
 
 API文档: https://platform.minimaxi.com/
 """
@@ -29,7 +29,7 @@ class MiniMaxLLM(BaseLLM):
         supports_function_calling=True,
         supports_json_mode=True,
         supports_web_search=False,
-        supports_thinking=False,
+        supports_thinking=True,
         supports_embedding=True,
         supports_vision=True,
         supports_audio_understand=True,
@@ -45,6 +45,8 @@ class MiniMaxLLM(BaseLLM):
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
         "tools", "tool_choice",
+        # 思考模式（MiniMax-M3）
+        "enable_thinking",
         # 图片生成参数
         "image_size", "image_quality", "num_images",
         # 音频生成参数
@@ -70,8 +72,10 @@ class MiniMaxLLM(BaseLLM):
         """
         流式聊天接口。
 
-        MiniMax 遵循标准 OpenAI 格式，无特殊参数映射。
-        不支持 web_search 和 thinking 相关参数。
+        MiniMax 遵循标准 OpenAI 格式，特殊参数映射：
+            enable_thinking (bool) → extra_body.thinking
+                True  → {"type": "adaptive"} + reasoning_split=True（思考内容走 reasoning_content）
+                False → {"type": "disabled"}
         """
         client = self._get_client()
 
@@ -82,24 +86,29 @@ class MiniMaxLLM(BaseLLM):
             "stream_options": {"include_usage": True},
         }
 
-        #=================参数解释====================#
-        # 注释：
-        # 所有从父类获得的参数加上运行时用户实际传过来的参数kwargs大集合。
         validated = self._validate_params(kwargs)
-        # 注释：
-        # 保留基础参数，过滤多余公共参数
-        # 从父类已经继承了非常多的公共的参数包括默认值，但是未必是本模型能用的，所以要在这里过滤掉不能用的
+
         for key in ("temperature", "top_p", "max_tokens", "stop",
                      "frequency_penalty", "presence_penalty"):
             if key in validated:
                 request_params[key] = validated[key]
-        #============================================#
 
         # 函数调用
         if "tools" in validated:
             request_params["tools"] = validated["tools"]
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
+
+        # 思考模式：enable_thinking → extra_body.thinking
+        extra_body: dict = {}
+        if "enable_thinking" in validated:
+            if validated["enable_thinking"]:
+                extra_body["thinking"] = {"type": "adaptive"}
+                extra_body["reasoning_split"] = True
+            else:
+                extra_body["thinking"] = {"type": "disabled"}
+        if extra_body:
+            request_params["extra_body"] = extra_body
 
         try:
             response = await client.chat.completions.create(**request_params)
