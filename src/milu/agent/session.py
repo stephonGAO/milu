@@ -4,6 +4,11 @@
   - conversation.jsonl: 每行一条消息的完整日志（append-only）
   - session.json: 会话元数据（创建时间、消息数、模型等）
 
+日志分段（reset 支持）：reset() 会在同一会话目录下切换到新的空日志段——
+首段为 conversation.jsonl，之后依次为 conversation.2.jsonl、conversation.3.jsonl…
+旧段只新建不重命名/删除（天然归档）；活动段 = 目录中段号最大的文件（磁盘即真相），
+load_messages() / 计数器恢复都只针对活动段，因此 reset 后加载不再包含旧历史。
+
 SYSTEM 消息不记录（每轮由 _build_system_prompt() 重建）。
 ASSISTANT 消息触发 round 计数器自增。
 """
@@ -12,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from pathlib import Path
@@ -20,6 +26,21 @@ from typing import Any
 from milu.llm.base.message import Message, MessageRole
 
 logger = logging.getLogger(__name__)
+
+
+# ── 日志分段命名 ─────────────────────────────────────────────
+#
+# 首段 conversation.jsonl（段号 1，向后兼容旧会话），reset 后依次
+# conversation.2.jsonl、conversation.3.jsonl…
+_SEG_RE = re.compile(r"^conversation(?:\.(\d+))?\.jsonl$")
+
+
+def _segment_index(filename: str) -> int | None:
+    """解析日志段文件名的段号：conversation.jsonl→1，conversation.N.jsonl→N，其它→None。"""
+    m = _SEG_RE.match(filename)
+    if not m:
+        return None
+    return int(m.group(1)) if m.group(1) else 1
 
 
 # ── 跨进程文件锁（写入健壮性）────────────────────────────────
@@ -65,18 +86,39 @@ class Session:
         self._dir = self._base_dir / session_id
         self._dir.mkdir(parents=True, exist_ok=True)
 
+        # 活动日志段：取目录中段号最大的文件（reset 后定位到新段）
+        self._active_segment = self._scan_max_segment(self._dir)
+
         self._line_counter = 0
         self._round_counter = 0
         self._message_count = 0
         self._created_at = time.time()
 
-        # 如果 conversation.jsonl 已存在（加载已有会话），计算当前行数和 round
+        # 如果活动段 JSONL 已存在（加载已有会话），计算当前行数和 round
         conv_path = self.conversation_path
         if conv_path.exists():
             self._scan_existing()
 
+    @staticmethod
+    def _segment_filename(idx: int) -> str:
+        """段号 → 文件名：1 → conversation.jsonl，N → conversation.N.jsonl。"""
+        return "conversation.jsonl" if idx <= 1 else f"conversation.{idx}.jsonl"
+
+    @staticmethod
+    def _scan_max_segment(dir_path: Path) -> int:
+        """扫描目录中最大的日志段号；无任何段时返回 1（首段约定名）。"""
+        max_idx = 0
+        try:
+            for entry in dir_path.iterdir():
+                idx = _segment_index(entry.name)
+                if idx is not None and idx > max_idx:
+                    max_idx = idx
+        except OSError as e:
+            logger.warning("扫描日志段失败: %s", e)
+        return max_idx or 1
+
     def _scan_existing(self) -> None:
-        """扫描已有的 JSONL 文件，恢复计数器。"""
+        """扫描已有的 JSONL 文件（活动段），恢复计数器。"""
         try:
             with open(self.conversation_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -198,6 +240,39 @@ class Session:
         line_no = self._line_counter
         self._line_counter += 1
         return line_no
+
+    # ── 重置（切换日志分段）──────────────────────────────────
+
+    def reset(self) -> int:
+        """切换到新的空日志段（同一会话目录，旧段保留），计数器归零。
+
+        - 用独占创建（"x"）探测可用段号：并发/多 worker 同时 reset 时各拿到
+          不同的新段，不会互相覆盖；
+        - 新空段立即落盘：进程重启 / AgentPool 重建 / load_session 时按
+          「最大段号」即可定位到新段，而不会回退到旧段加载旧历史。
+
+        :return: 新段号；创建失败时保持旧段并返回当前段号（降级，不丢数据）。
+        """
+        next_idx = max(self._active_segment, self._scan_max_segment(self._dir)) + 1
+        while True:
+            candidate = self._dir / self._segment_filename(next_idx)
+            try:
+                with open(candidate, "x", encoding="utf-8"):
+                    pass
+                break
+            except FileExistsError:
+                next_idx += 1
+            except OSError as e:
+                logger.warning("创建新日志段失败: %s", e)
+                return self._active_segment
+
+        self._active_segment = next_idx
+        self._line_counter = 0
+        self._round_counter = 0
+        self._message_count = 0
+        self.save_metadata()
+        logger.info("会话 %s 已切换到新日志段: %s", self._session_id, candidate.name)
+        return next_idx
 
     # ── 读取 ──────────────────────────────────────────────────
 
@@ -329,6 +404,7 @@ class Session:
             "updated_at": time.time(),
             "message_count": self._message_count,
             "round_count": self._round_counter,
+            "active_log": self._segment_filename(self._active_segment),
         }
         metadata.update(extra)
 
@@ -379,8 +455,9 @@ class Session:
                 except (OSError, json.JSONDecodeError):
                     pass
 
-            # 没有 session.json，从目录名和 JSONL 推断
-            conv_path = entry / "conversation.jsonl"
+            # 没有 session.json，从目录名和活动段 JSONL 推断
+            # （与 metadata 路径语义一致：消息数 = 当前活动段行数，即 load 可恢复的量）
+            conv_path = entry / cls._segment_filename(cls._scan_max_segment(entry))
             msg_count = 0
             if conv_path.exists():
                 try:
@@ -436,8 +513,8 @@ class Session:
 
     @property
     def conversation_path(self) -> Path:
-        """conversation.jsonl 文件路径"""
-        return self._dir / "conversation.jsonl"
+        """当前活动日志段的文件路径（首段 conversation.jsonl，reset 后为 conversation.N.jsonl）"""
+        return self._dir / self._segment_filename(self._active_segment)
 
     @property
     def metadata_path(self) -> Path:

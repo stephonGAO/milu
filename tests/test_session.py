@@ -325,3 +325,151 @@ class TestSessionProperties:
         r = repr(session)
         assert "repr_test" in r
         assert "messages=1" in r
+
+
+# ── 日志分段（reset）──────────────────────────────────────
+
+class TestSessionSegments:
+    """Session.reset() 日志分段：reset 切换新 JSONL 段，旧段保留、load 只读新段"""
+
+    def test_segment_index_parsing(self):
+        """段名解析：conversation.jsonl→1，conversation.N.jsonl→N，其它→None"""
+        from milu.agent.session import _segment_index
+
+        assert _segment_index("conversation.jsonl") == 1
+        assert _segment_index("conversation.2.jsonl") == 2
+        assert _segment_index("conversation.10.jsonl") == 10
+        assert _segment_index("foo.jsonl") is None
+        assert _segment_index("conversation.x.jsonl") is None
+        assert _segment_index("session.json") is None
+
+    def test_reset_creates_new_segment(self, tmp_dir):
+        """reset 后活动段切到 conversation.2.jsonl，旧段文件保留且内容完整"""
+        session = Session("seg_create", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "old message"))
+
+        new_idx = session.reset()
+
+        assert new_idx == 2
+        assert session.conversation_path.name == "conversation.2.jsonl"
+        assert session.conversation_path.exists()  # 新空段已落盘
+        # 旧段保留且内容完整
+        old_path = session.dir_path / "conversation.jsonl"
+        assert old_path.exists()
+        assert "old message" in old_path.read_text(encoding="utf-8")
+        # 目录与 id 不变
+        assert session.session_id == "seg_create"
+        assert session.dir_path == tmp_dir / "seg_create"
+
+    def test_reset_isolates_messages(self, tmp_dir):
+        """reset 前的消息不出现在 load_messages 中，新消息写入新段"""
+        session = Session("seg_isolate", tmp_dir)
+        for i in range(3):
+            session.log_message(_make_msg(MessageRole.USER, f"before-{i}"))
+
+        session.reset()
+        session.log_message(_make_msg(MessageRole.USER, "after-0"))
+        session.log_message(_make_msg(MessageRole.ASSISTANT, "after-1"))
+
+        loaded = session.load_messages()
+        assert len(loaded) == 2
+        assert [m.content for m in loaded] == ["after-0", "after-1"]
+        # 新消息确实写进了新段文件
+        text = (session.dir_path / "conversation.2.jsonl").read_text(encoding="utf-8")
+        assert "after-0" in text and "before-0" not in text
+
+    def test_reset_counters_zeroed(self, tmp_dir):
+        """reset 后计数器归零，新段从 0 递增"""
+        session = Session("seg_counters", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "q"))
+        session.log_message(_make_msg(MessageRole.ASSISTANT, "a"))
+        assert session.message_count == 2
+        assert session.round_count == 1
+
+        session.reset()
+        assert session.message_count == 0
+        assert session.round_count == 0
+
+        line_no = session.log_message(_make_msg(MessageRole.USER, "new q"))
+        assert line_no == 0  # 行号从 0 开始
+        assert session.message_count == 1
+
+    def test_reset_multiple_segments(self, tmp_dir):
+        """连续 reset 段号单调递增"""
+        session = Session("seg_multi", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "m"))
+
+        assert session.reset() == 2
+        assert session.reset() == 3
+        assert session.conversation_path.name == "conversation.3.jsonl"
+
+    def test_reset_then_reconstruct(self, tmp_dir):
+        """reset 后重建 Session（模拟进程重启/AgentPool 重建/load_session）定位到新段，
+        load_messages 不含旧历史 —— 复现原 bug 路径并验证已修复"""
+        s1 = Session("seg_restart", tmp_dir)
+        s1.log_message(_make_msg(MessageRole.USER, "old history"))
+        s1.reset()
+        s1.log_message(_make_msg(MessageRole.USER, "new history"))
+        s1.save_metadata()
+
+        # 直接构造重建（AgentPool 按 (user, session) 重建路径）
+        s2 = Session("seg_restart", tmp_dir)
+        assert s2.conversation_path.name == "conversation.2.jsonl"
+        loaded = s2.load_messages()
+        assert [m.content for m in loaded] == ["new history"]
+        assert s2.message_count == 1  # 计数器只扫描活动段
+
+        # load_session 类方法路径
+        s3 = Session.load_session("seg_restart", tmp_dir)
+        assert [m.content for m in s3.load_messages()] == ["new history"]
+
+    def test_reset_concurrent_unique_segments(self, tmp_dir):
+        """两个 Session 实例对同一目录各自 reset，应拿到不同的新段（独占创建不互相覆盖）"""
+        s1 = Session("seg_concurrent", tmp_dir)
+        s1.log_message(_make_msg(MessageRole.USER, "m"))
+        s2 = Session("seg_concurrent", tmp_dir)
+
+        idx1 = s1.reset()
+        idx2 = s2.reset()
+
+        assert idx1 != idx2
+        assert s1.conversation_path != s2.conversation_path
+        # 各自写入互不影响
+        s1.log_message(_make_msg(MessageRole.USER, "from s1"))
+        s2.log_message(_make_msg(MessageRole.USER, "from s2"))
+        assert [m.content for m in s1.load_messages()] == ["from s1"]
+        assert [m.content for m in s2.load_messages()] == ["from s2"]
+
+    def test_reset_empty_segment_loads_empty(self, tmp_dir):
+        """reset 后未写任何消息，load_messages 返回空列表（空段文件安全）"""
+        session = Session("seg_empty", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "m"))
+        session.reset()
+
+        assert session.load_messages() == []
+
+    def test_reset_writes_active_log_metadata(self, tmp_dir):
+        """reset 落盘 session.json，active_log 指向新段"""
+        session = Session("seg_meta", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "m"))
+        session.reset()
+
+        with open(session.metadata_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        assert meta["active_log"] == "conversation.2.jsonl"
+        assert meta["message_count"] == 0
+
+    def test_list_sessions_infer_active_segment(self, tmp_dir):
+        """无 session.json 时，list_sessions 按活动段（最大段号）推断消息数"""
+        session = Session("seg_list", tmp_dir)
+        session.log_message(_make_msg(MessageRole.USER, "old-1"))
+        session.log_message(_make_msg(MessageRole.USER, "old-2"))
+        session.reset()
+        session.log_message(_make_msg(MessageRole.USER, "new-1"))
+        # 删除 reset 落盘的元数据，走推断分支
+        session.metadata_path.unlink()
+
+        sessions = Session.list_sessions(tmp_dir)
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == "seg_list"
+        assert sessions[0]["message_count"] == 1  # 只数活动段

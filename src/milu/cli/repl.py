@@ -59,7 +59,10 @@ async def handle_command(agent, cmd: str) -> bool:
 
     elif cmd == "/reset":
         await agent.reset()
-        print(c("yellow", "\n  对话已重置，上下文和计划已清空。\n"))
+        msg = "\n  对话已重置，上下文和计划已清空。"
+        if agent.session:
+            msg += f"\n  新日志段: {agent.session.conversation_path.name}"
+        print(c("yellow", msg + "\n"))
 
     elif cmd == "/history":
         messages = agent.history.all_messages

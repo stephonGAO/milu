@@ -174,6 +174,59 @@ class TestAgentSessionLifecycle:
         count = agent.load_session("nonexistent_id")
         assert count == 0
 
+    @pytest.mark.asyncio
+    async def test_reset_switches_log_segment(self, tmp_dir):
+        """reset() 切换到新日志段：session id/目录不变，旧段保留，历史清空"""
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
+        llm = _make_llm("回复")
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_", **_sess)
+
+        async for _ in agent.run("问题1"):
+            pass
+
+        old_id = agent.session.session_id
+        old_dir = agent.session.dir_path
+        old_path = agent.session.conversation_path
+        assert old_path.name == "conversation.jsonl"
+
+        await agent.reset()
+
+        # 切到新段，id 与目录不变，旧段仍在磁盘
+        assert agent.session.session_id == old_id
+        assert agent.session.dir_path == old_dir
+        assert agent.session.conversation_path.name == "conversation.2.jsonl"
+        assert old_path.exists()
+        # 内存历史清空（保留 system）
+        non_system = [m for m in agent.history.all_messages if m.role != MessageRole.SYSTEM]
+        assert len(non_system) == 0
+
+    @pytest.mark.asyncio
+    async def test_reset_then_load_only_new_segment(self, tmp_dir):
+        """reset 后继续对话，load_session 只恢复 reset 后的消息（原 bug 修复验证）"""
+        config = AgentConfig()
+        _sess = dict(session_dir=str(tmp_dir))
+        llm = _make_llm("回复")
+        agent = Agent(llm=llm, system_prompt="test", config=config,
+                      skills_dir="/tmp/_nonexistent_", **_sess)
+
+        async for _ in agent.run("问题1"):
+            pass
+
+        await agent.reset()
+
+        async for _ in agent.run("问题2"):
+            pass
+
+        session_id = agent.session.session_id
+        # 重新加载同一会话：只应有 reset 后的 2 条（user + assistant）
+        count = agent.load_session(session_id)
+        assert count == 2
+        contents = [m.content for m in agent.history.all_messages
+                    if m.role != MessageRole.SYSTEM]
+        assert contents == ["问题2", "回复"]
+
 
 # ── History + Session 集成 ────────────────────────────────
 

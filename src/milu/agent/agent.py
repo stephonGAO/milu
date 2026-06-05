@@ -418,8 +418,14 @@ class Agent:
         self._confirm_wait_guard = guard
 
     async def reset(self) -> None:
-        """清空对话历史（保留 system 消息）。"""
+        """清空对话历史（保留 system 消息），并切换到新的会话日志段。
+
+        session 目录与 session_id 不变，旧日志段保留（归档）；新消息写入
+        conversation.N.jsonl 新段，load_session 也只会恢复新段内容。
+        """
         self._history.clear()
+        if self._session is not None:
+            self._session.reset()
         self._work_started = False
         self._plan_created = False
         # v2: TodoManager 已删除，plan 状态由 session/plan.json 承载
