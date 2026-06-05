@@ -6,6 +6,7 @@ from milu.resources import (
     builtin_skills_dir,
     templates_dir,
     user_data_dir,
+    project_dir,
     default_session_dir,
     default_mcp_config_path,
 )
@@ -77,8 +78,9 @@ __all__ = [
     "templates_dir",
     "builtin_prompts_dir",
     "builtin_skills_dir",
-    # 用户级数据/配置目录（与 CWD 解耦）
+    # 目录策略：写数据→user_data_dir()，读配置→project_dir()
     "user_data_dir",
+    "project_dir",
     "default_session_dir",
     "default_mcp_config_path",
     # Root Exception

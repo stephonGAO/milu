@@ -74,8 +74,9 @@ class TestCompactorInit:
         llm = _make_llm()
         config = AgentConfig()
         history = ConversationHistory(llm=llm)
+        # session_dir 不传 → 默认 default_session_dir()（conftest 已把 MILU_HOME 重定向到 tmp）
         agent = Agent(llm=llm, system_prompt="test", config=config,
-                      session_dir=".sessions_test", history=history, skills_dir="/tmp/_nonexistent_")
+                      history=history, skills_dir="/tmp/_nonexistent_")
         if agent._history._compactor:
             assert agent._history._compactor._session is agent.session
 

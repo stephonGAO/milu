@@ -29,17 +29,24 @@ def templates_dir() -> Path:
     return _TEMPLATES_DIR
 
 
-# ── 用户级数据/配置目录（与 CWD 解耦）────────────────────────────
+# ── 目录策略：写数据锚定用户级目录，读配置锚定项目目录（均与裸 CWD 解耦）────────
 #
 # 「内置模板」（prompts/skills）是只读的包内资源，随 wheel 分发，用上面的
 # templates_dir() / builtin_*_dir() 定位。
-# 「用户级可写数据」（会话日志、MCP 配置等）则不应写进 CWD——作为库被集成或部署到
-# 服务器时 CWD 取决于宿主应用，写入位置会漂移。统一锚定到 user_data_dir() 下，
-# 默认 ~/.milu，可用环境变量 MILU_HOME 覆盖。
+#
+# 「写数据」（会话日志、记忆、CLI 配置等可写状态）不应写进 CWD——作为库被集成或
+# 部署到服务器时 CWD 取决于宿主应用，写入位置会漂移。统一锚定到 user_data_dir()
+# （默认 ~/.milu，可用环境变量 MILU_HOME 覆盖）。
+#
+# 「读配置」（mcp_servers.json、.env 等由项目/用户提供的配置）锚定到 project_dir()
+# （默认 CWD，可用环境变量 MILU_PROJECT_DIR 覆盖），便于每个项目带自己的配置；
+# 项目级找不到时再回退到 user_data_dir() 下的用户级同名文件。
 
 
 def user_data_dir() -> Path:
-    """用户级数据/配置根目录（与 CWD 解耦）。
+    """用户级数据根目录 ——「写数据」的锚点（与 CWD 解耦）。
+
+    会话日志、记忆、CLI 配置等可写状态统一落在这里。
 
     解析优先级：
       1. 环境变量 MILU_HOME（如显式指定服务器数据盘）
@@ -51,6 +58,24 @@ def user_data_dir() -> Path:
     if env:
         return Path(env).expanduser()
     return Path.home() / ".milu"
+
+
+def project_dir() -> Path:
+    """项目目录 ——「读配置」的锚点（与 user_data_dir() 写数据锚点相对）。
+
+    mcp_servers.json、.env 等由项目/用户提供的配置从这里加载。集成或部署时由
+    宿主应用通过 CWD 或环境变量决定，从而与「写数据」目录区分开、不互相污染。
+
+    解析优先级：
+      1. 环境变量 MILU_PROJECT_DIR（显式指定项目根，如多项目部署）
+      2. 当前工作目录 CWD
+
+    :return: 项目根目录（不保证存在；读取方自行判断 exists()）。
+    """
+    env = os.environ.get("MILU_PROJECT_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path.cwd()
 
 
 def default_session_dir() -> Path:

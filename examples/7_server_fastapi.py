@@ -60,7 +60,8 @@ async def lifespan(app):
         ),
         # AgentConfig 现仅含运行限额；mode/session 等能力参数通过 agent_kwargs 透传
         agent_config=AgentConfig(max_turns=50, timeout=120),
-        agent_kwargs={"mode": "auto", "session_enabled": True, "session_dir": "./.sessions"},
+        # session_dir 不传 → 用 Agent 默认 default_session_dir()（~/.milu/sessions，与 CWD 解耦）
+        agent_kwargs={"mode": "auto", "session_enabled": True},
     )
     await pool.start()
     app.state.pool = pool

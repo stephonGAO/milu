@@ -99,8 +99,8 @@ def make_agent_factory(llm, shared_mcp_manager=None):
             llm=llm_for_user,
             tools=[*BUILTIN_TOOLS, so_tool],
             # mode/session 等能力参数现为 Agent 直接参数（原属 AgentConfig）
+            # session_dir 不传 → 默认 default_session_dir()（~/.milu/sessions，与 CWD 解耦）
             session_enabled=True,
-            session_dir="./.sessions",
             on_confirm=lambda tool, args: confirm_unsafe(user_id, tool, args),
             # 复用整池共享的一组 MCP 子进程（省内存）；None 时各 Agent 自建
             mcp_manager=shared_mcp_manager,
@@ -428,7 +428,8 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
 
         elif cmd == "/sessions":
             from milu.agent.session import Session as SessionClass
-            base_dir = Path(agent.session.base_dir) if agent.session else Path(".sessions")
+            from milu.resources import default_session_dir
+            base_dir = Path(agent.session.base_dir) if agent.session else default_session_dir()
             sessions = SessionClass.list_sessions(base_dir)
             if not sessions:
                 yield {"event": "CommandResult", "data": json.dumps(

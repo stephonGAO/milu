@@ -13,11 +13,12 @@ from typing import Literal
 logger = logging.getLogger(__name__)
 
 # 配置文件搜索顺序（仅在未显式传入路径时生效），见 _find_config_file()：
-#   1. ./config/mcp_servers.json —— 项目级（相对 CWD，向后兼容仓库示例）
-#   2. user_data_dir()/mcp_servers.json —— 用户级（默认 ~/.milu，
-#      可被环境变量 MILU_HOME 覆盖；与 CWD 解耦，适合部署）
-# ⚠️ 作为库集成时 CWD 取决于宿主应用，建议显式传入 mcp_config_path
-#    或用环境变量 MCP_CONFIG_PATH 指定绝对路径。
+#   1. project_dir()/config/mcp_servers.json —— 项目级「读配置」锚点
+#      （默认 CWD，可被环境变量 MILU_PROJECT_DIR 覆盖）
+#   2. user_data_dir()/mcp_servers.json —— 用户级兜底（默认 ~/.milu，
+#      可被环境变量 MILU_HOME 覆盖）
+# ⚠️ 作为库集成时 CWD 取决于宿主应用，建议显式传入 mcp_config_path、
+#    设置 MILU_PROJECT_DIR，或用环境变量 MCP_CONFIG_PATH 指定绝对路径。
 
 
 @dataclass
@@ -165,16 +166,16 @@ class MCPServerConfig:
 
     @classmethod
     def _find_config_file(cls) -> Path | None:
-        """按优先级搜索配置文件：项目级 CWD → 用户级（user_data_dir，可被环境变量覆盖）。
+        """按优先级搜索配置文件：项目级（project_dir）→ 用户级（user_data_dir）。
 
-        用户级路径在调用时解析（而非 import 时），以尊重运行期设置的
-        MILU_HOME。
+        两个路径都在调用时解析（而非 import 时），以尊重运行期设置的
+        MILU_PROJECT_DIR / MILU_HOME。
         """
-        from milu.resources import default_mcp_config_path
+        from milu.resources import default_mcp_config_path, project_dir
 
         search_paths = [
-            Path("./config/mcp_servers.json"),   # 项目级（相对 CWD）
-            default_mcp_config_path(),           # 用户级（~/.milu，env 可覆盖）
+            project_dir() / "config" / "mcp_servers.json",  # 项目级（MILU_PROJECT_DIR 可覆盖，默认 CWD）
+            default_mcp_config_path(),                       # 用户级（~/.milu，MILU_HOME 可覆盖）
         ]
         for p in search_paths:
             if p.exists():

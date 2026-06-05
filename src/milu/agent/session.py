@@ -1,6 +1,8 @@
 """会话持久化 — JSONL 对话日志 + 元数据管理
 
-每个会话存储在 `.sessions/{session_id}/` 目录下：
+会话默认落在用户级数据目录 `user_data_dir()/sessions/`（即 `~/.milu/sessions`，
+`MILU_HOME` 可覆盖），与 CWD 解耦；base_dir 由调用方显式传入。每个会话存储在
+`{base_dir}/{session_id}/` 目录下：
   - conversation.jsonl: 每行一条消息的完整日志（append-only）
   - session.json: 会话元数据（创建时间、消息数、模型等）
 
@@ -67,8 +69,9 @@ except ImportError:  # 非 POSIX（如 Windows）：降级为 no-op
 class Session:
     """会话管理器 — 对话日志持久化和元数据跟踪。
 
-    用法：
-        session = Session(Session.generate_id(), Path(".sessions"), model="qwen-max")
+    用法（base_dir 通常取 default_session_dir() = ~/.milu/sessions）：
+        from milu.resources import default_session_dir
+        session = Session(Session.generate_id(), default_session_dir(), model="qwen-max")
         session.log_message(user_msg)     # 追加到 JSONL
         session.log_message(assistant_msg) # round 计数器自增
         session.save_metadata()            # 写 session.json

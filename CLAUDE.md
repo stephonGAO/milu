@@ -88,7 +88,7 @@ milu sessions list         # 查看历史会话
 - 支持三种传输：`stdio`, `streamable_http`, `sse`
 - `MCPManager` 多服务器编排：`asyncio.gather` 并行连接，错误隔离
 - `converter.py` 将 MCP Tool 转为 `ToolWrapper`，工具名加 `{server_name}__` 前缀避免冲突
-- 配置文件搜索顺序（未显式传 `mcp_config_path` 时）：`./config/mcp_servers.json`（项目级，相对 CWD）→ `~/.milu/mcp_servers.json`（用户级，可用 `MILU_HOME` 覆盖）；亦可用环境变量 `MCP_CONFIG_PATH` 指定绝对路径
+- 配置文件搜索顺序（未显式传 `mcp_config_path` 时）：`{project_dir()}/config/mcp_servers.json`（项目级「读配置」，默认 CWD，可用 `MILU_PROJECT_DIR` 覆盖）→ `~/.milu/mcp_servers.json`（用户级兜底，可用 `MILU_HOME` 覆盖）；亦可用环境变量 `MCP_CONFIG_PATH` 指定绝对路径
 
 ### 5. 提示词 & 技能层 (`src/milu/prompts/`, `skills/`)
 
@@ -118,6 +118,7 @@ milu sessions list         # 查看历史会话
 - **Agent 含实例级共享状态**（`history`、`session`、`_work_started`、`_mcp_manager`、`tools` 等），多用户**不能共享同一个 Agent**。唯一安全方案是 **per-user Agent**（`AgentPool` 即为此而生）。瓶颈是 MCP 子进程内存（每 Agent 3-5 个 server 占 15-50 MB），不是 Agent 本身
 - **todo 工具与 subagent 已无状态化**：不再用模块级单例/闭包变量，而是 Agent 在 `run()` 入口通过 **ContextVar** 注入 per-call 状态（`todo_write._current_session_dir` 注入 session 目录、`todo_write._current_plan_items` 注入内存计划、`subagent._current_subagent_events` 注入事件列表、`subagent._current_parent_mode` 注入父模式），实现 asyncio 任务级隔离。新增任何"跨调用共享"的工具状态时，沿用 ContextVar 模式，**切勿用模块级全局变量**
 - **todo 计划存储双后端**（已与 session 解耦）：有 session → 文件后端 `{session_dir}/plan.json`（持久化、per-user 天然隔离）；无 session → 内存后端（`_current_plan_items` ContextVar，同一 Agent 跨轮保留、进程退出即弃）。因此 `session_enabled=False`（含子代理、用户自管 history）时 todo 也能用，不再抛 `RuntimeError`。LLM 通过 `todo_read` 主动拉取
+- **目录策略：写数据 vs 读配置分离，均与裸 CWD 解耦**（`resources.py` 顶部注释为单一真相源）：**写数据**（会话日志、记忆、CLI 配置）锚定 `user_data_dir()`（默认 `~/.milu`，`MILU_HOME` 覆盖）；**读配置**（`mcp_servers.json`、`.env` 等项目自带配置）锚定 `project_dir()`（默认 CWD，`MILU_PROJECT_DIR` 覆盖），项目级找不到再回退用户级。新增「写状态」目录走 `user_data_dir()`、新增「读配置」走 `project_dir()`，**切勿在代码里写裸相对路径 `./xxx`**（作为库被集成时 CWD 漂移）
 - **memory 长期记忆为用户级存储、单开关启用**（`memory_tool.py`）：**默认关闭**——`Agent(memory=False)`（默认）不注册工具不注入提示词；`memory=True` 启用（身份 `"default"`）；`memory="user_id"` 启用并按用户隔离。存储与 session **解耦**：`~/.milu/memory/{user_id}.json`（`MILU_HOME` 可覆盖），同一标识跨 session、跨进程共享。启用时记忆条目**每轮渲染进 system prompt 末尾**（`render_memory_prompt`，每轮重读文件），记忆文件路径在 `run()` 入口经 ContextVar `_current_memory_path` 注入（未启用注入 None，子代理不会继承父路径误写）。AgentPool 默认工厂把 `agent_kwargs={"memory": True}` 派生为 `memory=user_id`（防全部用户共享一份 default 记忆）。条目 {content, category, created_at}，上限 200 条丢弃最旧，内容级去重。与对话历史互补——历史会被压缩截断，记忆条目始终完整
 
 ## 代码风格约定

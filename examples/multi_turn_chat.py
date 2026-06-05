@@ -556,7 +556,8 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
 
     elif cmd == "/sessions":
         from milu.agent.session import Session as SessionClass
-        base_dir = Path(agent.session.base_dir) if agent.session else Path(".sessions")
+        from milu.resources import default_session_dir
+        base_dir = Path(agent.session.base_dir) if agent.session else default_session_dir()
         sessions = SessionClass.list_sessions(base_dir)
         if not sessions:
             print(f"\n  {c('dim', '暂无历史会话。')}\n")
