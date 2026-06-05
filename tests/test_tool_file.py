@@ -219,30 +219,15 @@ class TestFileWrite:
         assert open(path, encoding="utf-8").read() == "Hello"
 
     @pytest.mark.asyncio
-    async def test_write_overwrite_with_backup(self, tmp_path):
-        """覆盖已有文件，自动备份"""
+    async def test_write_overwrite(self, tmp_path):
+        """覆盖已有文件"""
         path = _make_file(tmp_path, "existing.txt", "原始内容")
 
         result = _parse(await file_write(
-            action="write", path=path, content="新内容", backup=True,
+            action="write", path=path, content="新内容",
         ))
         assert result["success"] is True
         assert open(path, encoding="utf-8").read() == "新内容"
-        assert "backup" in result
-        # 备份文件存在且内容是原始内容
-        backup_path = result["backup"]
-        assert os.path.exists(backup_path)
-        assert open(backup_path, encoding="utf-8").read() == "原始内容"
-
-    @pytest.mark.asyncio
-    async def test_write_without_backup(self, tmp_path):
-        """覆盖写入不备份"""
-        path = _make_file(tmp_path, "test.txt", "旧内容")
-
-        result = _parse(await file_write(
-            action="write", path=path, content="新内容", backup=False,
-        ))
-        assert result["success"] is True
         assert "backup" not in result
 
     @pytest.mark.asyncio
@@ -363,19 +348,6 @@ class TestFileReplace:
         result = _parse(await file_write(action="replace", path=path))
         assert result["success"] is False
 
-    @pytest.mark.asyncio
-    async def test_replace_creates_backup(self, tmp_path):
-        """替换操作自动备份"""
-        path = _make_file(tmp_path, "test.txt", "original\n")
-
-        result = _parse(await file_write(
-            action="replace", path=path,
-            old="original", new="modified", backup=True,
-        ))
-        assert result["success"] is True
-        assert "backup" in result
-        assert os.path.exists(result["backup"])
-
 
 # ── action: insert ────────────────────────────────────────
 
@@ -460,58 +432,6 @@ class TestFileDelete:
         """缺少参数"""
         path = _make_file(tmp_path, "test.txt", "line1\n")
         result = _parse(await file_write(action="delete", path=path))
-        assert result["success"] is False
-
-    @pytest.mark.asyncio
-    async def test_delete_creates_backup(self, tmp_path):
-        """删除操作自动备份"""
-        path = _make_file(tmp_path, "test.txt", "line1\nline2\nline3\n")
-
-        result = _parse(await file_write(
-            action="delete", path=path, start=1, end=1, backup=True,
-        ))
-        assert result["success"] is True
-        assert "backup" in result
-
-
-# ── action: restore ───────────────────────────────────────
-
-
-class TestFileRestore:
-    """file(action='restore') 测试"""
-
-    @pytest.mark.asyncio
-    async def test_restore_from_backup(self, tmp_path):
-        """从备份还原"""
-        # 先创建原文件
-        path = _make_file(tmp_path, "config.yaml", "原始内容\n")
-
-        # 写入（触发备份）
-        write_result = _parse(await file_write(
-            action="write", path=path, content="新内容\n", backup=True,
-        ))
-        backup_path = write_result["backup"]
-        assert open(path, encoding="utf-8").read() == "新内容\n"
-
-        # 还原
-        result = _parse(await file_write(action="restore", path=backup_path))
-        assert result["success"] is True
-        assert open(path, encoding="utf-8").read() == "原始内容\n"
-
-    @pytest.mark.asyncio
-    async def test_restore_invalid_backup_path(self, tmp_path):
-        """不是有效的备份路径"""
-        path = _make_file(tmp_path, "regular.txt", "内容")
-        result = _parse(await file_write(action="restore", path=path))
-        assert result["success"] is False
-        assert "不是有效的备份文件" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_restore_nonexistent_backup(self):
-        """备份文件不存在"""
-        result = _parse(await file_write(
-            action="restore", path="/no/backup.bak.123",
-        ))
         assert result["success"] is False
 
 

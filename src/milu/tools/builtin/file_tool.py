@@ -1,7 +1,7 @@
 """内置工具：统一文件系统操作
 
 单一 file(action, path, ...) 工具覆盖所有文件读写操作。
-支持索引、搜索、分段读取、原子写入、局部编辑、备份还原。
+支持索引、搜索、分段读取、原子写入、局部编辑。
 
 设计原则：
   - 能用局部编辑就不用全文覆盖
@@ -13,9 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import tempfile
-import time
 from typing import Literal, Optional
 
 from milu.tools.decorator import tool
@@ -44,6 +42,7 @@ def _binary_redirect_hint(path: str) -> dict | None:
                 "error": f"{ext} 是图片格式，file_read 无法按文本读取",
                 "hint": "请改用 image_read 工具查看图片内容"}
     return None
+
 _STRUCTURAL_PATTERNS = re.compile(
     r"^\s*(def |class |async def )"     # Python 函数/类
     r"|^#{1,6}\s"                        # Markdown 标题
@@ -70,14 +69,6 @@ def _atomic_write(path: str, content: str, encoding: str = "utf-8") -> None:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
-
-
-def _create_backup(path: str) -> str:
-    """创建备份文件，返回备份路径。"""
-    ts = int(time.time())
-    backup_path = f"{path}.bak.{ts}"
-    shutil.copy2(path, backup_path)
-    return backup_path
 
 
 def _read_lines(path: str, encoding: str = "utf-8") -> list[str]:
@@ -208,26 +199,18 @@ def _action_grep(path: str, pattern: str | None = None,
     }
 
 
-def _action_write(path: str, content: str | None = None,
-                  backup: bool = True, **_) -> dict:
-    """原子写入（全量覆盖），可选备份。"""
+def _action_write(path: str, content: str | None = None, **_) -> dict:
+    """原子写入（全量覆盖）。"""
     if content is None:
         return {"success": False, "error": "write 操作需要 content 参数"}
 
-    backup_path = None
-    if backup and os.path.exists(path):
-        backup_path = _create_backup(path)
-
     _atomic_write(path, content)
 
-    result = {
+    return {
         "success": True,
         "path": path,
         "bytes_written": len(content.encode("utf-8")),
     }
-    if backup_path:
-        result["backup"] = backup_path
-    return result
 
 
 def _action_append(path: str, content: str | None = None, **_) -> dict:
@@ -238,11 +221,8 @@ def _action_append(path: str, content: str | None = None, **_) -> dict:
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 
     with open(path, "a", encoding="utf-8") as f:
-        # 如果文件有内容且不以换行结尾，先加换行
         if os.path.exists(path) and os.path.getsize(path) > 0:
-            f.seek(0, 2)  # seek to end
-            if f.tell() > 0:
-                pass  # 追加模式已经在末尾
+            f.seek(0, 2)
         f.write(content)
         if not content.endswith("\n"):
             f.write("\n")
@@ -258,7 +238,7 @@ def _action_replace(path: str, start: int | None = None,
                     end: int | None = None,
                     old: str | None = None, new: str | None = None,
                     content: str | None = None,
-                    backup: bool = True, count: int = 1, **_) -> dict:
+                    count: int = 1, **_) -> dict:
     """局部替换：行范围替换或字符串精确替换。"""
     if not os.path.exists(path):
         return {"success": False, "error": f"文件不存在: {path}"}
@@ -277,23 +257,15 @@ def _action_replace(path: str, start: int | None = None,
             new_lines[-1] += "\n"
 
         result_lines = lines[:start - 1] + new_lines + lines[end:]
-
-        backup_path = None
-        if backup:
-            backup_path = _create_backup(path)
-
         _atomic_write(path, "".join(result_lines))
 
-        result = {
+        return {
             "success": True,
             "mode": "line_range",
             "replaced_lines": f"{start}-{end}",
             "old_line_count": end - start + 1,
             "new_line_count": len(new_lines),
         }
-        if backup_path:
-            result["backup"] = backup_path
-        return result
 
     # 模式 2: 字符串替换
     if old is not None and new is not None:
@@ -313,21 +285,13 @@ def _action_replace(path: str, start: int | None = None,
 
         replace_count = occurrences if count == -1 else min(count, occurrences)
         new_content = file_content.replace(old, new, replace_count)
-
-        backup_path = None
-        if backup:
-            backup_path = _create_backup(path)
-
         _atomic_write(path, new_content)
 
-        result = {
+        return {
             "success": True,
             "mode": "string",
             "replaced": replace_count,
         }
-        if backup_path:
-            result["backup"] = backup_path
-        return result
 
     return {
         "success": False,
@@ -336,8 +300,7 @@ def _action_replace(path: str, start: int | None = None,
 
 
 def _action_insert(path: str, after_line: int | None = None,
-                   content: str | None = None,
-                   backup: bool = True, **_) -> dict:
+                   content: str | None = None, **_) -> dict:
     """在指定行后插入内容。after_line=0 表示插入到文件开头。"""
     if content is None:
         return {"success": False, "error": "insert 操作需要 content 参数"}
@@ -356,26 +319,17 @@ def _action_insert(path: str, after_line: int | None = None,
         insert_lines[-1] += "\n"
 
     result_lines = lines[:after_line] + insert_lines + lines[after_line:]
-
-    backup_path = None
-    if backup:
-        backup_path = _create_backup(path)
-
     _atomic_write(path, "".join(result_lines))
 
-    result = {
+    return {
         "success": True,
         "inserted_after_line": after_line,
         "inserted_lines": len(insert_lines),
     }
-    if backup_path:
-        result["backup"] = backup_path
-    return result
 
 
 def _action_delete(path: str, start: int | None = None,
-                   end: int | None = None,
-                   backup: bool = True, **_) -> dict:
+                   end: int | None = None, **_) -> dict:
     """删除指定行范围 [start, end]。"""
     if start is None or end is None:
         return {"success": False, "error": "delete 操作需要 start 和 end 参数"}
@@ -390,42 +344,13 @@ def _action_delete(path: str, start: int | None = None,
     deleted_count = end - start + 1
     deleted_preview = "".join(lines[start - 1: end])[:200]
     result_lines = lines[:start - 1] + lines[end:]
-
-    backup_path = None
-    if backup:
-        backup_path = _create_backup(path)
-
     _atomic_write(path, "".join(result_lines))
 
-    result = {
+    return {
         "success": True,
         "deleted_lines": f"{start}-{end}",
         "deleted_count": deleted_count,
         "deleted_preview": deleted_preview,
-    }
-    if backup_path:
-        result["backup"] = backup_path
-    return result
-
-
-def _action_restore(path: str, **_) -> dict:
-    """从备份文件还原。path 为备份文件路径（如 config.yaml.bak.1234567890）。"""
-    if not os.path.exists(path):
-        return {"success": False, "error": f"备份文件不存在: {path}"}
-
-    # 解析备份路径: original_path.bak.timestamp
-    match = re.match(r"^(.+)\.bak\.(\d+)$", path)
-    if not match:
-        return {"success": False,
-                "error": "路径不是有效的备份文件（预期格式: *.bak.时间戳）"}
-
-    original_path = match.group(1)
-    shutil.copy2(path, original_path)
-
-    return {
-        "success": True,
-        "restored_to": original_path,
-        "backup_used": path,
     }
 
 
@@ -440,7 +365,6 @@ _ACTIONS = {
     "replace": _action_replace,
     "insert":  _action_insert,
     "delete":  _action_delete,
-    "restore": _action_restore,
 }
 
 
@@ -505,15 +429,14 @@ async def file_read(
 
 @tool(name="file_write", description=(
     "文件修改与写入工具。通过 action 参数选择操作类型：\n"
-    "write - 原子写入（全量覆盖），backup=True时自动备份原文件\n"
+    "write - 原子写入（全量覆盖）\n"
     "append - 追加内容到文件末尾\n"
     "replace - 局部替换：传start+end+content为行范围替换，传old+new为字符串精确替换\n"
     "insert - 在指定行后插入内容（after_line=0为文件开头）\n"
-    "delete - 删除指定行范围\n"
-    "restore - 从备份文件还原"
+    "delete - 删除指定行范围"
 ), is_safe=False)
 async def file_write(
-    action: Literal["write", "append", "replace", "insert", "delete", "restore"],
+    action: Literal["write", "append", "replace", "insert", "delete"],
     path: str,
     content: Optional[str] = None,
     start: Optional[int] = None,
@@ -521,36 +444,33 @@ async def file_write(
     old: Optional[str] = None,
     new: Optional[str] = None,
     after_line: Optional[int] = None,
-    backup: bool = True,
     count: int = 1,
 ) -> str:
     """
     文件修改与写入工具。
 
     :param action: 操作类型
-    :param path: 文件路径（restore 时传备份文件路径）
+    :param path: 文件路径
     :param content: 写入或替换的内容（write/append/replace行范围 时使用）
     :param start: 起始行号（replace/delete 时使用，从1开始）
     :param end: 结束行号（replace/delete 时使用）
     :param old: 替换源字符串（replace 字符串模式时使用）
     :param new: 替换目标字符串（replace 字符串模式时使用）
     :param after_line: 插入位置行号（insert 时使用，0=文件开头）
-    :param backup: 写入/替换/删除操作前是否自动备份原文件
     :param count: 字符串替换次数（1=仅第一处，-1=全部）
     """
     handler = _ACTIONS.get(action)
-    if not handler or action not in ("write", "append", "replace", "insert", "delete", "restore"):
+    if not handler or action not in ("write", "append", "replace", "insert", "delete"):
         return json.dumps({
             "success": False,
             "error": f"未知 action: {action}",
-            "available": ["write", "append", "replace", "insert", "delete", "restore"],
+            "available": ["write", "append", "replace", "insert", "delete"],
         }, ensure_ascii=False)
 
     try:
         result = handler(
             path=path, content=content, start=start, end=end,
-            old=old, new=new, after_line=after_line,
-            backup=backup, count=count,
+            old=old, new=new, after_line=after_line, count=count,
         )
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
