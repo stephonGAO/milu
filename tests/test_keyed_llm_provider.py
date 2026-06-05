@@ -5,10 +5,10 @@ import asyncio
 
 import pytest
 
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.serving import AgentPool, AgentPoolConfig, KeyedLLMProvider
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.llm.providers import ModelRegistry
+from milu.llm.providers.base import BaseLLM, ModelCapabilities
+from milu.serving import AgentPool, AgentPoolConfig, KeyedLLMProvider
 
 
 class _FakeLLM(BaseLLM):

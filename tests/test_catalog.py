@@ -1,7 +1,7 @@
 """测试工具目录元工具 (catalog.py)"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry, ToolWrapper
-from agent_framework.tools.catalog import create_catalog_tools
+from milu.tools import tool, ToolRegistry, ToolWrapper
+from milu.tools.catalog import create_catalog_tools
 
 
 def _make_wrapper(name: str, description: str = "") -> ToolWrapper:

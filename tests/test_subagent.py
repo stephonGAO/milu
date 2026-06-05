@@ -3,16 +3,16 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import (
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import (
     AgentDone, AgentError, TextDelta, ToolCallStart, ToolResult,
     SubAgentEvent, SubAgentDone,
 )
-from agent_framework.agent.subagent import (
+from milu.agent.subagent import (
     SubAgentConfig, _current_subagent_events, create_subagent_tools,
 )
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 # ── Fixtures ──────────────────────────────────────────────

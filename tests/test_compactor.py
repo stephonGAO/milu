@@ -2,11 +2,11 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.agent.compactor import Compactor, create_compact_tool
-from agent_framework.agent.config import AgentConfig, CompactConfig
-from agent_framework.agent.session import Session
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.agent.compactor import Compactor, create_compact_tool
+from milu.agent.config import AgentConfig, CompactConfig
+from milu.agent.session import Session
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 import tempfile
 from pathlib import Path
@@ -610,7 +610,7 @@ class TestCreateCompactTool:
 
     def test_tool_creation(self):
         """应成功创建 compact 工具"""
-        from agent_framework.agent import Agent
+        from milu.agent import Agent
         llm = _make_llm()
         config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,
@@ -622,7 +622,7 @@ class TestCreateCompactTool:
     @pytest.mark.asyncio
     async def test_tool_execution(self):
         """compact 工具执行应替换历史"""
-        from agent_framework.agent import Agent
+        from milu.agent import Agent
         llm = _make_llm("工具摘要")
         config = AgentConfig()
         agent = Agent(llm=llm, system_prompt="test", config=config,

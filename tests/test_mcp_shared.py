@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.serving import AgentPool, AgentPoolConfig
-from agent_framework.tools import tool
+from milu.agent import Agent, AgentConfig
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.serving import AgentPool, AgentPoolConfig
+from milu.tools import tool
 
 
 def _wrappers():
@@ -116,8 +116,8 @@ def test_no_injection_owns_mcp():
 async def test_pool_shared_mcp_single_manager(monkeypatch):
     """整池只创建一个共享 manager，注入所有 Agent，stop 时断开一次。"""
     wrappers = _wrappers()
-    import agent_framework.tools.mcp.config as cfgmod
-    import agent_framework.tools.mcp.manager as mgrmod
+    import milu.tools.mcp.config as cfgmod
+    import milu.tools.mcp.manager as mgrmod
 
     # 让配置加载返回非空（内容无所谓，FakeMgr 不用它）
     monkeypatch.setattr(cfgmod.MCPServerConfig, "load_file",
@@ -177,8 +177,8 @@ async def test_pool_shared_mcp_disabled_by_default():
 @pytest.mark.asyncio
 async def test_pool_shared_mcp_connect_failure_degrades(monkeypatch):
     """共享 MCP 连接失败不应阻断池启动，退化为无 MCP。"""
-    import agent_framework.tools.mcp.config as cfgmod
-    import agent_framework.tools.mcp.manager as mgrmod
+    import milu.tools.mcp.config as cfgmod
+    import milu.tools.mcp.manager as mgrmod
 
     monkeypatch.setattr(cfgmod.MCPServerConfig, "load_file",
                         staticmethod(lambda path=None: ["fake-config"]))

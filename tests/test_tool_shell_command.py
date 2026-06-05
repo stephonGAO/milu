@@ -2,7 +2,7 @@
 import sys
 
 import pytest
-from agent_framework.tools.builtin.shell_command import shell_command, _is_dangerous_command
+from milu.tools.builtin.shell_command import shell_command, _is_dangerous_command
 
 
 class TestShellCommand:

@@ -13,7 +13,7 @@ class TestQwenCapabilities:
     """验证 QwenLLM 的能力标志是否与规格一致"""
 
     def test_capabilities(self):
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.providers.qwen import QwenLLM
 
         llm = QwenLLM(api_key="test", model="qwen-max")
         caps = llm.capabilities
@@ -45,7 +45,7 @@ class TestQwenAvailableParams:
     """验证 QwenLLM 支持的参数名集合"""
 
     def test_available_params_include_basic(self):
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.providers.qwen import QwenLLM
 
         llm = QwenLLM(api_key="test", model="qwen-max")
         params = llm._get_available_param_names()
@@ -57,7 +57,7 @@ class TestQwenAvailableParams:
         assert "stop" in params
 
     def test_available_params_include_web_search(self):
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.providers.qwen import QwenLLM
 
         llm = QwenLLM(api_key="test", model="qwen-max")
         params = llm._get_available_param_names()
@@ -66,7 +66,7 @@ class TestQwenAvailableParams:
         assert "web_search_strategy" in params
 
     def test_available_params_include_thinking(self):
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.providers.qwen import QwenLLM
 
         llm = QwenLLM(api_key="test", model="qwen-max")
         params = llm._get_available_param_names()
@@ -75,7 +75,7 @@ class TestQwenAvailableParams:
         assert "thinking_level" in params
 
     def test_available_params_include_tools(self):
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.providers.qwen import QwenLLM
 
         llm = QwenLLM(api_key="test", model="qwen-max")
         params = llm._get_available_param_names()
@@ -90,8 +90,8 @@ class TestQwenChat:
     @pytest.mark.asyncio
     async def test_basic_chat(self):
         """基础聊天：3个chunk（内容"你"+"好"+结束带usage），验证StreamChunk字段"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.qwen import QwenLLM
 
         # 构造模拟的流式响应：3个chunk
         chunks = [
@@ -147,8 +147,8 @@ class TestQwenChat:
     @pytest.mark.asyncio
     async def test_thinking_mode_mapping(self):
         """思考模式映射：extra_body 中应包含 enable_thinking=True，thinking_level 被忽略"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.qwen import QwenLLM
 
         async def mock_stream():
             yield MockChunk(
@@ -181,8 +181,8 @@ class TestQwenChat:
     @pytest.mark.asyncio
     async def test_web_search_param(self):
         """联网搜索参数：extra_body 中应包含 enable_search=True"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.qwen import QwenLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.qwen import QwenLLM
 
         async def mock_stream():
             yield MockChunk(

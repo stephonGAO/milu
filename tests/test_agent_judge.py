@@ -10,12 +10,12 @@ import json
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.config import AgentMode
-from agent_framework.agent.events import ToolConfirmRequired, ToolResult
-from agent_framework.agent.judge import JudgeVerdict, _parse_verdicts
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.agent import Agent, AgentConfig
+from milu.agent.config import AgentMode
+from milu.agent.events import ToolConfirmRequired, ToolResult
+from milu.agent.judge import JudgeVerdict, _parse_verdicts
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 # ── 辅助工厂 ──────────────────────────────────────────────
@@ -389,7 +389,7 @@ class TestSubAgentJudgeInheritance:
     @pytest.mark.asyncio
     async def test_subagent_inherits_judge(self):
         """auto 模式下，子代理内的不安全工具同样经过父的判定器（deny 生效）"""
-        from agent_framework.agent.subagent import (
+        from milu.agent.subagent import (
             SubAgentConfig, create_subagent_tools,
         )
 
@@ -425,7 +425,7 @@ class TestSubAgentJudgeInheritance:
     @pytest.mark.asyncio
     async def test_subagent_disabled_when_parent_disabled(self):
         """父 judge_llm=False → 子代理判定器也关闭（不因默认规则用自身 llm 重新启用）"""
-        from agent_framework.agent.subagent import (
+        from milu.agent.subagent import (
             SubAgentConfig, create_subagent_tools,
         )
 

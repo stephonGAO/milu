@@ -1,10 +1,10 @@
 """测试 ModelRegistry 注册表"""
 
 import pytest
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.llm.base.message import Message
-from agent_framework.llm.base.response import StreamChunk
+from milu.llm.providers import ModelRegistry
+from milu.llm.providers.base import BaseLLM, ModelCapabilities
+from milu.llm.base.message import Message
+from milu.llm.base.response import StreamChunk
 
 
 class FakeLLM(BaseLLM):

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import (
+from milu import (
     Agent, AgentMode, ConfirmResponse,
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolConfirmRequired, ToolResult,
@@ -25,8 +25,8 @@ from agent_framework import (
     SubAgentEvent, SubAgentDone,
     HistoryCompacted, SessionLoaded,
 )
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools.builtin import (
+from milu.llm.providers import ModelRegistry
+from milu.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
 )
@@ -85,7 +85,7 @@ def print_header():
   子代理:   researcher（调研员）, reader（长内容阅读员）, coder（编码执行员）
   元工具:   list_catalog, search_tools, activate_tools（用于发现和激活 MCP 工具）
   技能:     内置 skill-creator / deep-research / mcp-builder 等，LLM 按需 load_skill 加载
-  计划文件: 每个会话独立保存（~/.agent_framework/sessions/{{session_id}}/plan.json）
+  计划文件: 每个会话独立保存（~/.milu/sessions/{{session_id}}/plan.json）
 
   命令:
     /history   — 查看对话历史
@@ -136,7 +136,7 @@ def build_agent() -> Agent:
       - 内置子代理三件套 researcher / reader / coder（操作模式与人工确认回调
         经 ContextVar 自动继承父 Agent）
       - 内置 main 角色提示词 + 内置技能（skill-creator / deep-research 等）
-      - 会话持久化到 ~/.agent_framework/sessions（AGENT_FRAMEWORK_HOME 可覆盖）
+      - 会话持久化到 ~/.milu/sessions（MILU_HOME 可覆盖）
 
     需要定制时显式传参覆盖，例如：
       tools=[...]                                # 覆盖默认全套工具（[] 即无工具）
@@ -555,7 +555,7 @@ async def handle_command(agent: Agent, cmd: str) -> bool:
             print(f"\n  {c('dim', '会话功能未启用。')}\n")
 
     elif cmd == "/sessions":
-        from agent_framework.agent.session import Session as SessionClass
+        from milu.agent.session import Session as SessionClass
         base_dir = Path(agent.session.base_dir) if agent.session else Path(".sessions")
         sessions = SessionClass.list_sessions(base_dir)
         if not sessions:

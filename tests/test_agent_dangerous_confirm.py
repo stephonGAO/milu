@@ -1,15 +1,15 @@
 """测试非安全工具确认机制（MANUAL 人工审批模式，原 AUTO 行为）"""
 import pytest
 from unittest.mock import AsyncMock
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import (
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import (
     ToolCallStart,
     ToolConfirmRequired,
     ToolResult,
     AgentDone,
 )
-from agent_framework.llm.base.response import StreamChunk
-from agent_framework.tools import tool
+from milu.llm.base.response import StreamChunk
+from milu.tools import tool
 
 
 # ── 测试用工具 ────────────────────────────────────────────
@@ -276,7 +276,7 @@ async def test_confirm_rejected_history_updated(unsafe_tool):
 @pytest.mark.asyncio
 async def test_confirm_response_approved(unsafe_tool):
     """返回 ConfirmResponse(approved=True) 时工具正常执行"""
-    from agent_framework.agent.events import ConfirmResponse
+    from milu.agent.events import ConfirmResponse
 
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=True)
@@ -304,7 +304,7 @@ async def test_confirm_response_approved(unsafe_tool):
 @pytest.mark.asyncio
 async def test_confirm_response_rejected_with_message(unsafe_tool):
     """返回 ConfirmResponse(approved=False, message="...") 时自定义消息发回 LLM"""
-    from agent_framework.agent.events import ConfirmResponse
+    from milu.agent.events import ConfirmResponse
 
     custom_msg = "不要用 rm，改用 mv 到回收站"
 
@@ -341,7 +341,7 @@ async def test_confirm_response_rejected_with_message(unsafe_tool):
 @pytest.mark.asyncio
 async def test_confirm_response_custom_message_in_history(unsafe_tool):
     """自定义消息应写入对话历史，供 LLM 下一轮看到"""
-    from agent_framework.agent.events import ConfirmResponse
+    from milu.agent.events import ConfirmResponse
 
     custom_msg = "请先备份再删除"
 
@@ -370,7 +370,7 @@ async def test_confirm_response_custom_message_in_history(unsafe_tool):
 @pytest.mark.asyncio
 async def test_confirm_response_rejected_no_message(unsafe_tool):
     """ConfirmResponse(approved=False) 无消息时使用默认拒绝文案"""
-    from agent_framework.agent.events import ConfirmResponse
+    from milu.agent.events import ConfirmResponse
 
     async def on_confirm(tool_name, args_str):
         return ConfirmResponse(approved=False)

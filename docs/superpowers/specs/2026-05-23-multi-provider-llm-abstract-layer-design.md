@@ -1,4 +1,4 @@
-# AI Agent Framework - 多厂商模型兼容层设计
+# milu - 多厂商模型兼容层设计
 
 > 日期：2026-05-23
 > 状态：已批准
@@ -53,11 +53,11 @@ BaseLLM (抽象基类)
 ### 3.2 项目结构
 
 ```
-ai-agent-framework/
+ai-milu/
 ├── pyproject.toml                  # 项目配置，uv管理
 ├── .env.example                    # 环境变量模板
 ├── src/
-│   └── agent_framework/
+│   └── milu/
 │       ├── __init__.py
 │       ├── providers/              # 各厂商模型实现
 │       │   ├── __init__.py         # ModelRegistry注册表
@@ -321,25 +321,25 @@ class ModelRegistry:
 ## 八、异常体系
 
 ```python
-class AgentFrameworkError(Exception):
+class MiluError(Exception):
     """框架基础异常"""
 
-class ModelConfigError(AgentFrameworkError):
+class ModelConfigError(MiluError):
     """模型配置错误（如不支持的参数）"""
 
-class AuthenticationError(AgentFrameworkError):
+class AuthenticationError(MiluError):
     """API Key无效或缺失"""
 
-class RateLimitError(AgentFrameworkError):
+class RateLimitError(MiluError):
     """请求频率超限"""
 
-class ModelNotAvailableError(AgentFrameworkError):
+class ModelNotAvailableError(MiluError):
     """模型不可用"""
 
-class StreamError(AgentFrameworkError):
+class StreamError(MiluError):
     """流式输出异常"""
 
-class FeatureNotSupportedError(AgentFrameworkError):
+class FeatureNotSupportedError(MiluError):
     """请求的功能该模型不支持"""
 ```
 

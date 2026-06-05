@@ -5,10 +5,10 @@ import argparse
 
 import pytest
 
-from agent_framework import AgentMode
-from agent_framework.cli.app import _cmd_providers, build_parser
-from agent_framework.cli.builder import build_agent
-from agent_framework.cli.config import (
+from milu import AgentMode
+from milu.cli.app import _cmd_providers, build_parser
+from milu.cli.builder import build_agent
+from milu.cli.config import (
     DEFAULT_MODELS,
     DEFAULT_PROVIDER,
     CLIConfig,
@@ -22,7 +22,7 @@ from agent_framework.cli.config import (
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     """把用户数据目录指向 tmp_path（隔离 config.json）。"""
-    monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+    monkeypatch.setenv("MILU_HOME", str(tmp_path))
     return tmp_path
 
 

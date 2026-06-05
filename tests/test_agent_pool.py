@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.serving import AgentPool, AgentPoolConfig
+from milu.agent import Agent, AgentConfig
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.serving import AgentPool, AgentPoolConfig
 
 
 def _make_quick_llm():

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import (
+from milu import (
     Agent, AgentConfig,
     SubAgentConfig, create_subagent_tools,
     SubAgentEvent, SubAgentDone,
@@ -23,8 +23,8 @@ from agent_framework import (
     ToolCallStart, ToolResult,
     AgentDone, AgentError,
 )
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools.builtin import (
+from milu.llm.providers import ModelRegistry
+from milu.tools.builtin import (
     BUILTIN_TOOLS,
     web_search,
     http_request,

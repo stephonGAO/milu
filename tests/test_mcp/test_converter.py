@@ -3,7 +3,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from agent_framework.tools.mcp.converter import convert_mcp_tool, _convert_result
+from milu.tools.mcp.converter import convert_mcp_tool, _convert_result
 
 
 class TestConvertMcpTool:

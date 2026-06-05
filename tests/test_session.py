@@ -4,8 +4,8 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from agent_framework.agent.session import Session
-from agent_framework.llm.base.message import Message, MessageRole
+from milu.agent.session import Session
+from milu.llm.base.message import Message, MessageRole
 
 
 @pytest.fixture

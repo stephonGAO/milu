@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.providers.chatgpt import ChatGPTLLM
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.providers.chatgpt import ChatGPTLLM
 
 
 # ── Responses API Mock 事件 ────────────────────────────────
@@ -81,7 +81,7 @@ class TestChatGPTCapabilities:
         assert llm.base_url == "https://api.openai.com/v1"
 
     def test_registered(self):
-        from agent_framework.llm.providers import ModelRegistry
+        from milu.llm.providers import ModelRegistry
         assert "openai" in ModelRegistry.list_providers()
 
 

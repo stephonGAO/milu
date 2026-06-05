@@ -15,9 +15,9 @@
 ## 文件结构
 
 **修改的文件**：
-- `src/agent_framework/tools/builtin/todo_write.py` — 重写（删除 TodoManager、引入 ContextVar）
-- `src/agent_framework/agent/subagent.py` — 重写（删除 _last_events、引入 ContextVar）
-- `src/agent_framework/agent/agent.py` — 3 处改动（删除 TodoManager 引用、注入 ContextVar、subagent per-call events 消费）
+- `src/milu/tools/builtin/todo_write.py` — 重写（删除 TodoManager、引入 ContextVar）
+- `src/milu/agent/subagent.py` — 重写（删除 _last_events、引入 ContextVar）
+- `src/milu/agent/agent.py` — 3 处改动（删除 TodoManager 引用、注入 ContextVar、subagent per-call events 消费）
 - `tests/test_tool_todo_write.py` — 更新（删除 TodoManager 直引）
 - `tests/test_subagent.py` — 更新（删除 _last_events 断言）
 - `tests/test_concurrency_stress.py` — 改严格断言
@@ -52,12 +52,12 @@ from pathlib import Path
 
 import pytest
 
-from agent_framework.agent.agent import Agent
-from agent_framework.agent.config import AgentConfig, AgentMode
-from agent_framework.agent.events import MessageRole
-from agent_framework.agent.history import Message
-from agent_framework.llm.providers.base import BaseLLM, StreamChunk, TokenUsage
-from agent_framework.tools.builtin.todo_write import (
+from milu.agent.agent import Agent
+from milu.agent.config import AgentConfig, AgentMode
+from milu.agent.events import MessageRole
+from milu.agent.history import Message
+from milu.llm.providers.base import BaseLLM, StreamChunk, TokenUsage
+from milu.tools.builtin.todo_write import (
     _current_session_dir,
     create_todo_write_tool,
     todo_read,
@@ -79,7 +79,7 @@ class _MockLLM(BaseLLM):
         yield StreamChunk(usage=TokenUsage(1, 1, 2))
 
     def get_capabilities(self):
-        from agent_framework.llm.capabilities import ModelCapabilities
+        from milu.llm.capabilities import ModelCapabilities
         return ModelCapabilities()
 
 
@@ -108,7 +108,7 @@ def test_create_todo_write_tool_no_args():
 @pytest.mark.asyncio
 async def test_todo_write_requires_contextvar(tmp_path: Path):
     """不通过 Agent.run() 直接调 todo_write 应抛 RuntimeError"""
-    from agent_framework.tools.builtin.todo_write import _current_session_dir
+    from milu.tools.builtin.todo_write import _current_session_dir
 
     # 确保 ContextVar 未设置
     assert _current_session_dir.get() is None
@@ -123,7 +123,7 @@ async def test_todo_read_without_file_returns_empty():
     """无 plan.json 时 todo_read 返回 '暂无会话计划。'"""
     from contextvars import copy_context
 
-    from agent_framework.tools.builtin.todo_write import _current_session_dir
+    from milu.tools.builtin.todo_write import _current_session_dir
 
     ctx = copy_context()
     token = _current_session_dir.set(tmp_path := Path("./.sessions/test"))
@@ -229,13 +229,13 @@ git add tests/test_todo_concurrent_isolation.py
 ## Task 2: 重写 `todo_write.py`（删除 TodoManager，引入 ContextVar）
 
 **Files:**
-- Modify: `src/agent_framework/tools/builtin/todo_write.py`（整文件重写）
+- Modify: `src/milu/tools/builtin/todo_write.py`（整文件重写）
 
 - [ ] **Step 1: 备份当前实现位置以便对照**
 
 ```bash
 # 整文件重写，先记录旧行数
-wc -l src/agent_framework/tools/builtin/todo_write.py
+wc -l src/milu/tools/builtin/todo_write.py
 ```
 
 Expected: 354 行（旧版）
@@ -261,7 +261,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent_framework.tools.decorator import tool
+from milu.tools.decorator import tool
 
 logger = logging.getLogger(__name__)
 
@@ -419,7 +419,7 @@ def create_todo_write_tool() -> tuple:
 
 - [ ] **Step 3: 验证文件写入成功**
 
-Run: `wc -l src/agent_framework/tools/builtin/todo_write.py`
+Run: `wc -l src/milu/tools/builtin/todo_write.py`
 Expected: ~165 行（远少于旧版 354）
 
 - [ ] **Step 4: 运行新测试**
@@ -430,7 +430,7 @@ Expected: `test_todo_write_no_closure_state` 和 `test_create_todo_write_tool_no
 - [ ] **Step 5: 暂存**
 
 ```bash
-git add src/agent_framework/tools/builtin/todo_write.py
+git add src/milu/tools/builtin/todo_write.py
 # 不提交，等 Task 6 一起提交
 ```
 
@@ -439,7 +439,7 @@ git add src/agent_framework/tools/builtin/todo_write.py
 ## Task 3: 修改 `agent.py`（删除 TodoManager 引用 + 注入 ContextVar）
 
 **Files:**
-- Modify: `src/agent_framework/agent/agent.py`
+- Modify: `src/milu/agent/agent.py`
 
 - [ ] **Step 1: 删除 `_find_todo_manager` 方法（agent.py:383-389）**
 
@@ -491,9 +491,9 @@ git add src/agent_framework/tools/builtin/todo_write.py
 
 - [ ] **Step 4: 添加 ContextVar 导入（agent.py 顶部 imports 区）**
 
-找到 `from agent_framework.tools.decorator import tool` 附近的 import 区，添加：
+找到 `from milu.tools.decorator import tool` 附近的 import 区，添加：
 ```python
-from agent_framework.tools.builtin.todo_write import _current_session_dir as _current_todo_session_dir
+from milu.tools.builtin.todo_write import _current_session_dir as _current_todo_session_dir
 ```
 
 - [ ] **Step 5: 在 `run()` 方法入口添加 ContextVar 绑定**
@@ -527,13 +527,13 @@ from agent_framework.tools.builtin.todo_write import _current_session_dir as _cu
 
 - [ ] **Step 6: 验证 import 正确**
 
-Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from agent_framework.agent.agent import Agent; print('ok')"`
+Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from milu.agent.agent import Agent; print('ok')"`
 Expected: `ok`（无 ImportError）
 
 - [ ] **Step 7: 暂存**
 
 ```bash
-git add src/agent_framework/agent/agent.py
+git add src/milu/agent/agent.py
 # 不提交，等 Task 6 一起提交
 ```
 
@@ -542,14 +542,14 @@ git add src/agent_framework/agent/agent.py
 ## Task 4: 实现 reminder 逻辑迁移（Agent 端）
 
 **Files:**
-- Modify: `src/agent_framework/agent/agent.py`
+- Modify: `src/milu/agent/agent.py`
 
 - [ ] **Step 1: 导入 reminder 常量**
 
 在 agent.py 顶部 imports 区，添加：
 ```python
-from agent_framework.tools.builtin.todo_write import _PLAN_REMINDER_INTERVAL
-from agent_framework.tools.builtin.todo_write import todo_read as _todo_read_tool
+from milu.tools.builtin.todo_write import _PLAN_REMINDER_INTERVAL
+from milu.tools.builtin.todo_write import todo_read as _todo_read_tool
 ```
 
 - [ ] **Step 2: 新增 `_maybe_inject_plan_reminder` 方法**
@@ -594,7 +594,7 @@ from agent_framework.tools.builtin.todo_write import todo_read as _todo_read_too
             return
 
         # 4. 渲染并追加到 system message
-        from agent_framework.tools.builtin.todo_write import _render
+        from milu.tools.builtin.todo_write import _render
         reminder = (
             "<reminder>\n"
             "计划已长时间未更新，请在继续工作前刷新计划状态。以下是当前计划：\n\n"
@@ -622,13 +622,13 @@ from agent_framework.tools.builtin.todo_write import todo_read as _todo_read_too
 
 - [ ] **Step 4: 验证 import 正确**
 
-Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from agent_framework.agent.agent import Agent; print('ok')"`
+Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from milu.agent.agent import Agent; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 5: 暂存**
 
 ```bash
-git add src/agent_framework/agent/agent.py
+git add src/milu/agent/agent.py
 # 不提交，等 Task 6 一起提交
 ```
 
@@ -648,7 +648,7 @@ Expected: 多处引用（约 10-20 处）
 
 把：
 ```python
-from agent_framework.tools.builtin.todo_write import (
+from milu.tools.builtin.todo_write import (
     TodoManager,
     PlanItem,
     PlanningState,
@@ -657,7 +657,7 @@ from agent_framework.tools.builtin.todo_write import (
 ```
 替换为：
 ```python
-from agent_framework.tools.builtin.todo_write import (
+from milu.tools.builtin.todo_write import (
     create_todo_write_tool,
     todo_read,
     todo_write,
@@ -706,7 +706,7 @@ class TestCreateTodoWriteTool:
     @pytest.mark.asyncio
     async def test_write_invocation_via_contextvar(self, tmp_path):
         """todo_write 通过 ContextVar 找到 plan.json 并写入"""
-        from agent_framework.tools.builtin.todo_write import _current_session_dir
+        from milu.tools.builtin.todo_write import _current_session_dir
         token = _current_session_dir.set(tmp_path)
         try:
             result = await todo_write._tool_wrapper.func(items=[
@@ -725,7 +725,7 @@ class TestCreateTodoWriteTool:
     @pytest.mark.asyncio
     async def test_read_invocation_via_contextvar(self, tmp_path):
         """todo_read 通过 ContextVar 找到 plan.json 并读取"""
-        from agent_framework.tools.builtin.todo_write import _current_session_dir
+        from milu.tools.builtin.todo_write import _current_session_dir
 
         # 先写入
         plan_file = tmp_path / "plan.json"
@@ -782,7 +782,7 @@ git add tests/test_tool_todo_write.py
 ```bash
 git status
 ```
-Expected: 看到 `tests/test_todo_concurrent_isolation.py`、`src/agent_framework/tools/builtin/todo_write.py`、`src/agent_framework/agent/agent.py`、`tests/test_tool_todo_write.py` 4 个文件
+Expected: 看到 `tests/test_todo_concurrent_isolation.py`、`src/milu/tools/builtin/todo_write.py`、`src/milu/agent/agent.py`、`tests/test_tool_todo_write.py` 4 个文件
 
 - [ ] **Step 2: 提交**
 
@@ -826,11 +826,11 @@ from typing import AsyncIterator
 
 import pytest
 
-from agent_framework.agent.agent import Agent
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.events import AgentDone, AgentEvent
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
-from agent_framework.llm.providers.base import BaseLLM, StreamChunk, TokenUsage
+from milu.agent.agent import Agent
+from milu.agent.config import AgentConfig
+from milu.agent.events import AgentDone, AgentEvent
+from milu.agent.subagent import SubAgentConfig, create_subagent_tools
+from milu.llm.providers.base import BaseLLM, StreamChunk, TokenUsage
 
 
 class _EchoLLM(BaseLLM):
@@ -844,7 +844,7 @@ class _EchoLLM(BaseLLM):
         yield StreamChunk(usage=TokenUsage(1, 1, 2))
 
     def get_capabilities(self):
-        from agent_framework.llm.capabilities import ModelCapabilities
+        from milu.llm.capabilities import ModelCapabilities
         return ModelCapabilities()
 
 
@@ -916,7 +916,7 @@ async def test_subagent_concurrent_runs_events_isolated():
                 yield StreamChunk(usage=TokenUsage(1, 1, 2))
 
         def get_capabilities(self):
-            from agent_framework.llm.capabilities import ModelCapabilities
+            from milu.llm.capabilities import ModelCapabilities
             return ModelCapabilities()
 
     sub_tool = create_subagent_tools(_EchoLLM("sub"), [
@@ -973,7 +973,7 @@ git add tests/test_subagent_concurrent_isolation.py
 ## Task 8: 重写 `subagent.py`（删除 _last_events，引入 ContextVar）
 
 **Files:**
-- Modify: `src/agent_framework/agent/subagent.py`（整文件重写）
+- Modify: `src/milu/agent/subagent.py`（整文件重写）
 
 - [ ] **Step 1: 写入新版 `subagent.py` 完整内容**
 
@@ -993,13 +993,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Optional
 
-from agent_framework.agent.config import AgentConfig, AgentMode
-from agent_framework.agent.events import AgentDone, AgentError, AgentEvent
-from agent_framework.agent.history import ConversationHistory
-from agent_framework.tools.decorator import tool
+from milu.agent.config import AgentConfig, AgentMode
+from milu.agent.events import AgentDone, AgentError, AgentEvent
+from milu.agent.history import ConversationHistory
+from milu.tools.decorator import tool
 
 if TYPE_CHECKING:
-    from agent_framework.llm.providers.base import BaseLLM
+    from milu.llm.providers.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
@@ -1086,7 +1086,7 @@ def _create_single_subagent_tool(
     get_parent_mode: Optional[Callable[[], AgentMode]] = None,
 ):
     """为单个 SubAgentConfig 创建工具函数。"""
-    from agent_framework.agent.agent import Agent
+    from milu.agent.agent import Agent
 
     @tool(name=cfg.name, description=cfg.description)
     async def _subagent_tool(task: str) -> str:
@@ -1149,7 +1149,7 @@ def _create_single_subagent_tool(
 
 - [ ] **Step 2: 验证文件写入成功**
 
-Run: `wc -l src/agent_framework/agent/subagent.py`
+Run: `wc -l src/milu/agent/subagent.py`
 Expected: ~155 行（旧版 197）
 
 - [ ] **Step 3: 运行新测试**
@@ -1160,7 +1160,7 @@ Expected: `test_subagent_no_closure_state` 和 `test_subagent_factory_unchanged`
 - [ ] **Step 4: 暂存**
 
 ```bash
-git add src/agent_framework/agent/subagent.py
+git add src/milu/agent/subagent.py
 # 不提交，等 Task 11 一起提交
 ```
 
@@ -1169,13 +1169,13 @@ git add src/agent_framework/agent/subagent.py
 ## Task 9: 修改 `agent.py` 主循环（subagent per-call events 消费）
 
 **Files:**
-- Modify: `src/agent_framework/agent/agent.py`
+- Modify: `src/milu/agent/agent.py`
 
 - [ ] **Step 1: 添加 subagent events ContextVar 的导入**
 
 在 Task 3 Step 4 的 import 附近添加：
 ```python
-from agent_framework.agent.subagent import _current_subagent_events
+from milu.agent.subagent import _current_subagent_events
 ```
 
 - [ ] **Step 2: 定位工具执行循环**
@@ -1281,7 +1281,7 @@ if wrapper and getattr(wrapper, '_is_subagent', False):
 
 - [ ] **Step 6: 验证 import 正确**
 
-Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from agent_framework.agent.agent import Agent; print('ok')"`
+Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from milu.agent.agent import Agent; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 7: 运行新测试**
@@ -1292,7 +1292,7 @@ Expected: 全部通过
 - [ ] **Step 8: 暂存**
 
 ```bash
-git add src/agent_framework/agent/agent.py
+git add src/milu/agent/agent.py
 # 不提交，等 Task 11 一起提交
 ```
 
@@ -1319,7 +1319,7 @@ Expected: 多处（约 5-10 处）
 - [ ] **Step 3: 找到 import 区域，确认 mock LLM 仍然适用**
 
 Run: `cd D:/MyWork/my-agent && head -30 tests/test_subagent.py`
-Expected: import 区域，可能需要 `from agent_framework.agent.subagent import _current_subagent_events` 用于新测试
+Expected: import 区域，可能需要 `from milu.agent.subagent import _current_subagent_events` 用于新测试
 
 - [ ] **Step 4: 跑测试**
 
@@ -1345,7 +1345,7 @@ git add tests/test_subagent.py
 ```bash
 git status
 ```
-Expected: 看到 `tests/test_subagent_concurrent_isolation.py`、`src/agent_framework/agent/subagent.py`、`src/agent_framework/agent/agent.py`、`tests/test_subagent.py` 4 个文件
+Expected: 看到 `tests/test_subagent_concurrent_isolation.py`、`src/milu/agent/subagent.py`、`src/milu/agent/agent.py`、`tests/test_subagent.py` 4 个文件
 
 - [ ] **Step 2: 提交**
 
@@ -1518,7 +1518,7 @@ Expected: 无输出
 
 - [ ] **Step 3: 验证 _last_events 闭包已删除**
 
-Run: `cd D:/MyWork/my-agent && grep -n "_last_events" src/agent_framework/agent/subagent.py`
+Run: `cd D:/MyWork/my-agent && grep -n "_last_events" src/milu/agent/subagent.py`
 Expected: 无输出
 
 - [ ] **Step 4: 验证 _subagent_events 标记已删除**
@@ -1533,7 +1533,7 @@ Expected: 看到 4-5 个新 commit（todo 重构、subagent 重构、stress 严�
 
 - [ ] **Step 6: 跑 verify 工具（若配置）**
 
-Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from agent_framework import Agent, SubAgentConfig, create_subagent_tools, create_todo_write_tool; print('public api ok')"`
+Run: `cd D:/MyWork/my-agent && .venv/Scripts/python -c "from milu import Agent, SubAgentConfig, create_subagent_tools, create_todo_write_tool; print('public api ok')"`
 Expected: `public api ok`
 
 ---

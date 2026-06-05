@@ -1,6 +1,6 @@
 """测试内置工具 python_repl - Python 代码沙箱执行"""
 import pytest
-from agent_framework.tools.builtin.python_repl import python_repl
+from milu.tools.builtin.python_repl import python_repl
 
 
 class TestPythonRepl:

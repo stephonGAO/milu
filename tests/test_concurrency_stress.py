@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import (
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import (
     AgentDone, AgentError, SubAgentDone, SubAgentEvent, TextDelta, ToolResult,
 )
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.agent.subagent import SubAgentConfig, create_subagent_tools
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 # ─────────────────────────────────────────────────────────────
@@ -203,7 +203,7 @@ async def test_session_jsonl_concurrent_writes_corruption(tmp_path: Path, capsys
     每个 turn 都会调 sess.log_message。在两次 LLM 调用之间的 await 点，
     两个 Agent 协程会切换，导致 log_message 交错执行。
     """
-    from agent_framework.agent.session import Session
+    from milu.agent.session import Session
 
     sess = Session("shared_sess", tmp_path, model="mock")
     n_per_agent = 20

@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.tools.builtin.todo_write import (
+from milu.agent import Agent, AgentConfig
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.llm.providers.base import BaseLLM, ModelCapabilities
+from milu.tools.builtin.todo_write import (
     todo_read,
     todo_write,
 )
@@ -128,7 +128,7 @@ def test_todo_write_no_closure_state():
 @pytest.mark.asyncio
 async def test_todo_write_requires_contextvar(tmp_path: Path):
     """不通过 Agent.run() 直接调 todo_write 应抛 RuntimeError"""
-    from agent_framework.tools.builtin.todo_write import _current_session_dir
+    from milu.tools.builtin.todo_write import _current_session_dir
 
     # 确保 ContextVar 未设置
     assert _current_session_dir.get() is None
@@ -141,7 +141,7 @@ async def test_todo_write_requires_contextvar(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_todo_read_without_file_returns_empty(tmp_path: Path):
     """无 plan.json 时 todo_read 返回 '暂无会话计划。'"""
-    from agent_framework.tools.builtin.todo_write import _current_session_dir
+    from milu.tools.builtin.todo_write import _current_session_dir
 
     token = _current_session_dir.set(tmp_path)
     try:

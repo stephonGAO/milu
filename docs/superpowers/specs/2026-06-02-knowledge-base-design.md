@@ -20,7 +20,7 @@
 | 向量库 | **Chroma 0.5+ `PersistentClient`** | 嵌入式（in-process）运行，零子进程；持久化为单一目录；原生 metadata 过滤 |
 | 嵌入生成 | **复用现有 LLM 的 embedding API** | 项目已有 `ModelCapabilities.supports_embedding`；轻量、零新模型依赖 |
 | 切块策略 | **固定字符切块 + overlap** | 工业标准，召回质量与实现复杂度平衡 |
-| 持久化路径 | `~/.agent_framework/kb/chroma/` | 与项目其他目录约定一致（参考 skills/ 路径） |
+| 持久化路径 | `~/.milu/kb/chroma/` | 与项目其他目录约定一致（参考 skills/ 路径） |
 
 **候选方案对比记录**：
 - LanceDB：性能更好但生态偏小
@@ -52,7 +52,7 @@
 │       └──────────────────────────┘                         │
 └──────────────────────┬──────────────────────────────────────┘
                        ▼
-              ~/.agent_framework/kb/chroma/
+              ~/.milu/kb/chroma/
 ```
 
 **6 个内部组件 + 3 个 LLM 可见工具，职责单一**：
@@ -69,7 +69,7 @@
 
 **目录结构**：
 ```
-src/agent_framework/tools/knowledge_base/
+src/milu/tools/knowledge_base/
 ├── __init__.py
 ├── embedding.py        # EmbeddingProvider + RemoteLLMEmbedder
 ├── chunker.py          # 切块
@@ -146,7 +146,7 @@ class EmbeddingProvider(Protocol):
 | `file` | `path` | `metadata` | 读单文件 → 切块 → 入库 |
 | `directory` | `path` | `glob`（默认 `**/*.{md,txt,py,json,csv}`）, `recursive`（默认 `True`） | 批量扫目录 |
 
-**`metadata` 参数语义**（`file` / `directory` action）：每个 source 共享一个 dict，作为公共 metadata 写入该 source 的所有块。例如 `{"project": "agent-framework", "tag": "design"}` 会出现在所有相关 chunk 的 metadata 中。
+**`metadata` 参数语义**（`file` / `directory` action）：每个 source 共享一个 dict，作为公共 metadata 写入该 source 的所有块。例如 `{"project": "milu", "tag": "design"}` 会出现在所有相关 chunk 的 metadata 中。
 
 ### `kb_search`（只读，`is_safe=True`）
 
@@ -193,14 +193,14 @@ class EmbeddingProvider(Protocol):
 
 ## 八、持久化
 
-- 默认目录：`~/.agent_framework/kb/chroma/`
+- 默认目录：`~/.milu/kb/chroma/`
 - `AgentConfig` 新增字段 `kb_persist_dir: str | None = None`（None 即用默认）
 - collection 名字固定 `kb_default`（YAGNI：MVP 不做多 collection）
 - Chroma 内部用 SQLite + DuckDB + Parquet，单目录可整体备份
 
 ## 九、错误处理
 
-### 异常体系（在 `agent_framework/exceptions.py` 新增）
+### 异常体系（在 `milu/exceptions.py` 新增）
 
 ```python
 class KnowledgeBaseError(Exception): pass
@@ -272,14 +272,14 @@ dependencies = [
 
 ```
 新增:
-  src/agent_framework/tools/knowledge_base/__init__.py
-  src/agent_framework/tools/knowledge_base/embedding.py
-  src/agent_framework/tools/knowledge_base/chunker.py
-  src/agent_framework/tools/knowledge_base/store.py
-  src/agent_framework/tools/knowledge_base/ingestor.py
-  src/agent_framework/tools/knowledge_base/retriever.py
-  src/agent_framework/tools/knowledge_base/tools.py
-  src/agent_framework/tools/knowledge_base/models.py
+  src/milu/tools/knowledge_base/__init__.py
+  src/milu/tools/knowledge_base/embedding.py
+  src/milu/tools/knowledge_base/chunker.py
+  src/milu/tools/knowledge_base/store.py
+  src/milu/tools/knowledge_base/ingestor.py
+  src/milu/tools/knowledge_base/retriever.py
+  src/milu/tools/knowledge_base/tools.py
+  src/milu/tools/knowledge_base/models.py
   tests/test_kb_chunker.py
   tests/test_kb_embedding.py
   tests/test_kb_store.py
@@ -291,7 +291,7 @@ dependencies = [
 
 修改:
   pyproject.toml                              # +chromadb
-  src/agent_framework/exceptions.py           # +KnowledgeBaseError 等
-  src/agent_framework/agent/config.py         # +kb_persist_dir 字段
-  src/agent_framework/tools/builtin/__init__.py  # 导出 kb 工具（可选）
+  src/milu/exceptions.py           # +KnowledgeBaseError 等
+  src/milu/agent/config.py         # +kb_persist_dir 字段
+  src/milu/tools/builtin/__init__.py  # 导出 kb 工具（可选）
 ```

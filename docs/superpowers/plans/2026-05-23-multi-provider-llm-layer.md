@@ -16,20 +16,20 @@
 |---------|------|
 | `pyproject.toml` | 项目配置，依赖管理 |
 | `.env.example` | 环境变量模板 |
-| `src/agent_framework/__init__.py` | 顶层公共导出 |
-| `src/agent_framework/exceptions.py` | 统一异常体系 |
-| `src/agent_framework/models/__init__.py` | 数据模型导出 |
-| `src/agent_framework/models/message.py` | Message, MessageRole |
-| `src/agent_framework/models/response.py` | StreamChunk, TokenUsage |
-| `src/agent_framework/models/config.py` | ModelConfig 及各扩展配置类 |
-| `src/agent_framework/providers/__init__.py` | ModelRegistry + 厂商导出 |
-| `src/agent_framework/providers/base.py` | BaseLLM + ModelCapabilities |
-| `src/agent_framework/providers/qwen.py` | 通义千问实现 |
-| `src/agent_framework/providers/kimi.py` | Kimi 实现 |
-| `src/agent_framework/providers/glm.py` | 智谱GLM 实现 |
-| `src/agent_framework/providers/deepseek.py` | DeepSeek 实现 |
-| `src/agent_framework/providers/minimax.py` | MiniMax 实现 |
-| `src/agent_framework/providers/doubao.py` | 豆包 实现 |
+| `src/milu/__init__.py` | 顶层公共导出 |
+| `src/milu/exceptions.py` | 统一异常体系 |
+| `src/milu/models/__init__.py` | 数据模型导出 |
+| `src/milu/models/message.py` | Message, MessageRole |
+| `src/milu/models/response.py` | StreamChunk, TokenUsage |
+| `src/milu/models/config.py` | ModelConfig 及各扩展配置类 |
+| `src/milu/providers/__init__.py` | ModelRegistry + 厂商导出 |
+| `src/milu/providers/base.py` | BaseLLM + ModelCapabilities |
+| `src/milu/providers/qwen.py` | 通义千问实现 |
+| `src/milu/providers/kimi.py` | Kimi 实现 |
+| `src/milu/providers/glm.py` | 智谱GLM 实现 |
+| `src/milu/providers/deepseek.py` | DeepSeek 实现 |
+| `src/milu/providers/minimax.py` | MiniMax 实现 |
+| `src/milu/providers/doubao.py` | 豆包 实现 |
 | `tests/conftest.py` | pytest 公共 fixtures |
 | `tests/test_models.py` | 数据模型和配置类测试 |
 | `tests/test_base_provider.py` | BaseLLM 和 ModelCapabilities 测试 |
@@ -49,20 +49,20 @@
 **Files:**
 - Create: `pyproject.toml`
 - Create: `.env.example`
-- Create: `src/agent_framework/__init__.py`
-- Create: `src/agent_framework/exceptions.py`
+- Create: `src/milu/__init__.py`
+- Create: `src/milu/exceptions.py`
 
 - [ ] **Step 1: 创建项目目录结构**
 
 ```bash
-mkdir -p src/agent_framework/providers src/agent_framework/models tests examples
+mkdir -p src/milu/providers src/milu/models tests examples
 ```
 
 - [ ] **Step 2: 创建 pyproject.toml**
 
 ```toml
 [project]
-name = "agent-framework"
+name = "milu"
 version = "0.1.0"
 description = "统一AI模型抽象层，兼容多家厂商API"
 requires-python = ">=3.10"
@@ -82,7 +82,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_framework"]
+packages = ["src/milu"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -101,43 +101,43 @@ MINIMAX_API_KEY=xxx
 DOUBAO_API_KEY=ark-cn-beijing-xxx
 ```
 
-- [ ] **Step 4: 创建 src/agent_framework/exceptions.py**
+- [ ] **Step 4: 创建 src/milu/exceptions.py**
 
 ```python
 """统一异常体系 - 所有自定义异常的基类和派生类"""
 
 
-class AgentFrameworkError(Exception):
+class MiluError(Exception):
     """框架基础异常，所有其他异常的父类"""
     pass
 
 
-class ModelConfigError(AgentFrameworkError):
+class ModelConfigError(MiluError):
     """模型配置错误，如传入了不支持的参数"""
     pass
 
 
-class AuthenticationError(AgentFrameworkError):
+class AuthenticationError(MiluError):
     """API Key 无效或缺失"""
     pass
 
 
-class RateLimitError(AgentFrameworkError):
+class RateLimitError(MiluError):
     """请求频率超限"""
     pass
 
 
-class ModelNotAvailableError(AgentFrameworkError):
+class ModelNotAvailableError(MiluError):
     """指定的模型不可用"""
     pass
 
 
-class StreamError(AgentFrameworkError):
+class StreamError(MiluError):
     """流式输出过程中发生异常"""
     pass
 
 
-class FeatureNotSupportedError(AgentFrameworkError):
+class FeatureNotSupportedError(MiluError):
     """请求的功能该模型不支持"""
     pass
 ```
@@ -145,10 +145,10 @@ class FeatureNotSupportedError(AgentFrameworkError):
 - [ ] **Step 5: 创建顶层 __init__.py（占位，后续完善导出）**
 
 ```python
-"""AI Agent Framework - 统一AI模型抽象层"""
+"""milu - 统一AI模型抽象层"""
 
-from agent_framework.exceptions import (
-    AgentFrameworkError,
+from milu.exceptions import (
+    MiluError,
     AuthenticationError,
     FeatureNotSupportedError,
     ModelConfigError,
@@ -158,7 +158,7 @@ from agent_framework.exceptions import (
 )
 
 __all__ = [
-    "AgentFrameworkError",
+    "MiluError",
     "ModelConfigError",
     "AuthenticationError",
     "RateLimitError",
@@ -178,7 +178,7 @@ uv pip install -e ".[dev]"
 - [ ] **Step 7: 验证异常可导入**
 
 ```bash
-uv run python -c "from agent_framework.exceptions import AgentFrameworkError, AuthenticationError; print('OK')"
+uv run python -c "from milu.exceptions import MiluError, AuthenticationError; print('OK')"
 ```
 
 Expected: `OK`
@@ -186,7 +186,7 @@ Expected: `OK`
 - [ ] **Step 8: 提交**
 
 ```bash
-git add pyproject.toml .env.example src/agent_framework/
+git add pyproject.toml .env.example src/milu/
 git commit -m "feat: 初始化项目脚手架和异常体系"
 ```
 
@@ -195,9 +195,9 @@ git commit -m "feat: 初始化项目脚手架和异常体系"
 ## Task 2: 数据模型（Message, StreamChunk, TokenUsage）
 
 **Files:**
-- Create: `src/agent_framework/models/message.py`
-- Create: `src/agent_framework/models/response.py`
-- Create: `src/agent_framework/models/__init__.py`
+- Create: `src/milu/models/message.py`
+- Create: `src/milu/models/response.py`
+- Create: `src/milu/models/__init__.py`
 - Create: `tests/test_models.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_models.py**
@@ -206,8 +206,8 @@ git commit -m "feat: 初始化项目脚手架和异常体系"
 """测试数据模型：Message, StreamChunk, TokenUsage"""
 
 import pytest
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
+from milu.models.message import Message, MessageRole
+from milu.models.response import StreamChunk, TokenUsage
 
 
 class TestMessageRole:
@@ -390,9 +390,9 @@ class TestStreamChunk:
 uv run pytest tests/test_models.py -v
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'agent_framework.models'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'milu.models'`
 
-- [ ] **Step 3: 创建 src/agent_framework/models/message.py**
+- [ ] **Step 3: 创建 src/milu/models/message.py**
 
 ```python
 """统一消息类型定义 - 兼容所有厂商的消息格式"""
@@ -451,7 +451,7 @@ class Message:
         return result
 ```
 
-- [ ] **Step 4: 创建 src/agent_framework/models/response.py**
+- [ ] **Step 4: 创建 src/milu/models/response.py**
 
 ```python
 """统一响应模型 - 流式输出数据块和Token用量统计"""
@@ -503,13 +503,13 @@ class StreamChunk:
     usage: TokenUsage | None = None
 ```
 
-- [ ] **Step 5: 创建 src/agent_framework/models/__init__.py**
+- [ ] **Step 5: 创建 src/milu/models/__init__.py**
 
 ```python
 """数据模型包 - 统一的消息、响应和配置结构"""
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
+from milu.models.message import Message, MessageRole
+from milu.models.response import StreamChunk, TokenUsage
 
 __all__ = [
     "Message",
@@ -530,7 +530,7 @@ Expected: 全部 PASS
 - [ ] **Step 7: 提交**
 
 ```bash
-git add src/agent_framework/models/ tests/test_models.py
+git add src/milu/models/ tests/test_models.py
 git commit -m "feat: 添加统一数据模型（Message, StreamChunk, TokenUsage）"
 ```
 
@@ -539,8 +539,8 @@ git commit -m "feat: 添加统一数据模型（Message, StreamChunk, TokenUsage
 ## Task 3: 配置参数体系
 
 **Files:**
-- Create: `src/agent_framework/models/config.py`
-- Modify: `src/agent_framework/models/__init__.py`
+- Create: `src/milu/models/config.py`
+- Modify: `src/milu/models/__init__.py`
 - Test: `tests/test_models.py`（追加测试）
 
 - [ ] **Step 1: 追加配置测试到 tests/test_models.py**
@@ -548,7 +548,7 @@ git commit -m "feat: 添加统一数据模型（Message, StreamChunk, TokenUsage
 在文件末尾追加：
 
 ```python
-from agent_framework.models.config import (
+from milu.models.config import (
     ModelConfig,
     WebSearchConfig,
     ThinkingConfig,
@@ -706,7 +706,7 @@ uv run pytest tests/test_models.py -v -k "Config"
 
 Expected: FAIL — `ImportError`
 
-- [ ] **Step 3: 创建 src/agent_framework/models/config.py**
+- [ ] **Step 3: 创建 src/milu/models/config.py**
 
 ```python
 """模型配置参数定义 - 基础配置和按能力扩展配置"""
@@ -806,12 +806,12 @@ class AudioGenerationConfig(ModelConfig):
     speed: float = 1.0
 ```
 
-- [ ] **Step 4: 更新 src/agent_framework/models/__init__.py 导出配置类**
+- [ ] **Step 4: 更新 src/milu/models/__init__.py 导出配置类**
 
 在现有文件中追加导出：
 
 ```python
-from agent_framework.models.config import (
+from milu.models.config import (
     ModelConfig,
     WebSearchConfig,
     ThinkingConfig,
@@ -834,7 +834,7 @@ Expected: 全部 PASS
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/models/config.py src/agent_framework/models/__init__.py tests/test_models.py
+git add src/milu/models/config.py src/milu/models/__init__.py tests/test_models.py
 git commit -m "feat: 添加模型配置参数体系（基础+扩展）"
 ```
 
@@ -843,7 +843,7 @@ git commit -m "feat: 添加模型配置参数体系（基础+扩展）"
 ## Task 4: BaseLLM 抽象基类与 ModelCapabilities
 
 **Files:**
-- Create: `src/agent_framework/providers/base.py`
+- Create: `src/milu/providers/base.py`
 - Create: `tests/test_base_provider.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_base_provider.py**
@@ -852,9 +852,9 @@ git commit -m "feat: 添加模型配置参数体系（基础+扩展）"
 """测试 BaseLLM 抽象基类和 ModelCapabilities"""
 
 import pytest
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk
+from milu.providers.base import BaseLLM, ModelCapabilities
+from milu.models.message import Message, MessageRole
+from milu.models.response import StreamChunk
 
 
 class TestModelCapabilities:
@@ -995,7 +995,7 @@ class TestBaseLLM:
         """api_key缺失时抛出AuthenticationError"""
         monkeypatch.delenv("TEST_PROVIDER_API_KEY", raising=False)
         llm = ConcreteLLM(api_key=None)
-        from agent_framework.exceptions import AuthenticationError
+        from milu.exceptions import AuthenticationError
         with pytest.raises(AuthenticationError):
             llm._get_api_key()
 
@@ -1013,7 +1013,7 @@ uv run pytest tests/test_base_provider.py -v
 
 Expected: FAIL — `ModuleNotFoundError`
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/base.py**
+- [ ] **Step 3: 创建 src/milu/providers/base.py**
 
 ```python
 """BaseLLM 抽象基类和 ModelCapabilities 能力描述符"""
@@ -1028,9 +1028,9 @@ from dataclasses import dataclass
 
 from openai import AsyncOpenAI
 
-from agent_framework.exceptions import AuthenticationError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk
+from milu.exceptions import AuthenticationError
+from milu.models.message import Message
+from milu.models.response import StreamChunk
 
 logger = logging.getLogger(__name__)
 
@@ -1233,7 +1233,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/base.py tests/test_base_provider.py
+git add src/milu/providers/base.py tests/test_base_provider.py
 git commit -m "feat: 添加BaseLLM抽象基类和ModelCapabilities能力描述符"
 ```
 
@@ -1242,7 +1242,7 @@ git commit -m "feat: 添加BaseLLM抽象基类和ModelCapabilities能力描述�
 ## Task 5: ModelRegistry 注册表
 
 **Files:**
-- Create: `src/agent_framework/providers/__init__.py`
+- Create: `src/milu/providers/__init__.py`
 - Create: `tests/test_registry.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_registry.py**
@@ -1251,10 +1251,10 @@ git commit -m "feat: 添加BaseLLM抽象基类和ModelCapabilities能力描述�
 """测试 ModelRegistry 注册表"""
 
 import pytest
-from agent_framework.providers import ModelRegistry
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk
+from milu.providers import ModelRegistry
+from milu.providers.base import BaseLLM, ModelCapabilities
+from milu.models.message import Message
+from milu.models.response import StreamChunk
 
 
 class FakeLLM(BaseLLM):
@@ -1328,26 +1328,26 @@ uv run pytest tests/test_registry.py -v
 
 Expected: FAIL — `ImportError`
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/__init__.py**
+- [ ] **Step 3: 创建 src/milu/providers/__init__.py**
 
 ```python
 """
 模型厂商包 - 包含所有厂商实现和注册表。
 
 使用方式:
-    from agent_framework.providers import ModelRegistry
+    from milu.providers import ModelRegistry
 
     # 工厂方式创建
     model = ModelRegistry.create("qwen", model="qwen-max")
 
     # 或直接导入
-    from agent_framework.providers.qwen import QwenLLM
+    from milu.providers.qwen import QwenLLM
     model = QwenLLM(model="qwen-max")
 """
 
 from __future__ import annotations
 
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 
 class ModelRegistry:
@@ -1399,7 +1399,7 @@ class ModelRegistry:
 
 # 导入所有厂商模块以触发自动注册
 # 注意：各厂商模块在后续Task中创建，此处先注释
-# from agent_framework.providers import qwen, kimi, glm, deepseek, minimax, doubao
+# from milu.providers import qwen, kimi, glm, deepseek, minimax, doubao
 
 __all__ = [
     "ModelRegistry",
@@ -1419,7 +1419,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/__init__.py tests/test_registry.py
+git add src/milu/providers/__init__.py tests/test_registry.py
 git commit -m "feat: 添加ModelRegistry模型注册表"
 ```
 
@@ -1428,7 +1428,7 @@ git commit -m "feat: 添加ModelRegistry模型注册表"
 ## Task 6: QwenLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/qwen.py`
+- Create: `src/milu/providers/qwen.py`
 - Create: `tests/conftest.py`
 - Create: `tests/test_qwen.py`
 
@@ -1500,9 +1500,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk
-from agent_framework.providers.qwen import QwenLLM
+from milu.models.message import Message, MessageRole
+from milu.models.response import StreamChunk
+from milu.providers.qwen import QwenLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -1667,9 +1667,9 @@ class TestQwenChat:
 uv run pytest tests/test_qwen.py -v
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'agent_framework.providers.qwen'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'milu.providers.qwen'`
 
-- [ ] **Step 4: 创建 src/agent_framework/providers/qwen.py**
+- [ ] **Step 4: 创建 src/milu/providers/qwen.py**
 
 ```python
 """
@@ -1689,10 +1689,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -1819,7 +1819,7 @@ class QwenLLM(BaseLLM):
 
 
 # 自动注册到 ModelRegistry
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("qwen", QwenLLM)
 ```
 
@@ -1834,7 +1834,7 @@ Expected: 全部 PASS
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/providers/qwen.py tests/conftest.py tests/test_qwen.py
+git add src/milu/providers/qwen.py tests/conftest.py tests/test_qwen.py
 git commit -m "feat: 添加QwenLLM通义千问模型实现"
 ```
 
@@ -1843,7 +1843,7 @@ git commit -m "feat: 添加QwenLLM通义千问模型实现"
 ## Task 7: KimiLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/kimi.py`
+- Create: `src/milu/providers/kimi.py`
 - Create: `tests/test_kimi.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_kimi.py**
@@ -1857,9 +1857,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import StreamChunk
-from agent_framework.providers.kimi import KimiLLM
+from milu.models.message import Message, MessageRole
+from milu.models.response import StreamChunk
+from milu.providers.kimi import KimiLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -1975,7 +1975,7 @@ uv run pytest tests/test_kimi.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/kimi.py**
+- [ ] **Step 3: 创建 src/milu/providers/kimi.py**
 
 ```python
 """
@@ -1994,10 +1994,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -2127,7 +2127,7 @@ class KimiLLM(BaseLLM):
         return result
 
 
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("kimi", KimiLLM)
 ```
 
@@ -2142,7 +2142,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/kimi.py tests/test_kimi.py
+git add src/milu/providers/kimi.py tests/test_kimi.py
 git commit -m "feat: 添加KimiLLM月之暗面模型实现"
 ```
 
@@ -2151,7 +2151,7 @@ git commit -m "feat: 添加KimiLLM月之暗面模型实现"
 ## Task 8: GLMLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/glm.py`
+- Create: `src/milu/providers/glm.py`
 - Create: `tests/test_glm.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_glm.py**
@@ -2165,8 +2165,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.providers.glm import GLMLLM
+from milu.models.message import Message, MessageRole
+from milu.providers.glm import GLMLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -2266,7 +2266,7 @@ uv run pytest tests/test_glm.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/glm.py**
+- [ ] **Step 3: 创建 src/milu/providers/glm.py**
 
 ```python
 """
@@ -2285,10 +2285,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -2403,7 +2403,7 @@ class GLMLLM(BaseLLM):
         return result
 
 
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("glm", GLMLLM)
 ```
 
@@ -2418,7 +2418,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/glm.py tests/test_glm.py
+git add src/milu/providers/glm.py tests/test_glm.py
 git commit -m "feat: 添加GLMLLM智谱AI模型实现"
 ```
 
@@ -2427,7 +2427,7 @@ git commit -m "feat: 添加GLMLLM智谱AI模型实现"
 ## Task 9: DeepSeekLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/deepseek.py`
+- Create: `src/milu/providers/deepseek.py`
 - Create: `tests/test_deepseek.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_deepseek.py**
@@ -2441,8 +2441,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.providers.deepseek import DeepSeekLLM
+from milu.models.message import Message, MessageRole
+from milu.providers.deepseek import DeepSeekLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -2539,7 +2539,7 @@ uv run pytest tests/test_deepseek.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/deepseek.py**
+- [ ] **Step 3: 创建 src/milu/providers/deepseek.py**
 
 ```python
 """
@@ -2558,10 +2558,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -2683,7 +2683,7 @@ class DeepSeekLLM(BaseLLM):
         return result
 
 
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("deepseek", DeepSeekLLM)
 ```
 
@@ -2698,7 +2698,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/deepseek.py tests/test_deepseek.py
+git add src/milu/providers/deepseek.py tests/test_deepseek.py
 git commit -m "feat: 添加DeepSeekLLM深度求索模型实现"
 ```
 
@@ -2707,7 +2707,7 @@ git commit -m "feat: 添加DeepSeekLLM深度求索模型实现"
 ## Task 10: MiniMaxLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/minimax.py`
+- Create: `src/milu/providers/minimax.py`
 - Create: `tests/test_minimax.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_minimax.py**
@@ -2721,8 +2721,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.providers.minimax import MiniMaxLLM
+from milu.models.message import Message, MessageRole
+from milu.providers.minimax import MiniMaxLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -2794,7 +2794,7 @@ uv run pytest tests/test_minimax.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/minimax.py**
+- [ ] **Step 3: 创建 src/milu/providers/minimax.py**
 
 ```python
 """
@@ -2815,10 +2815,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -2913,7 +2913,7 @@ class MiniMaxLLM(BaseLLM):
         return result
 
 
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("minimax", MiniMaxLLM)
 ```
 
@@ -2928,7 +2928,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/minimax.py tests/test_minimax.py
+git add src/milu/providers/minimax.py tests/test_minimax.py
 git commit -m "feat: 添加MiniMaxLLM模型实现"
 ```
 
@@ -2937,7 +2937,7 @@ git commit -m "feat: 添加MiniMaxLLM模型实现"
 ## Task 11: DoubaoLLM 实现
 
 **Files:**
-- Create: `src/agent_framework/providers/doubao.py`
+- Create: `src/milu/providers/doubao.py`
 - Create: `tests/test_doubao.py`
 
 - [ ] **Step 1: 编写失败测试 tests/test_doubao.py**
@@ -2951,8 +2951,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.providers.doubao import DoubaoLLM
+from milu.models.message import Message, MessageRole
+from milu.providers.doubao import DoubaoLLM
 from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 
 
@@ -3021,7 +3021,7 @@ uv run pytest tests/test_doubao.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: 创建 src/agent_framework/providers/doubao.py**
+- [ ] **Step 3: 创建 src/milu/providers/doubao.py**
 
 ```python
 """
@@ -3041,10 +3041,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 
-from agent_framework.exceptions import StreamError
-from agent_framework.models.message import Message
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.exceptions import StreamError
+from milu.models.message import Message
+from milu.models.response import StreamChunk, TokenUsage
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -3148,7 +3148,7 @@ class DoubaoLLM(BaseLLM):
         return result
 
 
-from agent_framework.providers import ModelRegistry
+from milu.providers import ModelRegistry
 ModelRegistry.register("doubao", DoubaoLLM)
 ```
 
@@ -3163,7 +3163,7 @@ Expected: 全部 PASS
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/providers/doubao.py tests/test_doubao.py
+git add src/milu/providers/doubao.py tests/test_doubao.py
 git commit -m "feat: 添加DoubaoLLM豆包模型实现"
 ```
 
@@ -3172,8 +3172,8 @@ git commit -m "feat: 添加DoubaoLLM豆包模型实现"
 ## Task 12: 集成导出与使用示例
 
 **Files:**
-- Modify: `src/agent_framework/providers/__init__.py`
-- Modify: `src/agent_framework/__init__.py`
+- Modify: `src/milu/providers/__init__.py`
+- Modify: `src/milu/__init__.py`
 - Create: `examples/basic_usage.py`
 
 - [ ] **Step 1: 更新 providers/__init__.py 导入所有厂商触发自动注册**
@@ -3182,21 +3182,21 @@ git commit -m "feat: 添加DoubaoLLM豆包模型实现"
 
 ```python
 # 导入所有厂商模块以触发自动注册
-from agent_framework.providers import qwen as _qwen
-from agent_framework.providers import kimi as _kimi
-from agent_framework.providers import glm as _glm
-from agent_framework.providers import deepseek as _deepseek
-from agent_framework.providers import minimax as _minimax
-from agent_framework.providers import doubao as _doubao
+from milu.providers import qwen as _qwen
+from milu.providers import kimi as _kimi
+from milu.providers import glm as _glm
+from milu.providers import deepseek as _deepseek
+from milu.providers import minimax as _minimax
+from milu.providers import doubao as _doubao
 ```
 
-- [ ] **Step 2: 更新 src/agent_framework/__init__.py 完整导出**
+- [ ] **Step 2: 更新 src/milu/__init__.py 完整导出**
 
 ```python
-"""AI Agent Framework - 统一AI模型抽象层"""
+"""milu - 统一AI模型抽象层"""
 
-from agent_framework.exceptions import (
-    AgentFrameworkError,
+from milu.exceptions import (
+    MiluError,
     AuthenticationError,
     FeatureNotSupportedError,
     ModelConfigError,
@@ -3204,13 +3204,13 @@ from agent_framework.exceptions import (
     RateLimitError,
     StreamError,
 )
-from agent_framework.models import Message, MessageRole, StreamChunk, TokenUsage
-from agent_framework.providers import ModelRegistry
-from agent_framework.providers.base import BaseLLM, ModelCapabilities
+from milu.models import Message, MessageRole, StreamChunk, TokenUsage
+from milu.providers import ModelRegistry
+from milu.providers.base import BaseLLM, ModelCapabilities
 
 __all__ = [
     # 异常
-    "AgentFrameworkError",
+    "MiluError",
     "ModelConfigError",
     "AuthenticationError",
     "RateLimitError",
@@ -3242,9 +3242,9 @@ __all__ = [
 
 import asyncio
 
-from agent_framework import Message, MessageRole, ModelRegistry
-from agent_framework.providers.qwen import QwenLLM
-from agent_framework.providers.deepseek import DeepSeekLLM
+from milu import Message, MessageRole, ModelRegistry
+from milu.providers.qwen import QwenLLM
+from milu.providers.deepseek import DeepSeekLLM
 
 
 async def demo_direct_usage():
@@ -3408,7 +3408,7 @@ Expected: 输出各厂商的能力对比信息
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/ examples/
+git add src/milu/ examples/
 git commit -m "feat: 完善包导出和基础使用示例"
 ```
 
@@ -3428,10 +3428,10 @@ Expected: 所有测试通过
 
 ```bash
 uv run python -c "
-from agent_framework import (
+from milu import (
     ModelRegistry, BaseLLM, ModelCapabilities,
     Message, MessageRole, StreamChunk, TokenUsage,
-    AgentFrameworkError, AuthenticationError,
+    MiluError, AuthenticationError,
 )
 
 # 验证所有厂商已注册

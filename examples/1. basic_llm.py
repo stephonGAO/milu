@@ -4,8 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import Message, MessageRole
-from agent_framework.llm.providers import ModelRegistry
+from milu import Message, MessageRole
+from milu.llm.providers import ModelRegistry
 
 # 加载 .env 中的 API Key
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")

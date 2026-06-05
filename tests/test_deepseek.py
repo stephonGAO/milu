@@ -13,7 +13,7 @@ class TestDeepSeekCapabilities:
     """验证 DeepSeekLLM 的能力标志是否与规格一致"""
 
     def test_capabilities(self):
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         llm = DeepSeekLLM(api_key="test", model="deepseek-chat")
         caps = llm.capabilities
@@ -45,7 +45,7 @@ class TestDeepSeekAvailableParams:
     """验证 DeepSeekLLM 支持的参数名集合"""
 
     def test_no_web_search(self):
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         llm = DeepSeekLLM(api_key="test", model="deepseek-chat")
         params = llm._get_available_param_names()
@@ -54,7 +54,7 @@ class TestDeepSeekAvailableParams:
         assert "web_search_strategy" not in params
 
     def test_has_thinking(self):
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         llm = DeepSeekLLM(api_key="test", model="deepseek-chat")
         params = llm._get_available_param_names()
@@ -63,7 +63,7 @@ class TestDeepSeekAvailableParams:
         assert "thinking_level" in params
 
     def test_has_basic_params(self):
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         llm = DeepSeekLLM(api_key="test", model="deepseek-chat")
         params = llm._get_available_param_names()
@@ -76,7 +76,7 @@ class TestDeepSeekAvailableParams:
         assert "presence_penalty" in params
 
     def test_has_tools(self):
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         llm = DeepSeekLLM(api_key="test", model="deepseek-chat")
         params = llm._get_available_param_names()
@@ -91,8 +91,8 @@ class TestDeepSeekChat:
     @pytest.mark.asyncio
     async def test_basic_chat(self):
         """基础聊天：3个chunk（内容"你"+"好"+结束带usage），验证StreamChunk字段"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         chunks = [
             MockChunk(
@@ -136,8 +136,8 @@ class TestDeepSeekChat:
     @pytest.mark.asyncio
     async def test_thinking_level_to_budget_mapping(self):
         """思考等级到预算的映射：low->1024, medium->4096, high->8192"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.deepseek import DeepSeekLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.deepseek import DeepSeekLLM
 
         async def mock_stream():
             yield MockChunk(

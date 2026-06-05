@@ -12,7 +12,7 @@ from tests.conftest import MockChunk, MockChoice, MockDelta, MockUsage
 class TestClaudeCapabilities:
 
     def test_capabilities(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         caps = llm.capabilities
@@ -31,26 +31,26 @@ class TestClaudeCapabilities:
         assert caps.supported_output_formats == ("text", "json")
 
     def test_provider_name(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         assert llm.provider_name == "anthropic"
 
     def test_base_url(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         assert "api.anthropic.com" in llm.base_url
 
     def test_registered(self):
-        from agent_framework.llm.providers import ModelRegistry
+        from milu.llm.providers import ModelRegistry
         assert "anthropic" in ModelRegistry.list_providers()
 
 
 class TestClaudeParams:
 
     def test_has_basic_params(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         params = llm._get_available_param_names()
@@ -59,7 +59,7 @@ class TestClaudeParams:
         assert "max_tokens" in params
 
     def test_has_thinking_params(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         params = llm._get_available_param_names()
@@ -67,14 +67,14 @@ class TestClaudeParams:
         assert "thinking_budget" in params
 
     def test_no_web_search(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         params = llm._get_available_param_names()
         assert "web_search" not in params
 
     def test_has_tools(self):
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         params = llm._get_available_param_names()
@@ -83,7 +83,7 @@ class TestClaudeParams:
 
     def test_no_frequency_penalty(self):
         """Claude 不支持 frequency_penalty"""
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.providers.claude import ClaudeLLM
 
         llm = ClaudeLLM(api_key="test", model="claude-sonnet-4-20250514")
         params = llm._get_available_param_names()
@@ -95,8 +95,8 @@ class TestClaudeChat:
 
     @pytest.mark.asyncio
     async def test_basic_chat(self):
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.claude import ClaudeLLM
 
         chunks = [
             MockChunk(choices=[MockChoice(delta=MockDelta(content="你", role="assistant"))]),
@@ -129,8 +129,8 @@ class TestClaudeChat:
 
     @pytest.mark.asyncio
     async def test_thinking_enabled(self):
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.claude import ClaudeLLM
 
         async def mock_stream():
             yield MockChunk(
@@ -159,8 +159,8 @@ class TestClaudeChat:
 
     @pytest.mark.asyncio
     async def test_thinking_custom_budget(self):
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.claude import ClaudeLLM
 
         async def mock_stream():
             yield MockChunk(
@@ -182,8 +182,8 @@ class TestClaudeChat:
 
     @pytest.mark.asyncio
     async def test_thinking_disabled(self):
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.claude import ClaudeLLM
 
         async def mock_stream():
             yield MockChunk(
@@ -205,8 +205,8 @@ class TestClaudeChat:
 
     @pytest.mark.asyncio
     async def test_reasoning_content(self):
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.claude import ClaudeLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.claude import ClaudeLLM
 
         async def mock_stream():
             yield MockChunk(

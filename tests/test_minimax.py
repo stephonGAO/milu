@@ -13,7 +13,7 @@ class TestMiniMaxCapabilities:
     """验证 MiniMaxLLM 的能力标志是否与规格一致"""
 
     def test_capabilities(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         caps = llm.capabilities
@@ -45,7 +45,7 @@ class TestMiniMaxAvailableParams:
     """验证 MiniMaxLLM 支持的参数名集合"""
 
     def test_available_params_include_basic(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
@@ -59,7 +59,7 @@ class TestMiniMaxAvailableParams:
         assert "presence_penalty" in params
 
     def test_available_params_include_tools(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
@@ -68,7 +68,7 @@ class TestMiniMaxAvailableParams:
         assert "tool_choice" in params
 
     def test_available_params_include_image_params(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
@@ -79,7 +79,7 @@ class TestMiniMaxAvailableParams:
         assert "num_images" in params
 
     def test_available_params_include_audio_params(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
@@ -90,7 +90,7 @@ class TestMiniMaxAvailableParams:
         assert "speed" in params
 
     def test_no_web_search_or_thinking_params(self):
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         llm = MiniMaxLLM(api_key="test", model="minimax-speech-02-turbo")
         params = llm._get_available_param_names()
@@ -108,8 +108,8 @@ class TestMiniMaxChat:
     @pytest.mark.asyncio
     async def test_basic_chat(self):
         """基础聊天：3个chunk（内容"你"+"好"+结束带usage），验证StreamChunk字段"""
-        from agent_framework.llm.base.message import Message, MessageRole
-        from agent_framework.llm.providers.minimax import MiniMaxLLM
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.minimax import MiniMaxLLM
 
         # 构造模拟的流式响应：3个chunk
         chunks = [

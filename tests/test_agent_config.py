@@ -2,8 +2,8 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from agent_framework.agent import Agent, AgentMode
-from agent_framework.agent.config import AgentConfig, CompactConfig
+from milu.agent import Agent, AgentMode
+from milu.agent.config import AgentConfig, CompactConfig
 
 
 def test_default_config():

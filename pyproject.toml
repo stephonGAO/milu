@@ -1,5 +1,5 @@
 [project]
-name = "agent-framework"
+name = "milu"
 version = "0.1.0"
 description = "统一AI模型抽象层，兼容多家厂商API"
 requires-python = ">=3.10"
@@ -23,16 +23,15 @@ mcp = [
 ]
 
 [project.scripts]
-# 入口点（pip install 后可直接在终端调用）。命令名可按需改为最终 PyPI 包名。
-agent-framework = "agent_framework.cli:main"
-afx = "agent_framework.cli:main"
+# 入口点（pip install 后可直接在终端调用）
+milu = "milu.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_framework"]
+packages = ["src/milu"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

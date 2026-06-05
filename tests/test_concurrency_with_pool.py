@@ -9,12 +9,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import TextDelta, AgentDone
-from agent_framework.llm.base.message import MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.serving import AgentPool, AgentPoolConfig
-from agent_framework.tools import tool
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import TextDelta, AgentDone
+from milu.llm.base.message import MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.serving import AgentPool, AgentPoolConfig
+from milu.tools import tool
 
 
 def _make_echo_llm(delay: float = 0.01):

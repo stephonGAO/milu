@@ -1,6 +1,6 @@
 # 多用户并发架构评估报告
 
-> **范围**：评估 `agent-framework` 项目作为"AI Agent 核心库 + 多用户并发服务"两大用途的可行性，识别当前设计的并发缺陷，给出改造路线。
+> **范围**：评估 `milu` 项目作为"AI Agent 核心库 + 多用户并发服务"两大用途的可行性，识别当前设计的并发缺陷，给出改造路线。
 >
 > **数据来源**：源码全量阅读（src/、tests/、examples/、docs/、pyproject.toml）、并发压测基线（`tests/test_concurrency_stress.py`）、既有路线图（`docs/superpowers/plans/2026-06-02-multi-user-concurrency-roadmap.md`）。
 
@@ -27,7 +27,7 @@
 
 ## 1. 现状盘点 — 4 层 + 2 个新增组件
 
-### 1.1 LLM 层（`src/agent_framework/llm/`）— 🟢 协程安全，但缺流控
+### 1.1 LLM 层（`src/milu/llm/`）— 🟢 协程安全，但缺流控
 
 **已实现能力**：
 - `BaseLLM` 抽象统一接口 `chat() -> AsyncIterator[StreamChunk]`
@@ -44,7 +44,7 @@
 
 **关键代码引用**：
 ```python
-# src/agent_framework/llm/providers/base.py:120-133
+# src/milu/llm/providers/base.py:120-133
 def _get_client(self) -> AsyncOpenAI:
     if self._client is None:
         self._client = AsyncOpenAI(
@@ -54,7 +54,7 @@ def _get_client(self) -> AsyncOpenAI:
     return self._client
 ```
 
-### 1.2 Agent 层（`src/agent_framework/agent/`）— 🟡 实例边界清晰，per-run 状态未重构
+### 1.2 Agent 层（`src/milu/agent/`）— 🟡 实例边界清晰，per-run 状态未重构
 
 **已实现能力**：
 - `Agent` 构造时**每次创建独立** `_history`、`_registry`、`_executor`、`_skill_registry`、`_session`（`agent.py:125-225`）
@@ -87,7 +87,7 @@ async def _subagent_tool(task: str) -> str:
         _last_events.append(event)
 ```
 
-### 1.3 Tool 层（`src/agent_framework/tools/`）— 🟡 双池设计、缺锁
+### 1.3 Tool 层（`src/milu/tools/`）— 🟡 双池设计、缺锁
 
 **已实现能力**：
 - `@tool` 装饰器（`decorator.py:1-48`）自动生成 JSON Schema
@@ -103,7 +103,7 @@ async def _subagent_tool(task: str) -> str:
   - 缓解：AgentPool 当前为每用户独立 Agent，TodoManager 也随实例独立（除非显式共享）
 - 🟢 `ToolExecutor.execute` 无锁，但工具函数**理论上应是纯函数或自带并发安全**——大多数内置工具都是
 
-### 1.4 MCP 层（`src/agent_framework/tools/mcp/`）— 🔴 无 per-user 隔离
+### 1.4 MCP 层（`src/milu/tools/mcp/`）— 🔴 无 per-user 隔离
 
 **已实现能力**：
 - 3 种传输：`stdio` / `streamable_http` / `sse`
@@ -122,7 +122,7 @@ async def _subagent_tool(task: str) -> str:
 
 **关键代码引用**：
 ```python
-# src/agent_framework/serving/pool.py:65-77 (注释)
+# src/milu/serving/pool.py:65-77 (注释)
 # 单 Agent 内存占用：
 #   - 无 MCP 场景：~1 MB
 #   - 有 MCP 场景：~15-50 MB（MCP 子进程是真正的瓶颈）
@@ -131,7 +131,7 @@ async def _subagent_tool(task: str) -> str:
 #   - 重度 MCP（5+ server + HTTP 长连接）：~240 用户 ❌ 需横向扩展
 ```
 
-### 1.5 serving 层（`src/agent_framework/serving/pool.py`）— 🟢 核心架构已就位
+### 1.5 serving 层（`src/milu/serving/pool.py`）— 🟢 核心架构已就位
 
 **AgentPool 4 个硬不变量**（`pool.py:92-96`）：
 1. 每个 `(user_id, session_id)` 最多 1 个 Agent 实例
@@ -186,7 +186,7 @@ await pool.stop()
 
 ### Bug #1：SubAgent `_last_events` 闭包共享
 
-**位置**：`src/agent_framework/agent/subagent.py:130, 140, 176, 194`
+**位置**：`src/milu/agent/subagent.py:130, 140, 176, 194`
 
 **症状**：
 - 同一父 Agent 在不同协程中调用同一 subagent 工具
@@ -220,7 +220,7 @@ async def _subagent_tool(task: str) -> str:
 
 ### Bug #2：Agent 内部状态共享
 
-**位置**：`src/agent_framework/agent/agent.py:466, 474, _conn_retry_count`
+**位置**：`src/milu/agent/agent.py:466, 474, _conn_retry_count`
 
 **症状**：
 - `_work_started` / `_plan_created` 是实例字段，跨 run 共享
@@ -253,7 +253,7 @@ async def run(self, user_input, **kw) -> AsyncIterator[AgentEvent]:
 
 ### Bug #3：Session JSONL 并发写
 
-**位置**：`src/agent_framework/agent/session.py:111-114, 155-157`
+**位置**：`src/milu/agent/session.py:111-114, 155-157`
 
 **症状**：
 - `log_message` 同步 `open(..., 'a')` 写盘
@@ -280,7 +280,7 @@ class Session:
 
 ### Bug #4：`_agent_busy` 单布尔误判
 
-**位置**：`src/agent_framework/agent/agent.py`（具体行需进一步定位）
+**位置**：`src/milu/agent/agent.py`（具体行需进一步定位）
 
 **症状**：
 - 原设计意图是"防止同一 Agent 并发 run 互踩"
@@ -293,7 +293,7 @@ class Session:
 
 ### Bug #5：TodoManager 跨用户共享
 
-**位置**：`src/agent_framework/tools/builtin/todo_write.py:79-137`
+**位置**：`src/milu/tools/builtin/todo_write.py:79-137`
 
 **症状**：
 - 如果上游项目显式 `create_todo_write_tool(manager=shared_manager)` 把同一 TodoManager 传给多用户 Agent
@@ -408,7 +408,7 @@ class Session:
 **当前 `pyproject.toml`**：
 ```toml
 [project]
-name = "agent-framework"
+name = "milu"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -428,21 +428,21 @@ mcp = ["mcp>=1.0.0"]
 
 | 问题 | 严重度 | 修复 |
 |---|---|---|
-| 无 `entry_points` | 🟡 | 加 `agent-server = "agent_framework.cli:main"` 启动多用户服务 |
+| 无 `entry_points` | 🟡 | 加 `agent-server = "milu.cli:main"` 启动多用户服务 |
 | 无 README / 长描述 | 🔴 | 加 `readme = "README.md"` 和项目文档 |
 | 无 `license` | 🔴 | 加 `license = {text = "MIT"}` |
 | 无 `authors` | 🔴 | 补全 |
 | `ddgs` 写死 | 🟡 | 移入 `[search]` 可选依赖 |
 | `httpx` 在主依赖 | 🟡 | 改可选（被 `openai` 间接依赖，重复声明） |
 | 无版本号语义化 | 🟡 | 仍 0.1.0，但应进入 0.2.0（加 PR-2/3/4/5 后） |
-| 公开 API 无声明 | 🟡 | 哪些是公开 API、哪些是 internal？建议加 `__all__` 和 `agent_framework.public_api` 标记 |
+| 公开 API 无声明 | 🟡 | 哪些是公开 API、哪些是 internal？建议加 `__all__` 和 `milu.public_api` 标记 |
 | `AgentPool` 已在 `__init__.py` | ✅ | `serving/__init__.py` re-export 已就位 |
 | 上游项目集成示例 | 🟡 | 缺 `examples/integration_basic/`、`examples/integration_with_pool/` |
 
 **建议改造的 `pyproject.toml` 草案**：
 ```toml
 [project]
-name = "agent-framework"
+name = "milu"
 version = "0.2.0"
 description = "Unified AI model abstraction + multi-user Agent orchestration"
 readme = "README.md"
@@ -473,7 +473,7 @@ Homepage = "https://..."
 Repository = "https://..."
 
 [project.scripts]
-agent-server = "agent_framework.cli:main"
+agent-server = "milu.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -483,15 +483,15 @@ build-backend = "hatchling.build"
 **上游项目集成建议**：
 ```python
 # 上游 A：仅用 LLM
-from agent_framework.llm import ModelRegistry
+from milu.llm import ModelRegistry
 llm = ModelRegistry.create("qwen", model="qwen3.7-max")
 
 # 上游 B：用 Agent
-from agent_framework import Agent, AgentConfig
+from milu import Agent, AgentConfig
 agent = Agent(llm=llm, config=AgentConfig(mode="auto"))
 
 # 上游 C：多用户服务
-from agent_framework.serving import AgentPool, AgentPoolConfig
+from milu.serving import AgentPool, AgentPoolConfig
 pool = AgentPool(llm_factory=lambda uid, sid: shared_llm, config=AgentPoolConfig(...))
 ```
 
@@ -615,7 +615,7 @@ pool = AgentPool(llm_factory=lambda uid, sid: shared_llm, config=AgentPoolConfig
 ## 附录 A：关键文件清单
 
 ```
-src/agent_framework/
+src/milu/
 ├── __init__.py                    # 公开 API 出口
 ├── agent/
 │   ├── agent.py                   # ⚠️ PR-2/3 改造点（per-run 状态）

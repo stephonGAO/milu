@@ -1,11 +1,11 @@
 """测试 Agent 编排器"""
 import pytest
 from unittest.mock import AsyncMock
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone, AgentError
-from agent_framework.llm.base.message import MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone, AgentError
+from milu.llm.base.message import MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 @pytest.fixture

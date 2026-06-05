@@ -4,13 +4,13 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.config import AgentMode
-from agent_framework.agent.events import (
+from milu.agent import Agent, AgentConfig
+from milu.agent.config import AgentMode
+from milu.agent.events import (
     ToolCallStart, ToolResult, AgentDone, AgentError,
 )
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 # ── 辅助工厂 ──────────────────────────────────────────────
@@ -472,7 +472,7 @@ class TestSubAgentModeInheritance:
     @pytest.mark.asyncio
     async def test_subagent_inherits_parent_talk_mode(self):
         """子代理应继承父 Agent 的 talk 模式"""
-        from agent_framework.agent.subagent import create_subagent_tools, SubAgentConfig
+        from milu.agent.subagent import create_subagent_tools, SubAgentConfig
 
         write_tool_called = False
 
@@ -560,7 +560,7 @@ class TestSubAgentModeInheritance:
         验证 Phase A.2：Agent.run() 注入 _current_parent_mode，子代理工具读取它，
         无需「先建 Agent 再回填 get_parent_mode 闭包」。
         """
-        from agent_framework.agent.subagent import create_subagent_tools, SubAgentConfig
+        from milu.agent.subagent import create_subagent_tools, SubAgentConfig
 
         write_tool_called = False
 
@@ -696,7 +696,7 @@ class TestShellSafe:
 
     def test_safe_commands_allowed(self):
         """白名单中的命令应判定为安全"""
-        from agent_framework.tools.builtin.shell_command import _is_safe_shell
+        from milu.tools.builtin.shell_command import _is_safe_shell
 
         allowed = ["ls", "cat file.txt", "grep pattern file", "curl http://example.com",
                    "git status", "git log", "ps aux", "df -h", "du -sh", "pwd",
@@ -707,7 +707,7 @@ class TestShellSafe:
 
     def test_non_safe_commands_blocked(self):
         """不在白名单中的命令应判定为非安全"""
-        from agent_framework.tools.builtin.shell_command import _is_safe_shell
+        from milu.tools.builtin.shell_command import _is_safe_shell
 
         blocked = ["rm file", "cp src dst", "mv old new", "mkdir dir",
                    "chmod 755 file", "chown user file", "pip install pkg",
@@ -717,7 +717,7 @@ class TestShellSafe:
 
     def test_redirect_blocked(self):
         """包含重定向的命令应判定为非安全"""
-        from agent_framework.tools.builtin.shell_command import _is_safe_shell
+        from milu.tools.builtin.shell_command import _is_safe_shell
 
         blocked = [
             "echo hello > file.txt",
@@ -729,7 +729,7 @@ class TestShellSafe:
 
     def test_path_prefix_stripped(self):
         """带路径前缀的命令应正确提取基础命令名"""
-        from agent_framework.tools.builtin.shell_command import _is_safe_shell
+        from milu.tools.builtin.shell_command import _is_safe_shell
 
         assert _is_safe_shell({"command": "/usr/bin/ls -la"}) is True
         assert _is_safe_shell({"command": "/bin/cat file"}) is True
@@ -737,7 +737,7 @@ class TestShellSafe:
 
     def test_empty_command(self):
         """空命令应判定为非安全"""
-        from agent_framework.tools.builtin.shell_command import _is_safe_shell
+        from milu.tools.builtin.shell_command import _is_safe_shell
 
         assert _is_safe_shell({"command": ""}) is False
         assert _is_safe_shell({}) is False
@@ -752,7 +752,7 @@ class TestPythonReplSafe:
     @pytest.mark.asyncio
     async def test_talk_allows_python_repl(self):
         """talk 模式应允许 python_repl（沙箱执行）"""
-        from agent_framework.tools.builtin.python_repl import python_repl
+        from milu.tools.builtin.python_repl import python_repl
 
         args = json.dumps({"code": "print(1+1)"})
         llm = _make_mock_llm("python_repl", tool_args=args)
@@ -777,7 +777,7 @@ class TestShellCommandTalkMode:
     @pytest.mark.asyncio
     async def test_talk_allows_safe_shell(self):
         """talk 模式应允许白名单中的 shell 命令"""
-        from agent_framework.tools.builtin.shell_command import shell_command
+        from milu.tools.builtin.shell_command import shell_command
 
         args = json.dumps({"command": "echo hello"})
         llm = _make_mock_llm("shell_command", tool_args=args)
@@ -797,7 +797,7 @@ class TestShellCommandTalkMode:
     @pytest.mark.asyncio
     async def test_talk_skips_confirm_for_safe(self):
         """talk 模式下安全工具不应触发确认"""
-        from agent_framework.tools.builtin.shell_command import shell_command
+        from milu.tools.builtin.shell_command import shell_command
 
         args = json.dumps({"command": "ls -la workspace/"})
         llm = _make_mock_llm("shell_command", tool_args=args)
@@ -829,7 +829,7 @@ class TestShellCommandTalkMode:
     @pytest.mark.asyncio
     async def test_talk_blocks_non_safe_shell(self):
         """talk 模式应阻止非白名单的 shell 命令"""
-        from agent_framework.tools.builtin.shell_command import shell_command
+        from milu.tools.builtin.shell_command import shell_command
 
         args = json.dumps({"command": "rm -rf /tmp/test"})
         llm = _make_mock_llm("shell_command", tool_args=args)

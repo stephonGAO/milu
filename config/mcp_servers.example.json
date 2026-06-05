@@ -1,5 +1,5 @@
 {
-  "_说明": "MCP 推荐配置模板（按 2025-2026 生态热度选型）。复制需要的条目到 mcp_servers.json（项目级）或 ~/.agent_framework/mcp_servers.json（用户级）并删除本说明键。带 _ 前缀的键会被加载器跳过。浏览器/数据库等重依赖能力建议走 MCP 而非内置工具（每个 stdio server 是独立子进程，注意内存成本；多用户场景配合 AgentPoolConfig(shared_mcp=True) 整池共享一组进程）。",
+  "_说明": "MCP 推荐配置模板（按 2025-2026 生态热度选型）。复制需要的条目到 mcp_servers.json（项目级）或 ~/.milu/mcp_servers.json（用户级）并删除本说明键。带 _ 前缀的键会被加载器跳过。浏览器/数据库等重依赖能力建议走 MCP 而非内置工具（每个 stdio server 是独立子进程，注意内存成本；多用户场景配合 AgentPoolConfig(shared_mcp=True) 整池共享一组进程）。",
 
   "_playwright_说明": "浏览器自动化（页面操作/截图/表单），MCP 生态热度第一；依赖 Node 与浏览器二进制",
   "_playwright": {

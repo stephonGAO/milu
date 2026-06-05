@@ -12,17 +12,17 @@ import json
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentMode
-from agent_framework.agent.subagent import (
+from milu.agent import Agent, AgentMode
+from milu.agent.subagent import (
     SubAgentConfig,
     builtin_subagent_configs,
     create_subagent_tools,
 )
-from agent_framework.agent.events import ConfirmResponse
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.resources import builtin_prompts_dir
-from agent_framework.serving import AgentPool, AgentPoolConfig
-from agent_framework.tools.decorator import tool
+from milu.agent.events import ConfirmResponse
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.resources import builtin_prompts_dir
+from milu.serving import AgentPool, AgentPoolConfig
+from milu.tools.decorator import tool
 
 
 # ── 内置配置工厂 ──────────────────────────────────────────

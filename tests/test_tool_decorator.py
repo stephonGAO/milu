@@ -1,7 +1,7 @@
 """测试 @tool 装饰器和 schema 生成"""
 import pytest
-from agent_framework.tools import tool
-from agent_framework.tools.decorator import ToolWrapper
+from milu.tools import tool
+from milu.tools.decorator import ToolWrapper
 
 
 def test_basic_tool_decorator():

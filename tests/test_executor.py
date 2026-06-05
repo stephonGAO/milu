@@ -1,8 +1,8 @@
 """测试 ToolExecutor"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry
-from agent_framework.agent.config import AgentConfig
-from agent_framework.tools.executor import ToolExecutor, ToolExecutionResult
+from milu.tools import tool, ToolRegistry
+from milu.agent.config import AgentConfig
+from milu.tools.executor import ToolExecutor, ToolExecutionResult
 
 
 @pytest.fixture

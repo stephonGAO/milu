@@ -4,11 +4,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import AgentDone, SessionLoaded
-from agent_framework.agent.session import Session
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import AgentDone, SessionLoaded
+from milu.agent.session import Session
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 
 def _make_llm(response_text: str = "回复"):

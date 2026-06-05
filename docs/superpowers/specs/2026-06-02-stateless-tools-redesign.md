@@ -1,7 +1,7 @@
 # Todo 工具与 SubAgent 工具无状态化重构
 
 > **日期**：2026-06-02
-> **范围**：`src/agent_framework/tools/builtin/todo_write.py` + `src/agent_framework/agent/subagent.py` + `src/agent_framework/agent/agent.py`
+> **范围**：`src/milu/tools/builtin/todo_write.py` + `src/milu/agent/subagent.py` + `src/milu/agent/agent.py`
 > **目的**：消除 P0 闭包 bug，让两个工具天然支持多用户并发
 > **配套文档**：`docs/superpowers/spikes/2026-06-02-stateless-tools-comparison.md`（方案对比）、`docs/superpowers/specs/2026-06-02-multi-user-concurrency-evaluation.md`（整体评估）
 
@@ -11,13 +11,13 @@
 
 ### 1.1 现状问题
 
-**todo_write（`src/agent_framework/tools/builtin/todo_write.py`）**
+**todo_write（`src/milu/tools/builtin/todo_write.py`）**
 - `TodoManager` 类持有 `state.items` / `state.rounds_since_update` 实例状态
 - `create_todo_write_tool(manager)` 通过闭包捕获 manager，绑定到工具函数
 - Agent 通过 `_todo_manager` 属性 + `_rebind_todo_manager()` 突变式切换 plan_file
 - 评估报告 Bug #5：跨用户共享 TodoManager 是 P0 陷阱（即使 AgentPool 已隔离，仍是 API 暴露的隐患）
 
-**subagent_tools（`src/agent_framework/agent/subagent.py:130`）**
+**subagent_tools（`src/milu/agent/subagent.py:130`）**
 ```python
 _last_events: list[AgentEvent] = []  # 闭包变量！
 
@@ -59,7 +59,7 @@ async def _subagent_tool(task: str) -> str:
 
 ### 3.1 todo_write 重构
 
-#### 3.1.1 新文件 `src/agent_framework/tools/builtin/todo_write.py`
+#### 3.1.1 新文件 `src/milu/tools/builtin/todo_write.py`
 
 ```python
 """内置工具：会话计划管理（Todo Write）— 无状态版本
@@ -78,7 +78,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent_framework.tools.decorator import tool
+from milu.tools.decorator import tool
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +219,7 @@ def create_todo_write_tool() -> tuple:
     return todo_write, todo_read
 ```
 
-#### 3.1.2 Agent 端改动 `src/agent_framework/agent/agent.py`
+#### 3.1.2 Agent 端改动 `src/milu/agent/agent.py`
 
 **删除**：
 - 第 186-187 行：`self._work_started` / `self._plan_created` 字段（**保留**，本 PR 不动）
@@ -254,7 +254,7 @@ def create_todo_write_tool() -> tuple:
   ```
 - 引入新模块级 ContextVar（在文件顶部）：
   ```python
-  from agent_framework.tools.builtin.todo_write import (
+  from milu.tools.builtin.todo_write import (
       _current_session_dir as _current_todo_session_dir,
   )
   ```
@@ -265,7 +265,7 @@ def create_todo_write_tool() -> tuple:
 
 ### 3.2 subagent_tools 重构
 
-#### 3.2.1 新文件 `src/agent_framework/agent/subagent.py`
+#### 3.2.1 新文件 `src/milu/agent/subagent.py`
 
 ```python
 """子代理（SubAgent）— 无状态版本
@@ -283,13 +283,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Optional
 
-from agent_framework.agent.config import AgentConfig, AgentMode
-from agent_framework.agent.events import AgentDone, AgentError, AgentEvent
-from agent_framework.agent.history import ConversationHistory
-from agent_framework.tools.decorator import tool
+from milu.agent.config import AgentConfig, AgentMode
+from milu.agent.events import AgentDone, AgentError, AgentEvent
+from milu.agent.history import ConversationHistory
+from milu.tools.decorator import tool
 
 if TYPE_CHECKING:
-    from agent_framework.llm.providers.base import BaseLLM
+    from milu.llm.providers.base import BaseLLM
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +339,7 @@ def _create_single_subagent_tool(
     get_parent_mode: Optional[Callable[[], AgentMode]] = None,
 ):
     """为单个 SubAgentConfig 创建工具函数。"""
-    from agent_framework.agent.agent import Agent
+    from milu.agent.agent import Agent
 
     @tool(name=cfg.name, description=cfg.description)
     async def _subagent_tool(task: str) -> str:
@@ -400,11 +400,11 @@ def _create_single_subagent_tool(
     return _subagent_tool
 ```
 
-#### 3.2.2 Agent 主循环改动 `src/agent_framework/agent/agent.py`
+#### 3.2.2 Agent 主循环改动 `src/milu/agent/agent.py`
 
 **导入**：
 ```python
-from agent_framework.agent.subagent import _current_subagent_events
+from milu.agent.subagent import _current_subagent_events
 ```
 
 **修改工具执行路径**（约第 800-855 行）：
@@ -589,7 +589,7 @@ ContextVar 隔离 + 每次调用新列表，零闭包共享。
 | 变更 | 影响 | 缓解 |
 |---|---|---|
 | `create_todo_write_tool(manager=..., plan_file=...)` → `create_todo_write_tool()` | 上游若显式传 `manager` 或 `plan_file` 报 `TypeError` | 删除这些参数后类型即不存在，调用时报错立即发现 |
-| `TodoManager` 类从 `agent_framework.tools.builtin.todo_write` 删除 | 上游若 import 直接报 `ImportError` | 同上 |
+| `TodoManager` 类从 `milu.tools.builtin.todo_write` 删除 | 上游若 import 直接报 `ImportError` | 同上 |
 | 工具函数不再有 `_todo_manager` 属性 | Agent `_find_todo_manager()` 改为不依赖此属性 | 重构同时移除 |
 | 工具函数不再有 `_plan_file` / `plan_file` 属性 | 不影响公开 API | 内部细节 |
 
@@ -597,9 +597,9 @@ ContextVar 隔离 + 每次调用新列表，零闭包共享。
 
 ```
 修改：
-  src/agent_framework/tools/builtin/todo_write.py        (重写)
-  src/agent_framework/agent/agent.py                     (删除 TodoManager 引用)
-  src/agent_framework/agent/subagent.py                  (删除 _last_events)
+  src/milu/tools/builtin/todo_write.py        (重写)
+  src/milu/agent/agent.py                     (删除 TodoManager 引用)
+  src/milu/agent/subagent.py                  (删除 _last_events)
 
 新增：
   tests/test_todo_concurrent_isolation.py
@@ -613,11 +613,11 @@ ContextVar 隔离 + 每次调用新列表，零闭包共享。
 
 ### 7.3 不受影响
 
-- `src/agent_framework/serving/pool.py`（AgentPool 与本 PR 无关）
+- `src/milu/serving/pool.py`（AgentPool 与本 PR 无关）
 - 9 个 LLM provider
-- `src/agent_framework/tools/decorator.py`（@tool 装饰器本身）
+- `src/milu/tools/decorator.py`（@tool 装饰器本身）
 - 其他内置工具（file_read/write/python_repl/http_request 等）
-- `src/agent_framework/agent/history.py`（ConversationHistory）
+- `src/milu/agent/history.py`（ConversationHistory）
 
 ---
 

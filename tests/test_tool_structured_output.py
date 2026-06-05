@@ -3,12 +3,12 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from agent_framework.tools.builtin.structured_output import (
+from milu.tools.builtin.structured_output import (
     structured_output,
     create_structured_output_tool,
     _extract_json,
 )
-from agent_framework.llm.base.response import StreamChunk
+from milu.llm.base.response import StreamChunk
 
 
 # ── 测试 Schema ──────────────────────────────────────────
@@ -243,7 +243,7 @@ class TestStructuredOutputAutoFix:
         mock_llm = _make_mock_llm(fixed_json)
 
         # mock 掉默认 LLM 的创建
-        with patch("agent_framework.tools.builtin.structured_output._get_default_fix_llm", return_value=mock_llm):
+        with patch("milu.tools.builtin.structured_output._get_default_fix_llm", return_value=mock_llm):
             result = await structured_output(bad_raw, SAMPLE_SCHEMA, auto_fix=True)
             assert result["success"] is True
             assert result["attempts"] == 2  # 没有 LLM，不尝试修复

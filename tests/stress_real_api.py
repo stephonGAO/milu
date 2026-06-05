@@ -35,11 +35,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import AgentDone, AgentError
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.serving import AgentPool, AgentPoolConfig, PoolBusyError
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import AgentDone, AgentError
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.providers import ModelRegistry
+from milu.serving import AgentPool, AgentPoolConfig, PoolBusyError
 
 PROVIDER = os.environ.get("STRESS_PROVIDER", "qwen")
 MODEL = os.environ.get("STRESS_MODEL", "qwen-turbo")

@@ -1,4 +1,4 @@
-# AI Agent Framework - Agent 循环核心引擎设计
+# milu - Agent 循环核心引擎设计
 
 > 日期：2026-05-23
 > 状态：已批准
@@ -71,7 +71,7 @@ Agent (编排器)
 ### 2.3 新增文件结构
 
 ```
-src/agent_framework/
+src/milu/
 ├── __init__.py              # 更新：导出 Agent、AgentConfig、AgentEvent 等
 ├── exceptions.py            # 更新：新增 Agent 相关异常
 ├── models/
@@ -170,7 +170,7 @@ async for event in agent.run("北京天气怎么样？"):
 ### 4.1 @tool 装饰器
 
 ```python
-from agent_framework.tools import tool
+from milu.tools import tool
 
 @tool(name="get_weather", description="获取指定城市的天气信息")
 async def get_weather(city: str, unit: str = "celsius") -> str:
@@ -628,7 +628,7 @@ ToolExecutionResult(output="结果", is_error=False)
 在已有 `exceptions.py` 基础上追加：
 
 ```python
-class AgentLoopError(AgentFrameworkError):
+class AgentLoopError(MiluError):
     """Agent 循环异常基类"""
 
 class MaxTurnsExceeded(AgentLoopError):
@@ -668,9 +668,9 @@ class ToolExecutionError(AgentLoopError):
 ## 十一、使用示例
 
 ```python
-from agent_framework import Agent, AgentConfig
-from agent_framework.providers import ModelRegistry
-from agent_framework.tools import tool
+from milu import Agent, AgentConfig
+from milu.providers import ModelRegistry
+from milu.tools import tool
 
 # 1. 定义工具
 @tool(name="get_weather", description="获取天气")

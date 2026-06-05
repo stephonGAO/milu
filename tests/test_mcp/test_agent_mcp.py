@@ -3,8 +3,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from agent_framework import Agent, AgentConfig
-from agent_framework.tools.decorator import ToolWrapper
+from milu import Agent, AgentConfig
+from milu.tools.decorator import ToolWrapper
 
 
 def _make_mock_llm():
@@ -16,7 +16,7 @@ def _make_mock_llm():
 
 async def _empty_stream():
     """空的 LLM 响应流"""
-    from agent_framework.llm.base.response import StreamChunk
+    from milu.llm.base.response import StreamChunk
     yield StreamChunk(content="你好", finish_reason="stop")
 
 
@@ -60,7 +60,7 @@ class TestAgentMCPIntegration:
 
         tool = _make_mock_tool("srv__hello")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "srv"
             conn.connect = AsyncMock()
@@ -89,7 +89,7 @@ class TestAgentMCPIntegration:
         })
         tool = _make_mock_tool("srv__hello")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "srv"
             conn.connect = AsyncMock()
@@ -136,7 +136,7 @@ class TestAgentMCPIntegration:
 
         tool = _make_mock_tool("env_srv__hello")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "env_srv"
             conn.connect = AsyncMock()
@@ -168,7 +168,7 @@ class TestAgentMCPIntegration:
 
         tool = _make_mock_tool("param_srv__hello")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "param_srv"
             conn.connect = AsyncMock()
@@ -191,7 +191,7 @@ class TestAgentMCPIntegration:
     @pytest.mark.asyncio
     async def test_mixed_native_and_mcp_tools(self, tmp_path):
         """本地 @tool 和 MCP 工具共存"""
-        from agent_framework.tools.decorator import tool
+        from milu.tools.decorator import tool
 
         @tool(name="native_tool", description="本地工具")
         async def native_tool() -> str:
@@ -202,7 +202,7 @@ class TestAgentMCPIntegration:
         })
         mcp_tool = _make_mock_tool("srv__mcp_tool")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "srv"
             conn.connect = AsyncMock()
@@ -232,7 +232,7 @@ class TestAgentMCPIntegration:
         })
         tool = _make_mock_tool("srv__hello")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "srv"
             conn.connect = AsyncMock()
@@ -263,7 +263,7 @@ class TestAgentMCPIntegration:
         })
         mcp_tool = _make_mock_tool("srv__query")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "srv"
             conn.connect = AsyncMock()

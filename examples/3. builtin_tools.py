@@ -5,14 +5,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import (
+from milu import (
     Agent, AgentConfig,
     TextDelta, ReasoningDelta,
     ToolCallStart, ToolResult,
     AgentDone, AgentError,
 )
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool
+from milu.llm.providers import ModelRegistry
+from milu.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool
 
 # 加载 .env 中的 API Key
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")

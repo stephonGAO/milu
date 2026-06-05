@@ -3,7 +3,7 @@ import json
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
-from agent_framework.tools.builtin.http_request import http_request
+from milu.tools.builtin.http_request import http_request
 
 
 class TestHttpRequest:
@@ -17,7 +17,7 @@ class TestHttpRequest:
         mock_response.text = '{"message": "ok"}'
         mock_response.headers = {"content-type": "application/json"}
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -36,7 +36,7 @@ class TestHttpRequest:
         mock_response.text = "Created"
         mock_response.headers = {}
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -58,7 +58,7 @@ class TestHttpRequest:
         mock_response.text = "ok"
         mock_response.headers = {}
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -76,7 +76,7 @@ class TestHttpRequest:
         """超时返回错误"""
         import httpx
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -91,7 +91,7 @@ class TestHttpRequest:
         """连接错误返回错误信息"""
         import httpx
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(side_effect=httpx.ConnectError("refused"))
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -109,7 +109,7 @@ class TestHttpRequest:
         mock_response.text = "x" * 10000
         mock_response.headers = {}
 
-        with patch("agent_framework.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
+        with patch("milu.tools.builtin.http_request.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.request = AsyncMock(return_value=mock_response)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)

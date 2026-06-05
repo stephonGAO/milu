@@ -1,6 +1,6 @@
 """测试 AgentEvent 事件类型"""
 import pytest
-from agent_framework.agent.events import (
+from milu.agent.events import (
     AgentEvent,
     TextDelta,
     ReasoningDelta,
@@ -9,7 +9,7 @@ from agent_framework.agent.events import (
     AgentDone,
     AgentError,
 )
-from agent_framework.llm.base.response import TokenUsage
+from milu.llm.base.response import TokenUsage
 
 
 def test_text_delta():

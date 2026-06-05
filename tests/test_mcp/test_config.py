@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from agent_framework.tools.mcp.config import MCPServerConfig
+from milu.tools.mcp.config import MCPServerConfig
 
 
 class TestMCPServerConfigConstruction:

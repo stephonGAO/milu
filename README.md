@@ -1,4 +1,4 @@
-# agent-framework
+# milu
 
 统一的 AI 模型抽象层 + Agent 编排引擎。一套接口接入 9 个 LLM 提供商（通义千问、Kimi、GLM、DeepSeek、MiniMax、豆包、ChatGPT、Gemini、Claude），内置工具系统（含 MCP 协议）、子 Agent、技能、文件化系统提示词、会话持久化、上下文自动压缩，以及**多用户并发资源池**。
 
@@ -20,25 +20,25 @@ DEEPSEEK_API_KEY=sk-xxx
 ANTHROPIC_API_KEY=sk-xxx
 ```
 
-> 作为库被集成时，可设 `AGENT_FRAMEWORK_NO_DOTENV=1` 关闭对 .env 的自动加载，改由宿主应用通过 `agent_framework.load_env(path)` 或自身机制管理环境变量。
+> 作为库被集成时，可设 `MILU_NO_DOTENV=1` 关闭对 .env 的自动加载，改由宿主应用通过 `milu.load_env(path)` 或自身机制管理环境变量。
 
 ## 命令行（CLI）
 
-`pip install` 后注册命令 `agent-framework`（短别名 `afx`），无需写代码即可使用：
+`pip install` 后注册命令 `milu`，无需写代码即可使用：
 
 ```bash
-agent-framework                      # 无子命令 → 进入交互式多轮对话
-agent-framework chat -p deepseek     # 指定厂商进入对话（默认厂商 qwen）
-agent-framework run "用一句话介绍你自己"   # 一次性执行
-agent-framework run "总结" -q          # -q 只输出最终回答（便于管道）
-echo "翻译成英文：你好" | agent-framework run   # 从 stdin 读取指令
-agent-framework providers            # 列出 9 个厂商及 API Key 配置状态
-agent-framework config set provider deepseek   # 持久化默认厂商
-agent-framework config set-key qwen sk-xxx     # 保存某厂商的 Key 到配置文件
-agent-framework sessions list        # 查看历史会话
+milu                      # 无子命令 → 进入交互式多轮对话
+milu chat -p deepseek     # 指定厂商进入对话（默认厂商 qwen）
+milu run "用一句话介绍你自己"   # 一次性执行
+milu run "总结" -q          # -q 只输出最终回答（便于管道）
+echo "翻译成英文：你好" | milu run   # 从 stdin 读取指令
+milu providers            # 列出 9 个厂商及 API Key 配置状态
+milu config set provider deepseek   # 持久化默认厂商
+milu config set-key qwen sk-xxx     # 保存某厂商的 Key 到配置文件
+milu sessions list        # 查看历史会话
 ```
 
-- **配置**：`~/.agent_framework/config.json`（`config` 子命令管理）。解析优先级 **CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 > 内置默认**。
+- **配置**：`~/.milu/config.json`（`config` 子命令管理）。解析优先级 **CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 > 内置默认**。
 - **能力**：交互式 `chat` 支持流式输出、工具调用可视化、内置子代理（researcher/reader/coder）、会话持久化、`/mode` 切换操作模式、MCP 自动接入，以及 `/help` 列出的全部 `/命令`。
 - 全局选项写在子命令之后：`-p/--provider`、`-m/--model`、`--api-key`、`--mode {talk,manual,auto,superwork}`、`--no-session`、`--no-mcp`、`--no-subagents`。
 
@@ -48,7 +48,7 @@ agent-framework sessions list        # 查看历史会话
 
 ```python
 import asyncio
-from agent_framework import ModelRegistry, Message, MessageRole
+from milu import ModelRegistry, Message, MessageRole
 
 async def main():
     llm = ModelRegistry.create("qwen", model="qwen-plus")
@@ -63,8 +63,8 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from agent_framework import Agent, AgentConfig, ModelRegistry, AgentDone
-from agent_framework.tools.builtin import BUILTIN_TOOLS
+from milu import Agent, AgentConfig, ModelRegistry, AgentDone
+from milu.tools.builtin import BUILTIN_TOOLS
 
 async def main():
     llm = ModelRegistry.create("qwen", model="qwen-plus")
@@ -82,7 +82,7 @@ asyncio.run(main())
 ### 3. 自定义工具
 
 ```python
-from agent_framework import tool
+from milu import tool
 
 @tool(name="add", description="两数相加", is_safe=True)
 async def add(a: int, b: int) -> int:
@@ -97,7 +97,7 @@ agent = Agent(llm=llm, tools=[add])
 按 `(user_id, session_id)` 隔离 Agent 实例，自带 LRU/TTL 淘汰、全局并发限流、同会话串行：
 
 ```python
-from agent_framework import AgentPool, AgentPoolConfig, AgentConfig, ModelRegistry
+from milu import AgentPool, AgentPoolConfig, AgentConfig, ModelRegistry
 
 llm = ModelRegistry.create("qwen", model="qwen-plus")  # LLM 可安全共享
 pool = AgentPool(
@@ -121,7 +121,7 @@ await pool.stop()
 预置提示词（main/coder/researcher/reviewer）与技能随包分发，pip 安装后即可用：
 
 ```python
-from agent_framework import Agent, builtin_prompts_dir, builtin_skills_dir
+from milu import Agent, builtin_prompts_dir, builtin_skills_dir
 
 agent = Agent(
     llm=llm,
@@ -141,7 +141,7 @@ agent = Agent(
 - **多租户 API Key 隔离**：不同租户/用户需用各自的 API Key 时，用内置的 `KeyedLLMProvider` 作为 `llm_factory`——它按 Key 缓存 LLM 实例：同 Key 复用同一连接池、不同 Key 隔离，总数受 `max_clients` 约束（超出 LRU 淘汰并关闭连接池）：
 
   ```python
-  from agent_framework import AgentPool, AgentPoolConfig, KeyedLLMProvider
+  from milu import AgentPool, AgentPoolConfig, KeyedLLMProvider
 
   provider = KeyedLLMProvider(
       "qwen", model="qwen-plus",

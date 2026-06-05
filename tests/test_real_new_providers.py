@@ -9,9 +9,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent_framework import Agent, AgentConfig
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.llm.base.message import Message, MessageRole
+from milu import Agent, AgentConfig
+from milu.llm.providers import ModelRegistry
+from milu.llm.base.message import Message, MessageRole
 
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -51,7 +51,7 @@ async def test_chatgpt_tool_call():
     print("  ChatGPT (Responses API) - 工具调用")
     print("=" * 60)
 
-    from agent_framework.tools import tool
+    from milu.tools import tool
 
     @tool(name="get_weather", description="获取城市天气")
     async def get_weather(city: str) -> str:
@@ -111,7 +111,7 @@ async def test_gemini_tool_call():
     print("  Gemini (OpenAI 兼容) - 工具调用")
     print("=" * 60)
 
-    from agent_framework.tools import tool
+    from milu.tools import tool
 
     @tool(name="calculate", description="计算数学表达式")
     async def calculate(expression: str) -> str:

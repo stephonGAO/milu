@@ -4,7 +4,7 @@
 让 Agent 自动发现并调用 MCP 提供的工具。
 
 运行前提：
-1. pip install agent-framework[mcp]
+1. pip install milu[mcp]
 2. 在 config/mcp_servers.json 中配置 MCP 服务器
    或在 .env 中设置 MCP_CONFIG_PATH=路径
 """
@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent_framework import Agent, AgentConfig
-from agent_framework.llm.providers import ModelRegistry
+from milu import Agent, AgentConfig
+from milu.llm.providers import ModelRegistry
 
 
 async def example_auto():
@@ -79,7 +79,7 @@ async def example_env_path():
 
 
 async def main():
-    from agent_framework.tools.mcp import MCPServerConfig
+    from milu.tools.mcp import MCPServerConfig
 
     # 简单验证配置加载
     configs = MCPServerConfig.load_file("config/mcp_servers.json")

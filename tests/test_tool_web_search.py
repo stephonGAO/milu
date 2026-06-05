@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import httpx
 import pytest
-from agent_framework.tools.builtin.web_search import web_search
+from milu.tools.builtin.web_search import web_search
 
 
 def _make_ddgs_mock(results: list[dict]):
@@ -26,7 +26,7 @@ class TestWebSearch:
             {"title": "Wikipedia", "body": "Python created by Guido.", "href": "https://en.wikipedia.org/wiki/Python"},
         ]
 
-        with patch("agent_framework.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
             result = await web_search(query="Python programming")
             assert "Python" in result
             assert "https://python.org" in result
@@ -34,7 +34,7 @@ class TestWebSearch:
     @pytest.mark.asyncio
     async def test_search_no_results(self):
         """搜索无结果"""
-        with patch("agent_framework.tools.builtin.web_search.DDGS", _make_ddgs_mock([]), create=True):
+        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock([]), create=True):
             result = await web_search(query="xyznonexistentquery123")
             assert "未找到" in result
 
@@ -45,7 +45,7 @@ class TestWebSearch:
         mock_instance.text = MagicMock(side_effect=Exception("Connection refused"))
         mock_cls = MagicMock(return_value=mock_instance)
 
-        with patch("agent_framework.tools.builtin.web_search.DDGS", mock_cls, create=True):
+        with patch("milu.tools.builtin.web_search.DDGS", mock_cls, create=True):
             result = await web_search(query="test")
             assert "错误" in result
 
@@ -57,7 +57,7 @@ class TestWebSearch:
             for i in range(3)
         ]
 
-        with patch("agent_framework.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
             result = await web_search(query="test", num_results=3)
             assert result.count("https://example.com/") == 3
 
@@ -81,7 +81,7 @@ class TestWebSearch:
         }
 
         with patch.dict("os.environ", {"SEARCH_API_URL": "https://api.custom.com/search", "SEARCH_API_KEY": "mykey"}):
-            with patch("agent_framework.tools.builtin.web_search.httpx.AsyncClient") as mock_client_cls:
+            with patch("milu.tools.builtin.web_search.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(return_value=mock_response)
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -120,7 +120,7 @@ class TestSearchProviders:
 
         env = {"WEB_SEARCH_PROVIDER": "tavily", "TAVILY_API_KEY": "tk"}
         with patch.dict("os.environ", env, clear=False):
-            with patch("agent_framework.tools.builtin.web_search.httpx.AsyncClient", client_cls):
+            with patch("milu.tools.builtin.web_search.httpx.AsyncClient", client_cls):
                 result = await web_search(query="测试")
 
         assert "Tavily 结果" in result
@@ -141,7 +141,7 @@ class TestSearchProviders:
 
         env = {"WEB_SEARCH_PROVIDER": "bocha", "BOCHA_API_KEY": "bk"}
         with patch.dict("os.environ", env, clear=False):
-            with patch("agent_framework.tools.builtin.web_search.httpx.AsyncClient", client_cls):
+            with patch("milu.tools.builtin.web_search.httpx.AsyncClient", client_cls):
                 result = await web_search(query="测试")
 
         assert "博查结果" in result
@@ -170,6 +170,6 @@ class TestSearchProviders:
         with patch.dict("os.environ", {}, clear=False):
             import os
             os.environ.pop("WEB_SEARCH_PROVIDER", None)
-            with patch("agent_framework.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+            with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
                 result = await web_search(query="测试")
         assert "DDG 结果" in result

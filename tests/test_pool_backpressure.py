@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import AgentConfig
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.serving import (
+from milu.agent import AgentConfig
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.serving import (
     AgentPool,
     AgentPoolConfig,
     PoolBusyError,

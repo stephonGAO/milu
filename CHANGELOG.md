@@ -2,12 +2,27 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased] — 项目改名 milu（2026-06-04）
+
+### 变更（破坏性）
+
+- **项目正式更名为 `milu`（麋鹿）**：原名 `agent-framework` 与微软 PyPI 官方包冲突，
+  发布前必须更换；新名呼应「四不像」集多家之长，PyPI 占位包 milu 0.0.1 已锁定名称。
+- **全面迁移**：
+  - 包名/导入：`agent_framework` → `milu`（`src/agent_framework/` → `src/milu/`）
+  - PyPI 包名与 CLI 入口点：`agent-framework` → `milu`；**短别名 `afx` 移除**（milu 已足够短）
+  - 异常基类：`AgentFrameworkError` → `MiluError`
+  - 环境变量：`AGENT_FRAMEWORK_HOME` → `MILU_HOME`、`AGENT_FRAMEWORK_NO_DOTENV` → `MILU_NO_DOTENV`
+  - 用户数据目录：`~/.agent_framework/` → `~/.milu/`（会话、配置、记忆、MCP 用户级配置）
+- 升级提示：已安装旧包的环境需 `pip uninstall agent-framework` 后重装；
+  本地已有 `~/.agent_framework/` 数据的用户手动迁移到 `~/.milu/` 即可继续使用
+
 ## [Unreleased] — memory 长期记忆升级为用户级存储（2026-06-04）
 
 ### 变更（破坏性）
 
-- **存储位置**：`{session_dir}/memory.json` → `~/.agent_framework/memory/{user_id}.json`
-  （`AGENT_FRAMEWORK_HOME` 可覆盖）。与 session 彻底解耦——同一用户标识跨 session、
+- **存储位置**：`{session_dir}/memory.json` → `~/.milu/memory/{user_id}.json`
+  （`MILU_HOME` 可覆盖）。与 session 彻底解耦——同一用户标识跨 session、
   跨进程共享同一份记忆，解决「记忆锁在单个会话里，开新对话就丢」的问题。
   旧的 session 内 memory.json 与无 session 内存后端**均已移除**。
 - **默认关闭，单开关启用**：`Agent(memory=False)`（默认）不注册 memory 工具；
@@ -149,7 +164,7 @@
 ### 新增
 
 - **开箱即用默认**：`Agent(llm)` 即可用——顶层 Agent 默认套用内置 `main` 角色提示词 + 内置技能（无需再手写 `prompt_dir` / `skills_dir`）。
-- **用户级数据目录**：`resources.user_data_dir()` / `default_session_dir()` / `default_mcp_config_path()`，默认锚定 `~/.agent_framework`，可用环境变量 `AGENT_FRAMEWORK_HOME` 覆盖（与 CWD 解耦，适合部署）。
+- **用户级数据目录**：`resources.user_data_dir()` / `default_session_dir()` / `default_mcp_config_path()`，默认锚定 `~/.milu`，可用环境变量 `MILU_HOME` 覆盖（与 CWD 解耦，适合部署）。
 - **todo 计划内存后端**：无 session 时 todo 计划落内存（run 级注入、同一 Agent 跨轮保留），`session_enabled=False`（含子代理、用户自管 history）时 todo 不再抛 `RuntimeError`。
 - **`AgentPool.from_llm(llm)`**：单 LLM 实例一行起池；默认工厂给每个 per-user Agent 配齐 `BUILTIN_TOOLS` + 内置提示词/技能。
 - **`AgentPool(..., agent_kwargs={...})`**：向默认工厂透传 Agent 能力参数（`mode` / `session_enabled` / `session_dir` / `tools` / ...）。
@@ -176,7 +191,7 @@
    AgentPool(llm_factory=..., agent_kwargs={"mode": "auto", "session_enabled": False})
    ```
 
-2. **默认会话目录从 CWD `./.sessions` 改为 `~/.agent_framework/sessions`**（与 CWD 解耦）。需要旧行为者显式传 `session_dir="./.sessions"`。
+2. **默认会话目录从 CWD `./.sessions` 改为 `~/.milu/sessions`**（与 CWD 解耦）。需要旧行为者显式传 `session_dir="./.sessions"`。
 
 3. **裸 `Agent(llm)` 的默认 system prompt 行为变更**：以前为空，现默认加载内置 `main` 角色提示词 + 内置技能。需要「空提示词」者显式传 `prompt_dir=None`（注意：传 `system_prompt` 时只用 `system_prompt`，不叠加内置）。
 
@@ -186,6 +201,6 @@
 
 - `Agent.set_mode()` 改写实例字段 `self._mode`，不再原地修改共享 `AgentConfig`——从根上消除多用户 mode 跨用户串扰（越权）隐患。
 - `prompt_dir` / `skills_dir` 的「`None` → 内置默认」仅对顶层 Agent 生效（以 `register_catalog` 区分），子代理保持精简不变量。
-- MCP 配置搜索改为运行期解析用户级路径（尊重 `AGENT_FRAMEWORK_HOME`），保留 `./config/mcp_servers.json` 项目级兜底。
-- 测试 `conftest.py` autouse fixture 重定向 `AGENT_FRAMEWORK_HOME` 到 `tmp_path`，保持单测 hermetic。
+- MCP 配置搜索改为运行期解析用户级路径（尊重 `MILU_HOME`），保留 `./config/mcp_servers.json` 项目级兜底。
+- 测试 `conftest.py` autouse fixture 重定向 `MILU_HOME` 到 `tmp_path`，保持单测 hermetic。
 - 已验证构建 wheel 包含 `templates/`（内置提示词/技能），pip 安装后开箱可用。

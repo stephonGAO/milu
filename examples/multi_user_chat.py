@@ -34,20 +34,20 @@ from typing import Any, AsyncIterator
 
 from dotenv import load_dotenv
 
-from agent_framework.agent.config import AgentMode
-from agent_framework.agent.events import (
+from milu.agent.config import AgentMode
+from milu.agent.events import (
     AgentDone,
     AgentError,
     ConfirmResponse,
     ToolConfirmRequired,
 )
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.serving import AgentPool, AgentPoolConfig
-from agent_framework.tools.builtin import (
+from milu.llm.providers import ModelRegistry
+from milu.serving import AgentPool, AgentPoolConfig
+from milu.tools.builtin import (
     BUILTIN_TOOLS,
     create_structured_output_tool,
 )
-from agent_framework import Agent
+from milu import Agent
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 logger = logging.getLogger("multi_user_chat")
@@ -158,8 +158,8 @@ async def lifespan(app):
     # 连接失败不致命，降级为无 MCP 运行。
     shared_mcp = None
     try:
-        from agent_framework.tools.mcp.config import MCPServerConfig
-        from agent_framework.tools.mcp.manager import MCPManager
+        from milu.tools.mcp.config import MCPServerConfig
+        from milu.tools.mcp.manager import MCPManager
         mcp_configs = MCPServerConfig.load_file(None)  # 自动搜索 config/mcp_servers.json
         if mcp_configs:
             shared_mcp = MCPManager(mcp_configs)
@@ -427,7 +427,7 @@ async def _exec_command(agent: Agent, cmd: str) -> AsyncIterator[dict]:
                     {"type": "info", "text": "会话功能未启用。"}, ensure_ascii=False)}
 
         elif cmd == "/sessions":
-            from agent_framework.agent.session import Session as SessionClass
+            from milu.agent.session import Session as SessionClass
             base_dir = Path(agent.session.base_dir) if agent.session else Path(".sessions")
             sessions = SessionClass.list_sessions(base_dir)
             if not sessions:
@@ -564,7 +564,7 @@ from fastapi import FastAPI, Header, HTTPException, Request  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 from sse_starlette.sse import EventSourceResponse  # noqa: E402
 
-app = FastAPI(title="agent-framework multi-user chat", lifespan=lifespan)
+app = FastAPI(title="milu multi-user chat", lifespan=lifespan)
 
 
 @app.post("/chat")

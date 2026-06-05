@@ -5,12 +5,12 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.skills.config import SkillConfig
-from agent_framework.skills.registry import SkillRegistry
-from agent_framework.tools.registry import ToolRegistry
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.skills.config import SkillConfig
+from milu.skills.registry import SkillRegistry
+from milu.tools.registry import ToolRegistry
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +434,7 @@ class TestVendoredBuiltinSkills:
     """移植技能加载 + 多文件技能目录注入"""
 
     def _registry(self) -> SkillRegistry:
-        from agent_framework.resources import builtin_skills_dir
+        from milu.resources import builtin_skills_dir
         reg = SkillRegistry()
         reg.load_from_directory(str(builtin_skills_dir()))
         return reg
@@ -465,6 +465,6 @@ class TestVendoredBuiltinSkills:
 
     def test_licenses_present(self):
         """每个移植技能目录均保留上游 LICENSE.txt（合规要求）"""
-        from agent_framework.resources import builtin_skills_dir
+        from milu.resources import builtin_skills_dir
         for n in _VENDORED:
             assert (builtin_skills_dir() / n / "LICENSE.txt").exists(), f"{n} 缺 LICENSE.txt"

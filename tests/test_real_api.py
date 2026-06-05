@@ -26,11 +26,11 @@ IMAGE_PATH = r"C:\Users\Administrator\Desktop\8111.jpg_wh860.jpg"
 DOC_PATH = r"C:\Users\Administrator\Desktop\1776910210186-[舆情数据导出]智元合作伙伴大会监测-2026-04-23_10_05.xlsx"
 OUTPUT_DIR = r"C:\Users\Administrator\Desktop"
 
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk
-from agent_framework.llm.providers.qwen import QwenLLM
-from agent_framework.llm.providers.minimax import MiniMaxLLM
-from agent_framework.llm.providers.deepseek import DeepSeekLLM
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk
+from milu.llm.providers.qwen import QwenLLM
+from milu.llm.providers.minimax import MiniMaxLLM
+from milu.llm.providers.deepseek import DeepSeekLLM
 
 
 # ==================== 辅助函数 ====================
@@ -606,7 +606,7 @@ async def test_deepseek():
 
 async def main():
     """运行所有测试"""
-    print("🚀 AI Agent Framework - 真实API集成测试")
+    print("🚀 milu - 真实API集成测试")
     print("=" * 60)
 
     # 依次测试三家

@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent
-from agent_framework.llm.base.message import MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.tools.builtin.memory_tool import (
+from milu.agent import Agent
+from milu.llm.base.message import MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.tools.builtin.memory_tool import (
     _current_memory_path,
     memory_file_path,
     memory_read,
@@ -115,13 +115,13 @@ class TestMemoryToolFile:
 
 class TestPathAndPrompt:
     def test_memory_file_path_under_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         path = memory_file_path("alice")
         assert path == tmp_path / "memory" / "alice.json"
 
     def test_memory_file_path_sanitized(self, tmp_path, monkeypatch):
         """用户标识做文件系统安全化；空串回退 default"""
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         assert memory_file_path("a/b:c").name == "a_b_c.json"
         assert memory_file_path("  ").name == "default.json"
 
@@ -203,7 +203,7 @@ class TestAgentIntegration:
         assert "长期记忆" not in system.content
 
     def test_enabled_registers_tools(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         agent = _make_agent(AsyncMock(), tmp_path, memory=True)
         names = [s["function"]["name"] for s in agent.tools.get_schemas()]
         assert "memory_write" in names
@@ -212,7 +212,7 @@ class TestAgentIntegration:
 
     async def test_run_writes_user_level_file(self, tmp_path, monkeypatch):
         """memory="alice"：run() 注入路径，memory_write 落盘用户级文件（与 session 解耦）"""
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         agent = _make_agent(_make_memory_llm(), tmp_path, memory="alice")
         async for _ in agent.run("记住这个"):
             pass
@@ -226,7 +226,7 @@ class TestAgentIntegration:
 
     async def test_memory_injected_at_prompt_tail(self, tmp_path, monkeypatch):
         """记忆条目注入 system prompt 最后"""
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         agent = _make_agent(
             _make_memory_llm(), tmp_path,
             system_prompt="你是助手", memory="alice",
@@ -243,7 +243,7 @@ class TestAgentIntegration:
 
     async def test_shared_across_agents_same_user(self, tmp_path, monkeypatch):
         """同一用户标识的另一个 Agent（新会话）能看到已写入的记忆——跨 session 共享"""
-        monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path))
+        monkeypatch.setenv("MILU_HOME", str(tmp_path))
         writer = _make_agent(_make_memory_llm(), tmp_path, memory="alice")
         async for _ in writer.run("记住这个"):
             pass

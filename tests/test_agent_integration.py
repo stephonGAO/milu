@@ -3,9 +3,9 @@ import asyncio
 import os
 import pytest
 
-from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.tools import tool
+from milu import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.llm.providers import ModelRegistry
+from milu.tools import tool
 
 
 # 跳过条件：没有 API Key

@@ -1,7 +1,7 @@
 """测试 Agent 相关异常类"""
 import pytest
-from agent_framework.exceptions import AgentFrameworkError
-from agent_framework.agent.exceptions import (
+from milu.exceptions import MiluError
+from milu.agent.exceptions import (
     AgentLoopError,
     MaxTurnsExceeded,
     AgentTimeout,
@@ -12,11 +12,11 @@ from agent_framework.agent.exceptions import (
 
 
 def test_agent_loop_error_inherits_from_base():
-    """AgentLoopError 应继承 AgentFrameworkError"""
-    assert issubclass(AgentLoopError, AgentFrameworkError)
+    """AgentLoopError 应继承 MiluError"""
+    assert issubclass(AgentLoopError, MiluError)
 
     error = AgentLoopError("测试错误")
-    assert isinstance(error, AgentFrameworkError)
+    assert isinstance(error, MiluError)
     assert str(error) == "测试错误"
 
 

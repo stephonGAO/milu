@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-from agent_framework.tools.builtin import web_fetch
-from agent_framework.tools.builtin.web_fetch import _html_to_markdown
+from milu.tools.builtin import web_fetch
+from milu.tools.builtin.web_fetch import _html_to_markdown
 
 
 # ── 纯函数 _html_to_markdown ─────────────────────────────
@@ -99,7 +99,7 @@ def _patch_client(monkeypatch, resp):
 
     import httpx as real_httpx
 
-    wf_mod = sys.modules["agent_framework.tools.builtin.web_fetch"]
+    wf_mod = sys.modules["milu.tools.builtin.web_fetch"]
     fake_httpx = SimpleNamespace(
         AsyncClient=lambda **kw: _FakeClient(resp),
         HTTPError=real_httpx.HTTPError,

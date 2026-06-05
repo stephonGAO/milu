@@ -11,16 +11,16 @@ from typing import AsyncIterator
 
 import pytest
 
-from agent_framework.agent.agent import Agent
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.events import (
+from milu.agent.agent import Agent
+from milu.agent.config import AgentConfig
+from milu.agent.events import (
     AgentDone,
     AgentEvent,
     SubAgentDone,
 )
-from agent_framework.agent.subagent import SubAgentConfig, create_subagent_tools
-from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.agent.subagent import SubAgentConfig, create_subagent_tools
+from milu.llm.providers.base import BaseLLM, ModelCapabilities
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 
 # ── Fake 数据结构 ─────────────────────────────────────────

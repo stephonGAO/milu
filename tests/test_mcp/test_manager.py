@@ -2,9 +2,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from agent_framework.tools.mcp.config import MCPServerConfig
-from agent_framework.tools.mcp.manager import MCPManager
-from agent_framework.tools.decorator import ToolWrapper
+from milu.tools.mcp.config import MCPServerConfig
+from milu.tools.mcp.manager import MCPManager
+from milu.tools.decorator import ToolWrapper
 
 
 def _make_mock_tool(name: str) -> ToolWrapper:
@@ -32,7 +32,7 @@ class TestMCPManager:
         tool_a = _make_mock_tool("a__tool1")
         tool_b = _make_mock_tool("b__tool2")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             # 模拟两个连接
             conn_a = AsyncMock()
             conn_a.name = "a"
@@ -65,7 +65,7 @@ class TestMCPManager:
 
         tool = _make_mock_tool("ok__tool1")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn_ok = AsyncMock()
             conn_ok.name = "ok"
             conn_ok.connect = AsyncMock()
@@ -95,7 +95,7 @@ class TestMCPManager:
             MCPServerConfig.stdio(name="fail2", command="bad2"),
         ]
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn1 = AsyncMock()
             conn1.name = "fail1"
             conn1.connect = AsyncMock(side_effect=Exception("err1"))
@@ -116,7 +116,7 @@ class TestMCPManager:
         configs = [MCPServerConfig.stdio(name="a", command="echo")]
         tool = _make_mock_tool("a__t")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "a"
             conn.connect = AsyncMock()
@@ -136,7 +136,7 @@ class TestMCPManager:
         configs = [MCPServerConfig.stdio(name="a", command="echo")]
         tool = _make_mock_tool("a__t")
 
-        with patch("agent_framework.tools.mcp.manager.MCPServerConnection") as MockConn:
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
             conn = AsyncMock()
             conn.name = "a"
             conn.connect = AsyncMock()

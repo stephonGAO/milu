@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from agent_framework.tools.builtin.todo_write import (
+from milu.tools.builtin.todo_write import (
     _current_session_dir,
     _current_plan_items,
     _MAX_PLAN_ITEMS,
@@ -523,9 +523,9 @@ class TestTodoWriteAgentIntegration:
         """Agent 通过 session_dir 注入 plan.json 位置并完成一次 todo_write"""
         import json as _json
         from unittest.mock import AsyncMock
-        from agent_framework.agent import Agent, AgentConfig
-        from agent_framework.agent.events import ToolResult
-        from agent_framework.llm.base.response import StreamChunk
+        from milu.agent import Agent, AgentConfig
+        from milu.agent.events import ToolResult
+        from milu.llm.base.response import StreamChunk
 
         todo_write_fn, todo_read_fn = todo_write, todo_read
         call_count = 0
@@ -586,9 +586,9 @@ class TestTodoWriteAgentIntegration:
         """Agent 通过 todo_read 从已存在的 plan.json 恢复计划"""
         import json as _json
         from unittest.mock import AsyncMock
-        from agent_framework.agent import Agent, AgentConfig
-        from agent_framework.agent.events import ToolResult
-        from agent_framework.llm.base.response import StreamChunk
+        from milu.agent import Agent, AgentConfig
+        from milu.agent.events import ToolResult
+        from milu.llm.base.response import StreamChunk
 
         todo_write_fn, todo_read_fn = todo_write, todo_read
 

@@ -3,7 +3,7 @@ import json
 from datetime import datetime
 
 import pytest
-from agent_framework.tools.builtin.datetime_tool import datetime_tool, get_current_time
+from milu.tools.builtin.datetime_tool import datetime_tool, get_current_time
 
 
 class TestDatetimeTool:

@@ -2,8 +2,8 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from agent_framework.tools.mcp.config import MCPServerConfig
-from agent_framework.tools.mcp.connection import MCPServerConnection
+from milu.tools.mcp.config import MCPServerConfig
+from milu.tools.mcp.connection import MCPServerConnection
 
 
 class TestMCPServerConnection:

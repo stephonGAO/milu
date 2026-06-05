@@ -4,7 +4,7 @@ import tempfile
 
 import pytest
 
-from agent_framework.prompts.builder import PromptBuilder, PromptSection
+from milu.prompts.builder import PromptBuilder, PromptSection
 
 
 class TestPromptSection:
@@ -87,9 +87,9 @@ class TestPromptBuilderBasic:
                 f.write("---\nsection: soul\n---\n\n你好 {{user_name}}，欢迎 {{project}}。\n")
 
             builder = PromptBuilder(tmpdir)
-            result = builder.build(user_name="张三", project="agent-framework")
+            result = builder.build(user_name="张三", project="milu")
             assert "你好 张三" in result
-            assert "欢迎 agent-framework" in result
+            assert "欢迎 milu" in result
 
     def test_variable_interpolation_missing(self):
         """未提供的 {{key}} 应保留原样"""

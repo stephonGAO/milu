@@ -13,7 +13,7 @@
 | SubAgent 闭包共享 `_last_events` | P0 致命 | 2 并发时 1 个 run 缺失 SubAgentDone |
 | `_agent_busy` 是单布尔而非互斥锁 | P0 设计 | 5 并发 run 全部进入执行 |
 | Session JSONL 无锁追加 | P1 理论风险 | Windows + GIL 下未复现，跨平台风险存在 |
-| AgentPool 缺失 | P1 架构 | 需新增 `agent_framework.serving` 子包 |
+| AgentPool 缺失 | P1 架构 | 需新增 `milu.serving` 子包 |
 | 缺 Web 服务层示例 | P1 部署 | examples/ 全部是 CLI 脚本 |
 
 好消息：**底层（LLM、provider、@tool）天然协程安全；Agent 实例化边界清晰。** 因此无需大改核心引擎。
@@ -49,7 +49,7 @@ PR-5 AgentPool ──► PR-6 FastAPI 示例 ──► PR-7 (可选) 持久化�
 
 ## PR-2：修复 SubAgent 闭包共享
 
-**目标**：消除 `agent_framework/agent/subagent.py:130` 的 `_last_events = []` 闭包共享 bug。
+**目标**：消除 `milu/agent/subagent.py:130` 的 `_last_events = []` 闭包共享 bug。
 
 **问题代码**：
 ```python
@@ -62,7 +62,7 @@ def _create_single_subagent_tool(llm, cfg, get_parent_mode=None):
 ```
 
 **改动**：
-- 文件：`src/agent_framework/agent/subagent.py`
+- 文件：`src/milu/agent/subagent.py`
 - 把 `_last_events` 改为 `asyncio.Event` + `dict[call_id, list[events]]`，或用 `contextvars.ContextVar`
 - 最简方案：把 events 存到 ToolWrapper 的实例属性上，但**给每次调用一个唯一 ID 隔离**：
 
@@ -155,7 +155,7 @@ class _RunContext:
 **目标**：消除 `Session.log_message` 多协程并发追加的风险。
 
 **改动**：
-- 文件：`src/agent_framework/agent/session.py`
+- 文件：`src/milu/agent/session.py`
 - 给 `Session` 类加 `self._write_lock = asyncio.Lock()`
 - `log_message` 入口 `async with self._write_lock:`
 - `log_compaction` 同样
@@ -180,9 +180,9 @@ class _RunContext:
 **目标**：为多用户场景提供 Agent 生命周期管理。
 
 **改动**：
-- 新增 `src/agent_framework/serving/__init__.py`
-- 新增 `src/agent_framework/serving/pool.py`（含 `AgentPool`, `AgentPoolConfig`, `PooledAgent`）
-- 在 `src/agent_framework/__init__.py` re-export 公开 API
+- 新增 `src/milu/serving/__init__.py`
+- 新增 `src/milu/serving/pool.py`（含 `AgentPool`, `AgentPoolConfig`, `PooledAgent`）
+- 在 `src/milu/__init__.py` re-export 公开 API
 
 **核心 API**：
 ```python

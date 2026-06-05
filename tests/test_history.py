@@ -1,7 +1,7 @@
 """测试 ConversationHistory"""
 import pytest
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.agent.history import ConversationHistory
+from milu.llm.base.message import Message, MessageRole
+from milu.agent.history import ConversationHistory
 
 
 def test_add_and_get_messages():

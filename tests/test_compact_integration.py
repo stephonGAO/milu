@@ -2,15 +2,15 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import (
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import (
     AgentDone, AgentError, HistoryCompacted, TextDelta,
 )
-from agent_framework.agent.compactor import Compactor
-from agent_framework.agent.config import CompactConfig
-from agent_framework.agent.history import ConversationHistory
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.agent.compactor import Compactor
+from milu.agent.config import CompactConfig
+from milu.agent.history import ConversationHistory
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 
 def _make_llm(response_text: str = "回复"):

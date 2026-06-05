@@ -13,7 +13,7 @@
 ## 文件结构
 
 ```
-src/agent_framework/
+src/milu/
 ├── exceptions.py                    # 修改：追加 Agent 相关异常
 ├── __init__.py                      # 修改：导出新组件
 ├── models/
@@ -45,7 +45,7 @@ tests/
 ## Task 1: 异常类
 
 **Files:**
-- Modify: `src/agent_framework/exceptions.py`
+- Modify: `src/milu/exceptions.py`
 - Test: `tests/test_exceptions.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -54,8 +54,8 @@ tests/
 # tests/test_exceptions.py
 """测试 Agent 相关异常类"""
 import pytest
-from agent_framework.exceptions import (
-    AgentFrameworkError,
+from milu.exceptions import (
+    MiluError,
     AgentLoopError,
     MaxTurnsExceeded,
     AgentTimeout,
@@ -66,11 +66,11 @@ from agent_framework.exceptions import (
 
 
 def test_agent_loop_error_inherits_from_base():
-    """AgentLoopError 应继承 AgentFrameworkError"""
-    assert issubclass(AgentLoopError, AgentFrameworkError)
+    """AgentLoopError 应继承 MiluError"""
+    assert issubclass(AgentLoopError, MiluError)
     
     error = AgentLoopError("测试错误")
-    assert isinstance(error, AgentFrameworkError)
+    assert isinstance(error, MiluError)
     assert str(error) == "测试错误"
 
 
@@ -112,11 +112,11 @@ pytest tests/test_exceptions.py -v
 
 - [ ] **Step 3: 实现异常类**
 
-在 `src/agent_framework/exceptions.py` 末尾追加：
+在 `src/milu/exceptions.py` 末尾追加：
 
 ```python
 # Agent 循环相关异常
-class AgentLoopError(AgentFrameworkError):
+class AgentLoopError(MiluError):
     """Agent 循环异常基类"""
     pass
 
@@ -157,7 +157,7 @@ pytest tests/test_exceptions.py -v
 - [ ] **Step 5: 提交**
 
 ```bash
-git add src/agent_framework/exceptions.py tests/test_exceptions.py
+git add src/milu/exceptions.py tests/test_exceptions.py
 git commit -m "feat: add Agent loop exception classes
 
 - AgentLoopError: base exception for agent loop
@@ -173,8 +173,8 @@ git commit -m "feat: add Agent loop exception classes
 ## Task 2: AgentEvent 事件类型
 
 **Files:**
-- Create: `src/agent_framework/models/events.py`
-- Modify: `src/agent_framework/models/__init__.py`
+- Create: `src/milu/models/events.py`
+- Modify: `src/milu/models/__init__.py`
 - Test: `tests/test_events.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -183,7 +183,7 @@ git commit -m "feat: add Agent loop exception classes
 # tests/test_events.py
 """测试 AgentEvent 事件类型"""
 import pytest
-from agent_framework.models.events import (
+from milu.models.events import (
     AgentEvent,
     TextDelta,
     ReasoningDelta,
@@ -192,7 +192,7 @@ from agent_framework.models.events import (
     AgentDone,
     AgentError,
 )
-from agent_framework.models.response import TokenUsage
+from milu.models.response import TokenUsage
 
 
 def test_text_delta():
@@ -279,13 +279,13 @@ pytest tests/test_events.py -v
 - [ ] **Step 3: 实现事件类**
 
 ```python
-# src/agent_framework/models/events.py
+# src/milu/models/events.py
 """Agent 事件类型定义"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent_framework.models.response import TokenUsage
+from milu.models.response import TokenUsage
 
 
 @dataclass(frozen=True)
@@ -340,10 +340,10 @@ class AgentError(AgentEvent):
 
 - [ ] **Step 4: 更新 models/__init__.py**
 
-在 `src/agent_framework/models/__init__.py` 追加：
+在 `src/milu/models/__init__.py` 追加：
 
 ```python
-from agent_framework.models.events import (
+from milu.models.events import (
     AgentEvent,
     TextDelta,
     ReasoningDelta,
@@ -375,7 +375,7 @@ pytest tests/test_events.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/models/events.py src/agent_framework/models/__init__.py tests/test_events.py
+git add src/milu/models/events.py src/milu/models/__init__.py tests/test_events.py
 git commit -m "feat: add AgentEvent types
 
 - TextDelta: streaming text output
@@ -391,9 +391,9 @@ git commit -m "feat: add AgentEvent types
 ## Task 3: @tool 装饰器和 Schema 生成
 
 **Files:**
-- Create: `src/agent_framework/tools/schema.py`
-- Create: `src/agent_framework/tools/decorator.py`
-- Create: `src/agent_framework/tools/__init__.py`
+- Create: `src/milu/tools/schema.py`
+- Create: `src/milu/tools/decorator.py`
+- Create: `src/milu/tools/__init__.py`
 - Test: `tests/test_tool_decorator.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -402,8 +402,8 @@ git commit -m "feat: add AgentEvent types
 # tests/test_tool_decorator.py
 """测试 @tool 装饰器和 schema 生成"""
 import pytest
-from agent_framework.tools import tool
-from agent_framework.tools.decorator import ToolWrapper
+from milu.tools import tool
+from milu.tools.decorator import ToolWrapper
 
 
 def test_basic_tool_decorator():
@@ -539,7 +539,7 @@ pytest tests/test_tool_decorator.py -v
 - [ ] **Step 3: 实现 schema 生成**
 
 ```python
-# src/agent_framework/tools/schema.py
+# src/milu/tools/schema.py
 """Python 函数签名 → JSON Schema 转换"""
 from __future__ import annotations
 
@@ -653,7 +653,7 @@ def generate_schema_from_function(func) -> dict:
 - [ ] **Step 4: 实现 @tool 装饰器**
 
 ```python
-# src/agent_framework/tools/decorator.py
+# src/milu/tools/decorator.py
 """@tool 装饰器实现"""
 from __future__ import annotations
 
@@ -662,7 +662,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Callable
 
-from agent_framework.tools.schema import generate_schema_from_function
+from milu.tools.schema import generate_schema_from_function
 
 
 @dataclass
@@ -716,9 +716,9 @@ def tool(name: str, description: str, dangerous: bool = False):
 - [ ] **Step 5: 创建 tools/__init__.py**
 
 ```python
-# src/agent_framework/tools/__init__.py
+# src/milu/tools/__init__.py
 """工具系统 - @tool 装饰器和 ToolRegistry"""
-from agent_framework.tools.decorator import tool, ToolWrapper
+from milu.tools.decorator import tool, ToolWrapper
 
 __all__ = ["tool", "ToolWrapper"]
 ```
@@ -734,7 +734,7 @@ pytest tests/test_tool_decorator.py -v
 - [ ] **Step 7: 提交**
 
 ```bash
-git add src/agent_framework/tools/ tests/test_tool_decorator.py
+git add src/milu/tools/ tests/test_tool_decorator.py
 git commit -m "feat: add @tool decorator and schema generation
 
 - @tool decorator for marking functions as tools
@@ -750,8 +750,8 @@ git commit -m "feat: add @tool decorator and schema generation
 ## Task 4: ToolRegistry
 
 **Files:**
-- Create: `src/agent_framework/tools/registry.py`
-- Modify: `src/agent_framework/tools/__init__.py`
+- Create: `src/milu/tools/registry.py`
+- Modify: `src/milu/tools/__init__.py`
 - Test: `tests/test_tool_registry.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -760,7 +760,7 @@ git commit -m "feat: add @tool decorator and schema generation
 # tests/test_tool_registry.py
 """测试 ToolRegistry"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry
+from milu.tools import tool, ToolRegistry
 
 
 def test_register_single_tool():
@@ -859,11 +859,11 @@ pytest tests/test_tool_registry.py -v
 - [ ] **Step 3: 实现 ToolRegistry**
 
 ```python
-# src/agent_framework/tools/registry.py
+# src/milu/tools/registry.py
 """工具注册表"""
 from __future__ import annotations
 
-from agent_framework.tools.decorator import ToolWrapper
+from milu.tools.decorator import ToolWrapper
 
 
 class ToolRegistry:
@@ -914,10 +914,10 @@ class ToolRegistry:
 - [ ] **Step 4: 更新 tools/__init__.py**
 
 ```python
-# src/agent_framework/tools/__init__.py
+# src/milu/tools/__init__.py
 """工具系统 - @tool 装饰器和 ToolRegistry"""
-from agent_framework.tools.decorator import tool, ToolWrapper
-from agent_framework.tools.registry import ToolRegistry
+from milu.tools.decorator import tool, ToolWrapper
+from milu.tools.registry import ToolRegistry
 
 __all__ = ["tool", "ToolWrapper", "ToolRegistry"]
 ```
@@ -933,7 +933,7 @@ pytest tests/test_tool_registry.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/tools/registry.py src/agent_framework/tools/__init__.py tests/test_tool_registry.py
+git add src/milu/tools/registry.py src/milu/tools/__init__.py tests/test_tool_registry.py
 git commit -m "feat: add ToolRegistry
 
 - register/register_many for adding tools
@@ -947,8 +947,8 @@ git commit -m "feat: add ToolRegistry
 ## Task 5: ConversationHistory
 
 **Files:**
-- Create: `src/agent_framework/agent/history.py`
-- Create: `src/agent_framework/agent/__init__.py`
+- Create: `src/milu/agent/history.py`
+- Create: `src/milu/agent/__init__.py`
 - Test: `tests/test_history.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -957,8 +957,8 @@ git commit -m "feat: add ToolRegistry
 # tests/test_history.py
 """测试 ConversationHistory"""
 import pytest
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.agent.history import ConversationHistory
+from milu.models.message import Message, MessageRole
+from milu.agent.history import ConversationHistory
 
 
 def test_add_and_get_messages():
@@ -1081,13 +1081,13 @@ pytest tests/test_history.py -v
 - [ ] **Step 3: 实现 ConversationHistory**
 
 ```python
-# src/agent_framework/agent/history.py
+# src/milu/agent/history.py
 """对话历史管理"""
 from __future__ import annotations
 
 import re
 
-from agent_framework.models.message import Message, MessageRole
+from milu.models.message import Message, MessageRole
 
 
 def _estimate_tokens(text: str) -> int:
@@ -1220,9 +1220,9 @@ class ConversationHistory:
 - [ ] **Step 4: 创建 agent/__init__.py**
 
 ```python
-# src/agent_framework/agent/__init__.py
+# src/milu/agent/__init__.py
 """Agent 核心模块"""
-from agent_framework.agent.history import ConversationHistory
+from milu.agent.history import ConversationHistory
 
 __all__ = ["ConversationHistory"]
 ```
@@ -1238,7 +1238,7 @@ pytest tests/test_history.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/agent/ tests/test_history.py
+git add src/milu/agent/ tests/test_history.py
 git commit -m "feat: add ConversationHistory with truncation strategies
 
 - 4 strategies: none, sliding_window, token_limit, head_tail
@@ -1253,7 +1253,7 @@ git commit -m "feat: add ConversationHistory with truncation strategies
 ## Task 6: AgentConfig
 
 **Files:**
-- Create: `src/agent_framework/agent/config.py`
+- Create: `src/milu/agent/config.py`
 - Test: `tests/test_agent_config.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -1262,7 +1262,7 @@ git commit -m "feat: add ConversationHistory with truncation strategies
 # tests/test_agent_config.py
 """测试 AgentConfig"""
 import pytest
-from agent_framework.agent.config import AgentConfig
+from milu.agent.config import AgentConfig
 
 
 def test_default_config():
@@ -1305,7 +1305,7 @@ pytest tests/test_agent_config.py -v
 - [ ] **Step 3: 实现 AgentConfig**
 
 ```python
-# src/agent_framework/agent/config.py
+# src/milu/agent/config.py
 """Agent 配置"""
 from __future__ import annotations
 
@@ -1326,10 +1326,10 @@ class AgentConfig:
 - [ ] **Step 4: 更新 agent/__init__.py**
 
 ```python
-# src/agent_framework/agent/__init__.py
+# src/milu/agent/__init__.py
 """Agent 核心模块"""
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.history import ConversationHistory
+from milu.agent.config import AgentConfig
+from milu.agent.history import ConversationHistory
 
 __all__ = ["AgentConfig", "ConversationHistory"]
 ```
@@ -1345,7 +1345,7 @@ pytest tests/test_agent_config.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/agent/config.py src/agent_framework/agent/__init__.py tests/test_agent_config.py
+git add src/milu/agent/config.py src/milu/agent/__init__.py tests/test_agent_config.py
 git commit -m "feat: add AgentConfig
 
 - max_turns: loop iteration limit
@@ -1361,7 +1361,7 @@ git commit -m "feat: add AgentConfig
 ## Task 7: ToolExecutor
 
 **Files:**
-- Create: `src/agent_framework/agent/executor.py`
+- Create: `src/milu/agent/executor.py`
 - Test: `tests/test_executor.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -1370,9 +1370,9 @@ git commit -m "feat: add AgentConfig
 # tests/test_executor.py
 """测试 ToolExecutor"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.executor import ToolExecutor, ToolExecutionResult
+from milu.tools import tool, ToolRegistry
+from milu.agent.config import AgentConfig
+from milu.agent.executor import ToolExecutor, ToolExecutionResult
 
 
 @pytest.fixture
@@ -1496,7 +1496,7 @@ pytest tests/test_executor.py -v
 - [ ] **Step 3: 实现 ToolExecutor**
 
 ```python
-# src/agent_framework/agent/executor.py
+# src/milu/agent/executor.py
 """工具执行器"""
 from __future__ import annotations
 
@@ -1505,8 +1505,8 @@ import json
 import logging
 from dataclasses import dataclass
 
-from agent_framework.tools.registry import ToolRegistry
-from agent_framework.agent.config import AgentConfig
+from milu.tools.registry import ToolRegistry
+from milu.agent.config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -1586,11 +1586,11 @@ class ToolExecutor:
 - [ ] **Step 4: 更新 agent/__init__.py**
 
 ```python
-# src/agent_framework/agent/__init__.py
+# src/milu/agent/__init__.py
 """Agent 核心模块"""
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.executor import ToolExecutor, ToolExecutionResult
-from agent_framework.agent.history import ConversationHistory
+from milu.agent.config import AgentConfig
+from milu.agent.executor import ToolExecutor, ToolExecutionResult
+from milu.agent.history import ConversationHistory
 
 __all__ = [
     "AgentConfig",
@@ -1611,7 +1611,7 @@ pytest tests/test_executor.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/agent/executor.py src/agent_framework/agent/__init__.py tests/test_executor.py
+git add src/milu/agent/executor.py src/milu/agent/__init__.py tests/test_executor.py
 git commit -m "feat: add ToolExecutor
 
 - Safe tool execution with error handling
@@ -1626,8 +1626,8 @@ git commit -m "feat: add ToolExecutor
 ## Task 8: Agent 编排器（核心循环）
 
 **Files:**
-- Create: `src/agent_framework/agent/agent.py`
-- Modify: `src/agent_framework/agent/__init__.py`
+- Create: `src/milu/agent/agent.py`
+- Modify: `src/milu/agent/__init__.py`
 - Test: `tests/test_agent.py` (新建)
 
 - [ ] **Step 1: 写失败测试**
@@ -1637,11 +1637,11 @@ git commit -m "feat: add ToolExecutor
 """测试 Agent 编排器"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.models.events import TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.models.message import MessageRole
-from agent_framework.models.response import StreamChunk, TokenUsage
-from agent_framework.tools import tool
+from milu.agent import Agent, AgentConfig
+from milu.models.events import TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.models.message import MessageRole
+from milu.models.response import StreamChunk, TokenUsage
+from milu.tools import tool
 
 
 @pytest.fixture
@@ -1748,7 +1748,7 @@ async def test_tool_call_flow(mock_llm, simple_tool):
 @pytest.mark.asyncio
 async def test_max_turns_limit(mock_llm, simple_tool):
     """超出最大轮次应返回 AgentError"""
-    from agent_framework.models.events import AgentError
+    from milu.models.events import AgentError
     
     async def mock_chat(*args, **kwargs):
         # 始终返回工具调用，触发无限循环
@@ -1850,7 +1850,7 @@ pytest tests/test_agent.py -v
 由于代码较长，分两部分实现。先创建基础结构：
 
 ```python
-# src/agent_framework/agent/agent.py
+# src/milu/agent/agent.py
 """Agent 编排器"""
 from __future__ import annotations
 
@@ -1859,10 +1859,10 @@ import logging
 import time
 from collections.abc import AsyncIterator
 
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.executor import ToolExecutor
-from agent_framework.agent.history import ConversationHistory
-from agent_framework.models.events import (
+from milu.agent.config import AgentConfig
+from milu.agent.executor import ToolExecutor
+from milu.agent.history import ConversationHistory
+from milu.models.events import (
     AgentDone,
     AgentError,
     AgentEvent,
@@ -1871,10 +1871,10 @@ from agent_framework.models.events import (
     ToolCallStart,
     ToolResult,
 )
-from agent_framework.models.message import Message, MessageRole
-from agent_framework.models.response import TokenUsage
-from agent_framework.providers.base import BaseLLM
-from agent_framework.tools.registry import ToolRegistry
+from milu.models.message import Message, MessageRole
+from milu.models.response import TokenUsage
+from milu.providers.base import BaseLLM
+from milu.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -2072,12 +2072,12 @@ class Agent:
 - [ ] **Step 4: 更新 agent/__init__.py**
 
 ```python
-# src/agent_framework/agent/__init__.py
+# src/milu/agent/__init__.py
 """Agent 核心模块"""
-from agent_framework.agent.agent import Agent
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.executor import ToolExecutor, ToolExecutionResult
-from agent_framework.agent.history import ConversationHistory
+from milu.agent.agent import Agent
+from milu.agent.config import AgentConfig
+from milu.agent.executor import ToolExecutor, ToolExecutionResult
+from milu.agent.history import ConversationHistory
 
 __all__ = [
     "Agent",
@@ -2099,7 +2099,7 @@ pytest tests/test_agent.py -v
 - [ ] **Step 6: 提交**
 
 ```bash
-git add src/agent_framework/agent/ tests/test_agent.py
+git add src/milu/agent/ tests/test_agent.py
 git commit -m "feat: add Agent orchestrator with core loop
 
 - ReAct-style loop: reason → act → observe → continue
@@ -2115,16 +2115,16 @@ git commit -m "feat: add Agent orchestrator with core loop
 ## Task 9: 更新顶层导出
 
 **Files:**
-- Modify: `src/agent_framework/__init__.py`
+- Modify: `src/milu/__init__.py`
 
 - [ ] **Step 1: 更新 __init__.py**
 
-在 `src/agent_framework/__init__.py` 追加导出：
+在 `src/milu/__init__.py` 追加导出：
 
 ```python
 # Agent 核心
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.models.events import (
+from milu.agent import Agent, AgentConfig
+from milu.models.events import (
     AgentEvent,
     TextDelta,
     ReasoningDelta,
@@ -2150,7 +2150,7 @@ __all__.extend([
 - [ ] **Step 2: 验证导入**
 
 ```bash
-python -c "from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart; print('OK')"
+python -c "from milu import Agent, AgentConfig, TextDelta, ToolCallStart; print('OK')"
 ```
 
 预期：OK
@@ -2158,7 +2158,7 @@ python -c "from agent_framework import Agent, AgentConfig, TextDelta, ToolCallSt
 - [ ] **Step 3: 提交**
 
 ```bash
-git add src/agent_framework/__init__.py
+git add src/milu/__init__.py
 git commit -m "feat: export Agent core components at top level
 
 - Agent, AgentConfig
@@ -2181,9 +2181,9 @@ import asyncio
 import os
 import pytest
 
-from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.providers import ModelRegistry
-from agent_framework.tools import tool
+from milu import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.providers import ModelRegistry
+from milu.tools import tool
 
 
 # 跳过条件：没有 API Key
@@ -2346,9 +2346,9 @@ pytest tests/ -v
 
 ```bash
 python -c "
-from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.tools import tool, ToolRegistry
-from agent_framework.agent import ConversationHistory, ToolExecutor
+from milu import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.tools import tool, ToolRegistry
+from milu.agent import ConversationHistory, ToolExecutor
 print('所有导入成功')
 "
 ```
@@ -2363,9 +2363,9 @@ print('所有导入成功')
 import asyncio
 import os
 
-from agent_framework import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
-from agent_framework.providers import ModelRegistry
-from agent_framework.tools import tool
+from milu import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu.providers import ModelRegistry
+from milu.tools import tool
 
 
 # 定义工具

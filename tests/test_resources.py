@@ -1,8 +1,8 @@
 """测试内置资源（提示词模板 / 技能）随包分发与定位 API。"""
 import pytest
 
-from agent_framework import builtin_prompts_dir, builtin_skills_dir, templates_dir
-from agent_framework.prompts import PromptBuilder
+from milu import builtin_prompts_dir, builtin_skills_dir, templates_dir
+from milu.prompts import PromptBuilder
 
 
 def test_templates_dir_exists():

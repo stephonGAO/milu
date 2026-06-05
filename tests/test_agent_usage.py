@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agent_framework.agent import Agent, AgentConfig
-from agent_framework.agent.events import AgentDone
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
+from milu.agent import Agent, AgentConfig
+from milu.agent.events import AgentDone
+from milu.llm.base.response import StreamChunk, TokenUsage
 
 
 def _agent(llm):
@@ -72,7 +72,7 @@ async def test_usage_summed_across_tool_turns():
     llm = AsyncMock()
     llm.chat = chat
 
-    from agent_framework.tools import tool
+    from milu.tools import tool
 
     @tool(name="noop", description="无操作", is_safe=True)
     async def noop() -> str:

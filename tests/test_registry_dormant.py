@@ -1,6 +1,6 @@
 """测试 ToolRegistry 休眠池管理"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry, ToolWrapper
+from milu.tools import tool, ToolRegistry, ToolWrapper
 
 
 def _make_wrapper(name: str, description: str = "") -> ToolWrapper:
@@ -85,7 +85,7 @@ class TestDormantPool:
     def test_deactivate_meta_tools_blocked(self):
         """元工具不可被停用"""
         reg = ToolRegistry()
-        from agent_framework.tools.catalog import create_catalog_tools
+        from milu.tools.catalog import create_catalog_tools
         catalog = create_catalog_tools(reg)
         reg.register_many(catalog)
 
@@ -357,8 +357,8 @@ class TestExecutorDormantIntercept:
     @pytest.mark.asyncio
     async def test_execute_dormant_tool_returns_hint(self):
         """调用休眠工具应返回激活提示"""
-        from agent_framework.tools.executor import ToolExecutor
-        from agent_framework.agent.config import AgentConfig
+        from milu.tools.executor import ToolExecutor
+        from milu.agent.config import AgentConfig
 
         reg = ToolRegistry()
         w = _make_wrapper("fetch__html", "Fetch HTML")
@@ -378,8 +378,8 @@ class TestExecutorDormantIntercept:
     @pytest.mark.asyncio
     async def test_execute_activated_tool_succeeds(self):
         """激活后工具可正常执行"""
-        from agent_framework.tools.executor import ToolExecutor
-        from agent_framework.agent.config import AgentConfig
+        from milu.tools.executor import ToolExecutor
+        from milu.agent.config import AgentConfig
 
         reg = ToolRegistry()
         w = _make_wrapper("fetch__html", "Fetch HTML")

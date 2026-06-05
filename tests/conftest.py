@@ -13,14 +13,14 @@ def _isolate_paths(monkeypatch, tmp_path):
 
     - CWD 切到 pytest 自动清理的 ``tmp_path``：兼容仍依赖相对路径
       （如显式 ``session_dir="./.sessions"``）的测试。
-    - ``AGENT_FRAMEWORK_HOME`` 指向 ``tmp_path`` 下的数据目录：Agent 默认
+    - ``MILU_HOME`` 指向 ``tmp_path`` 下的数据目录：Agent 默认
       ``session_enabled=True`` 且 ``session_dir=None`` → 解析为
-      ``user_data_dir()/sessions``（即 ``~/.agent_framework/sessions``）。若不重定向，
+      ``user_data_dir()/sessions``（即 ``~/.milu/sessions``）。若不重定向，
       大量构造 Agent 的单元测试会在真实用户主目录残留 session/plan 文件。重定向后
       这些会话/计划落到临时目录并随测试结束被清理。
     """
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AGENT_FRAMEWORK_HOME", str(tmp_path / ".agent_framework"))
+    monkeypatch.setenv("MILU_HOME", str(tmp_path / ".milu"))
 
 
 @dataclass

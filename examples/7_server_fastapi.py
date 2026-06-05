@@ -32,11 +32,11 @@ from typing import AsyncIterator, Optional
 
 from dotenv import load_dotenv
 
-from agent_framework.agent.config import AgentConfig
-from agent_framework.agent.events import AgentEvent, AgentDone, AgentError
-from agent_framework.llm.providers import ModelRegistry
-from agent_framework.serving import AgentPool, AgentPoolConfig
-from agent_framework.tools.builtin import BUILTIN_TOOLS
+from milu.agent.config import AgentConfig
+from milu.agent.events import AgentEvent, AgentDone, AgentError
+from milu.llm.providers import ModelRegistry
+from milu.serving import AgentPool, AgentPoolConfig
+from milu.tools.builtin import BUILTIN_TOOLS
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 
-app = FastAPI(title="agent-framework multi-user server", lifespan=lifespan)
+app = FastAPI(title="milu multi-user server", lifespan=lifespan)
 
 
 # ── 3. SSE 事件序列化 ───────────────────────────────────────

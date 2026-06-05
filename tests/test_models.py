@@ -1,9 +1,9 @@
 """测试数据模型：Message, StreamChunk, TokenUsage, Config"""
 
 import pytest
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk, TokenUsage
-from agent_framework.llm.base.config import (
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.llm.base.config import (
     ModelConfig,
     WebSearchConfig,
     ThinkingConfig,

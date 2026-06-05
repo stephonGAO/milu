@@ -1,6 +1,6 @@
 """测试 ToolRegistry"""
 import pytest
-from agent_framework.tools import tool, ToolRegistry
+from milu.tools import tool, ToolRegistry
 
 
 def test_register_single_tool():

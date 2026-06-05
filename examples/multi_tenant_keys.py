@@ -25,7 +25,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent_framework import (
+from milu import (
     AgentDone,
     AgentPool,
     AgentPoolConfig,

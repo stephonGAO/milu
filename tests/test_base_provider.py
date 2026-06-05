@@ -1,9 +1,9 @@
 """测试 BaseLLM 抽象基类和 ModelCapabilities"""
 
 import pytest
-from agent_framework.llm.providers.base import BaseLLM, ModelCapabilities
-from agent_framework.llm.base.message import Message, MessageRole
-from agent_framework.llm.base.response import StreamChunk
+from milu.llm.providers.base import BaseLLM, ModelCapabilities
+from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.response import StreamChunk
 
 
 # ==================== ModelCapabilities 测试 ====================
@@ -227,7 +227,7 @@ class TestBaseLLM:
         """测试API Key缺失时抛出 AuthenticationError"""
         monkeypatch.delenv("TEST_PROVIDER_API_KEY", raising=False)
         llm = ConcreteLLM(api_key=None)
-        from agent_framework.llm.base.exceptions import AuthenticationError
+        from milu.llm.base.exceptions import AuthenticationError
         with pytest.raises(AuthenticationError):
             llm._get_api_key()
 
