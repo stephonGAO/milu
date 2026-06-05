@@ -34,7 +34,13 @@ def compute_next_run(task: ScheduleTask, after: datetime) -> datetime | None:
         return after + timedelta(minutes=task.interval_minutes)
 
     if task.trigger_type == "once":
-        return None  # 只运行一次，执行后禁用
+        # run_at 字段即触发时间
+        if task.run_at:
+            try:
+                return datetime.fromisoformat(task.run_at)
+            except ValueError:
+                return None
+        return None
 
     return None
 
@@ -82,7 +88,12 @@ class ScheduleEngine:
                 next_dt = compute_next_run(task, now)
                 task.next_run = next_dt.isoformat() if next_dt else None
                 self._store.update(task)
-                if task.next_run:
+                if next_dt is None:
+                    continue
+                # 初始化后立刻检查是否已到期（如启动时 run_at 已过）
+                if next_dt <= now:
+                    due.append(task)
+                else:
                     print(f"  [调度器] '{task.name}' 下次运行: {task.next_run[:16]}")
                 continue
 
@@ -108,16 +119,15 @@ class ScheduleEngine:
             task.run_count += 1
 
             if task.trigger_type == "once":
-                task.enabled = False
-                task.next_run = None
+                self._store.remove(task.name)
+                print(f"[调度器] ✓ '{task.name}' 执行完成，已删除")
             else:
                 next_dt = compute_next_run(task, now)
                 task.next_run = next_dt.isoformat() if next_dt else None
-
-            self._store.update(task)
-            print(f"[调度器] ✓ '{task.name}' 执行完成（第 {task.run_count} 次）")
-            if task.next_run:
-                print(f"[调度器]   下次运行: {task.next_run[:16]}")
+                self._store.update(task)
+                print(f"[调度器] ✓ '{task.name}' 执行完成（第 {task.run_count} 次）")
+                if task.next_run:
+                    print(f"[调度器]   下次运行: {task.next_run[:16]}")
 
             if self._log_dir:
                 self._write_log(task, now, result)
@@ -135,13 +145,12 @@ class ScheduleEngine:
         now = datetime.now()
         task.last_run = now.isoformat()
         task.run_count += 1
-        if task.trigger_type != "once":
+        if task.trigger_type == "once":
+            self._store.remove(task.name)
+        else:
             next_dt = compute_next_run(task, now)
             task.next_run = next_dt.isoformat() if next_dt else None
-        elif task.trigger_type == "once":
-            task.enabled = False
-            task.next_run = None
-        self._store.update(task)
+            self._store.update(task)
         return result
 
     async def _run_task(self, task: ScheduleTask) -> str:
