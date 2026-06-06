@@ -163,4 +163,6 @@ def test_write_project_template(paths):
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "default_models", "security",
+        "display",
     }
+    assert data["display"]["show_subagent_events"] is False

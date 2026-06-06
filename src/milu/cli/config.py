@@ -44,6 +44,7 @@ class Settings:
     use_subagents: bool = True
     session_id: str | None = None
     selfguard_enabled: bool = True
+    show_subagent_events: bool = False   # 是否在 CLI 渲染子代理内部事件（默认隐藏）
     # 运行限额 / 压缩分节（供 builder 构造 AgentConfig / CompactConfig）
     agent: dict = field(default_factory=dict)
     compact: dict = field(default_factory=dict)
@@ -87,6 +88,7 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         session_enabled = False
 
     security = config.security
+    display = config.display
     return Settings(
         provider=provider,
         model=model,
@@ -99,6 +101,7 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         use_subagents=not getattr(args, "no_subagents", False),
         session_id=getattr(args, "session", None),
         selfguard_enabled=bool(security.get("selfguard_enabled", True)),
+        show_subagent_events=bool(display.get("show_subagent_events", False)),
         agent=dict(agent),
         compact=dict(config.compact),
     )

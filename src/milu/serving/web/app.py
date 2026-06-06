@@ -45,6 +45,8 @@ from milu.agent.events import (
     AgentDone,
     AgentError,
     ConfirmResponse,
+    SubAgentDone,
+    SubAgentEvent,
     ToolConfirmRequired,
 )
 from milu.cli.config import DEFAULT_MODELS, DEFAULT_PROVIDER, env_key_name
@@ -76,6 +78,7 @@ class ServerOptions:
     use_subagents: bool = True
     use_scheduler: bool = True
     selfguard_enabled: bool = True
+    show_subagent_events: bool = False   # 是否向前端转发子代理内部事件（默认隐藏）
 
     def resolved_model(self) -> str | None:
         return self.model or DEFAULT_MODELS.get(self.provider)
@@ -136,6 +139,7 @@ def _effective_settings(state, user_id: str, session_id: str) -> dict:
         "mode": pref.get("mode", d.mode),
         "web_search": pref.get("web_search", d.web_search),
         "enable_thinking": pref.get("enable_thinking", d.enable_thinking),
+        "show_subagent_events": pref.get("show_subagent_events", d.show_subagent_events),
         "session_enabled": d.session_enabled,
     }
 
@@ -214,6 +218,7 @@ def create_app(
     use_subagents: bool = True,
     use_scheduler: bool = True,
     selfguard_enabled: bool = True,
+    show_subagent_events: bool = False,
 ):
     """构造 FastAPI 应用（含 AgentPool + 可选嵌入式调度引擎 + 全部端点）。"""
     options = ServerOptions(
@@ -227,6 +232,7 @@ def create_app(
         use_subagents=use_subagents,
         use_scheduler=use_scheduler,
         selfguard_enabled=selfguard_enabled,
+        show_subagent_events=show_subagent_events,
     )
 
     @asynccontextmanager
@@ -326,7 +332,11 @@ def create_app(
 
     @app.get("/")
     async def index():
-        return FileResponse(STATIC_DIR / "index.html")
+        # 演示前端随版本迭代；禁用缓存，避免浏览器用旧 HTML（改了前端却看不到变化）
+        return FileResponse(
+            STATIC_DIR / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     @app.get("/health")
     async def health():
@@ -344,9 +354,16 @@ def create_app(
                 queue: asyncio.Queue = asyncio.Queue()
                 st.queues[key] = queue
 
+                # 子代理事件显示：按 per-(user,session) 偏好取（前端可运行时切换），
+                # 未设置则回退到服务启动默认。每次对话请求重新读取，切换无需重建实例。
+                show_subagent = _effective_settings(st, user_id, session_id)["show_subagent_events"]
+
                 async def _run():
                     try:
                         async for evt in agent.run(user_input):
+                            # 子代理内部事件：按配置开关决定是否转发给前端（默认隐藏）
+                            if not show_subagent and isinstance(evt, (SubAgentEvent, SubAgentDone)):
+                                continue
                             await queue.put(("event", _sse(evt.__class__.__name__,
                                                            _to_jsonable(evt))))
                             if isinstance(evt, (AgentDone, AgentError)):
@@ -455,15 +472,23 @@ def create_app(
         st = request.app.state
         key = (x_user_id, x_session_id)
         pref = dict(st.prefs.get(key, {}))
+        # 影响 Agent/LLM 构造的字段：变更需驱逐实例按新配置重建
+        needs_rebuild = False
         for field_name in ("provider", "model", "mode"):
             if field_name in body and body[field_name] is not None:
                 pref[field_name] = body[field_name]
+                needs_rebuild = True
         for field_name in ("web_search", "enable_thinking"):
             if field_name in body and body[field_name] is not None:
                 pref[field_name] = bool(body[field_name])
+                needs_rebuild = True
+        # 纯展示开关：读取发生在对话流式时，切换无需重建实例（不触发驱逐）
+        if "show_subagent_events" in body and body["show_subagent_events"] is not None:
+            pref["show_subagent_events"] = bool(body["show_subagent_events"])
         st.prefs[key] = pref
-        # 驱逐该实例 → 下条消息按新厂商/模型/参数重建
-        await st.pool.remove(x_user_id, x_session_id)
+        # 仅当影响构造的字段变更时才驱逐该实例 → 下条消息按新厂商/模型/参数重建
+        if needs_rebuild:
+            await st.pool.remove(x_user_id, x_session_id)
         return {"status": "ok", "settings": _effective_settings(st, x_user_id, x_session_id)}
 
     @app.post("/api/mode")

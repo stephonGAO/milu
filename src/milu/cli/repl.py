@@ -79,7 +79,7 @@ def _start_esc_watcher(
     return t
 
 
-async def _render_with_esc(agent, user_input: str) -> str:
+async def _render_with_esc(agent, user_input: str, *, show_subagent: bool = True) -> str:
     """运行 render_turn，同时监听 ESC 键中断。
 
     检测到 ESC 时立即取消当前轮次，并回滚历史到本轮开始前的状态，
@@ -89,7 +89,9 @@ async def _render_with_esc(agent, user_input: str) -> str:
     # 快照历史：中断后回滚，避免半截的 assistant/tool 消息破坏下一次 LLM 调用
     snapshot = list(agent.history._messages)
 
-    task: asyncio.Task[str] = asyncio.create_task(render_turn(agent, user_input))
+    task: asyncio.Task[str] = asyncio.create_task(
+        render_turn(agent, user_input, show_subagent=show_subagent)
+    )
     stop_event = threading.Event()
     _start_esc_watcher(loop, task, stop_event)
 
@@ -481,7 +483,9 @@ async def run_chat(agent, settings: Settings) -> None:
             print(c("blue", f"\n  [Turn {turn_count}]") + c("dim", "  ESC 中断"))
             print(DIVIDER)
             try:
-                await _render_with_esc(agent, user_input)
+                await _render_with_esc(
+                    agent, user_input, show_subagent=settings.show_subagent_events
+                )
             except Exception as e:  # noqa: BLE001 — REPL 兜底，单轮异常不退出
                 print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
     finally:

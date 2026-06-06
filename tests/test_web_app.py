@@ -110,6 +110,22 @@ def test_settings_triggers_rebuild(client):
     assert ("bob", "s1") not in pool._entries
 
 
+def test_show_subagent_toggle(client):
+    """子代理显示开关：默认隐藏、可经 /api/settings 切换，且不驱逐实例。"""
+    h = _h(uid="erin")
+    # 默认隐藏（服务启动默认 show_subagent_events=False）
+    assert client.get("/api/settings", headers=h).json()["show_subagent_events"] is False
+    # 先建实例
+    client.get("/api/tools", headers=h)
+    pool = client.app.state.pool
+    assert ("erin", "s1") in pool._entries
+    # 仅切换展示开关 → 偏好生效，但不应驱逐实例（纯展示，无需重建）
+    r = client.post("/api/settings", headers=h, json={"show_subagent_events": True})
+    assert r.status_code == 200
+    assert client.get("/api/settings", headers=h).json()["show_subagent_events"] is True
+    assert ("erin", "s1") in pool._entries
+
+
 def test_mode_switch(client):
     h = _h(uid="carol")
     assert client.post("/api/mode", headers=h, json={"mode": "talk"}).status_code == 200

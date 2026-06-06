@@ -68,12 +68,16 @@ async def confirm_unsafe(tool_name: str, args_str: str) -> ConfirmResponse:
 
 # ── 事件流渲染 ─────────────────────────────────────────────
 
-async def render_turn(agent, user_input: str, *, show_meta: bool = True) -> str:
+async def render_turn(
+    agent, user_input: str, *, show_meta: bool = True, show_subagent: bool = True
+) -> str:
     """运行 Agent 一轮，流式渲染事件，返回助手最终文本。
 
     :param agent: Agent 实例
     :param user_input: 用户输入
     :param show_meta: 是否在结束时打印 token/轮次等元信息
+    :param show_subagent: 是否渲染子代理内部事件（SubAgentEvent/SubAgentDone）。
+        为 False 时子代理照常运行，仅不展示其内部过程（由 display.show_subagent_events 控制）。
     :return: 助手正文文本（拼接所有 TextDelta）
     """
     thinking_visible = False
@@ -119,6 +123,8 @@ async def render_turn(agent, user_input: str, *, show_meta: bool = True) -> str:
 
         # ── 子代理内部事件 ──
         elif isinstance(event, SubAgentEvent):
+            if not show_subagent:
+                continue
             name = event.subagent_name
             tag = c("magenta", f"[{name}]")
 
@@ -159,6 +165,8 @@ async def render_turn(agent, user_input: str, *, show_meta: bool = True) -> str:
 
         # ── 子代理完成 ──
         elif isinstance(event, SubAgentDone):
+            if not show_subagent:
+                continue
             name = event.subagent_name
             tag = c("magenta", f"[{name}]")
             status = c("red", " [ERROR]") if event.is_error else ""

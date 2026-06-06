@@ -28,6 +28,17 @@
     "acquire_timeout": null,
     "shared_mcp": false
   },
+  "scheduler": {
+    "max_concurrent_tasks": 4,
+    "task_timeout": 300.0,
+    "notify": true
+  },
+  "security": {
+    "selfguard_enabled": true
+  },
+  "display": {
+    "show_subagent_events": false
+  },
   "default_models": {
     "qwen": "qwen3.6-plus",
     "deepseek": "deepseek-v4-flash",

@@ -92,6 +92,11 @@ def _builtin_defaults() -> dict:
         "security": {
             "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
         },
+        "display": {
+            # 是否把子代理（researcher/reader/coder 等）的内部事件输出到 CLI / Web 前端。
+            # 默认关闭——子代理照常运行，仅不展示其内部 thinking/工具/文本细节，保持界面精简。
+            "show_subagent_events": False,
+        },
         "default_models": dict(DEFAULT_MODELS),
     }
 
@@ -177,6 +182,10 @@ class MiluConfig:
     @property
     def security(self) -> dict:
         return self.data.get("security", {})
+
+    @property
+    def display(self) -> dict:
+        return self.data.get("display", {})
 
     @property
     def default_models(self) -> dict:

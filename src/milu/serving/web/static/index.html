@@ -143,6 +143,7 @@
         </label>
         <label class="chk"><input type="checkbox" id="web_search">联网搜索 web_search</label>
         <label class="chk"><input type="checkbox" id="enable_thinking">思考模式 thinking</label>
+        <label class="chk"><input type="checkbox" id="show_subagent">显示子代理过程 subagent</label>
         <button class="btn" id="saveSet">保存并切换</button>
         <p class="hint">切换厂商/模型会驱逐当前实例，下一条消息按新设置重建。</p>
       </div>
@@ -365,9 +366,10 @@ async function loadSettings(){
   const r=await api("/api/settings");const s=await r.json();
   $("provider").value=s.provider;$("model").value=s.model||"";$("mode").value=s.mode;
   $("web_search").checked=!!s.web_search;$("enable_thinking").checked=!!s.enable_thinking;
+  $("show_subagent").checked=!!s.show_subagent_events;
 }
 $("saveSet").onclick=async()=>{
-  const body={provider:$("provider").value,model:$("model").value.trim()||null,mode:$("mode").value,web_search:$("web_search").checked,enable_thinking:$("enable_thinking").checked};
+  const body={provider:$("provider").value,model:$("model").value.trim()||null,mode:$("mode").value,web_search:$("web_search").checked,enable_thinking:$("enable_thinking").checked,show_subagent_events:$("show_subagent").checked};
   await api("/api/settings",{method:"POST",body:JSON.stringify(body)});
   await api("/api/mode",{method:"POST",body:JSON.stringify({mode:$("mode").value})});
   toast("已保存，下一条消息生效");

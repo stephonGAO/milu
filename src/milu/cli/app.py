@@ -167,7 +167,7 @@ async def _run_once(settings, prompt: str, quiet: bool) -> int:
                     final = ev.final_text
             print(final)
         else:
-            await render_turn(agent, prompt)
+            await render_turn(agent, prompt, show_subagent=settings.show_subagent_events)
     finally:
         agent.save_session()
         await agent.disconnect_mcp()
@@ -518,6 +518,7 @@ def _cmd_serve(args) -> int:
         use_subagents=not getattr(args, "no_subagents", False),
         use_scheduler=not getattr(args, "no_scheduler", False),
         selfguard_enabled=settings.selfguard_enabled,
+        show_subagent_events=settings.show_subagent_events,
     )
 
     host, port = args.host, args.port
