@@ -281,11 +281,12 @@ def create_app(
         st.pool = pool
 
         # 定时任务存储始终可用（REST 管理）；引擎按需嵌入
-        from milu.scheduler import ScheduleEngine, ScheduleStore
+        from milu.scheduler import ScheduleEngine, ScheduleStore, SchedulerLock
         from milu.scheduler.engine import SchedulerConfig
         st.store = ScheduleStore(user_data_dir())
         st.engine = None
         sched_task = None
+        sched_lock = None
         st.recent_results = []  # 内存最近结果（on_result 推送，便于前端即时感知）
         if options.use_scheduler:
             async def _on_result(task, result: str) -> None:
@@ -303,7 +304,10 @@ def create_app(
                 agent_pool=pool,
                 on_result=_on_result,
             )
-            sched_task = st.engine.start_background()
+            # 单实例锁（与 daemon / chat 嵌入共用，多引擎并存会重复执行任务）：
+            # start_with_lock 抢到即运行，被占用则等待、持锁者退出后自动接管
+            sched_lock = SchedulerLock(user_data_dir())
+            sched_task = st.engine.start_background(sched_lock)
 
         logger.info("milu Web 服务就绪：provider=%s model=%s mode=%s",
                     options.provider, options.resolved_model(), options.mode)
@@ -318,6 +322,8 @@ def create_app(
                     await sched_task
                 except asyncio.CancelledError:
                     pass
+            if sched_lock is not None:
+                sched_lock.release()
             await pool.stop()
             if shared_mcp is not None:
                 try:
@@ -624,17 +630,26 @@ def create_app(
             raise HTTPException(400, "name 和 prompt 必填")
         if trigger_type not in ("cron", "interval", "once"):
             raise HTTPException(400, "trigger_type 必须是 cron/interval/once")
+        # 触发参数严格校验——配置无效的任务永远算不出 next_run，会静默不执行
         run_at = (body.get("run_at") or "").strip()
-        if trigger_type == "once" and run_at:
+        cron = (body.get("cron") or "").strip()
+        interval_minutes = int(body.get("interval_minutes") or 0)
+        if trigger_type == "once":
+            if not run_at:
+                raise HTTPException(400, "once 任务必须填写执行时间 run_at")
             try:
                 if datetime.fromisoformat(run_at) <= datetime.now():
                     raise HTTPException(400, f"run_at '{run_at}' 是过去时间，任务不会触发")
             except ValueError:
                 raise HTTPException(400, f"run_at 格式无效: {run_at}")
+        if trigger_type == "interval" and interval_minutes < 1:
+            raise HTTPException(400, "interval 任务必须填写间隔分钟数（≥1）")
+        if trigger_type == "cron" and not cron:
+            raise HTTPException(400, "cron 任务必须填写 cron 表达式")
         task = ScheduleTask.create(
             name=name, prompt=prompt, trigger_type=trigger_type,
-            cron=(body.get("cron") or "").strip(),
-            interval_minutes=int(body.get("interval_minutes") or 0),
+            cron=cron,
+            interval_minutes=interval_minutes,
             run_at=run_at,
             description=(body.get("description") or "").strip(),
             provider=(body.get("provider") or "").strip(),

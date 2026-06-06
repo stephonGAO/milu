@@ -1,7 +1,8 @@
 """ScheduleEngine 多用户并发执行测试。
 
 验证：并发执行错误隔离、同用户并发写无丢更新、任务超时、结果投递
-（outbox + on_result）、agent_pool 注入路径、start_background 生命周期。
+（outbox + on_result）、agent_pool 注入路径、start_background 生命周期、
+韧性防护（tick 异常不杀主循环、echo 编码容错、后台任务死亡可见）。
 所有引擎实例 notify=False（测试中不弹系统通知）。
 """
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -252,6 +255,189 @@ async def test_start_background_cancelable(tmp_path: Path):
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
+
+
+# ── 韧性与回显（嵌入运行形态）─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_safe_tick_swallows_exception_then_recovers(tmp_path: Path):
+    """单次 tick 异常被吞掉（主循环不死），后续 tick 正常执行任务。"""
+    store = ScheduleStore(tmp_path)
+    store.add(_mk("t", "alice"))
+    engine = _engine(tmp_path, store)
+    orig_tick = engine._tick
+    calls = {"n": 0}
+
+    async def flaky_tick():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("tick boom")
+        await orig_tick()
+
+    engine._tick = flaky_tick
+    await engine._safe_tick()  # 异常被吞，不抛出
+    await engine._safe_tick()  # 恢复正常
+    assert engine.ran == ["t"]
+
+
+@pytest.mark.asyncio
+async def test_echo_off_silent_but_outbox_delivered(tmp_path: Path, capsys):
+    """echo=False（嵌入默认）：不写 stdout，任务仍正常执行并投递 outbox。"""
+    store = ScheduleStore(tmp_path)
+    store.add(_mk("t", "alice"))
+    engine = _engine(tmp_path, store)  # 默认 echo=False
+    await engine._tick()
+    assert capsys.readouterr().out == ""
+    assert _read_outbox(tmp_path, "alice")[0]["ok"] is True
+
+
+def test_echo_print_tolerates_encode_error(tmp_path: Path, monkeypatch):
+    """echo=True 时 stdout 编码失败（如 GBK 重定向遇 '▶'）降级重打，
+    不抛异常——曾导致 Web 嵌入引擎任务静默不执行。"""
+    store = ScheduleStore(tmp_path)
+    engine = _engine(tmp_path, store, echo=True)
+    calls: list[str] = []
+
+    def gbk_print(text):
+        if not calls:
+            calls.append(text)
+            raise UnicodeEncodeError(
+                "gbk", str(text), 0, 1, "illegal multibyte sequence")
+        calls.append(text)
+
+    monkeypatch.setattr("builtins.print", gbk_print)
+    engine._echo_print("[调度器] ▶ 执行任务: x")  # 不抛出
+    assert len(calls) == 2  # 第一次失败，回退 errors='replace' 再打印
+
+
+@pytest.mark.asyncio
+async def test_invalid_task_disabled_with_visible_failure(tmp_path: Path):
+    """配置无效的任务（once 缺 run_at）被自动禁用并投递可见失败。
+
+    回归：曾静默跳过——任务「创建了却永不执行」且毫无线索（用户经 Web 表单
+    创建 once 任务但 run_at 为空时实际撞上）。
+    """
+    store = ScheduleStore(tmp_path)
+    bad = ScheduleTask.create(
+        name="bad", prompt="p", trigger_type="once", run_at="",  # 永远算不出 next_run
+        user_id="alice",
+    )
+    store.add(bad)
+    engine = _engine(tmp_path, store)
+
+    await engine._tick()
+
+    saved = store.get("bad", "alice")
+    assert saved is not None and saved.enabled is False  # 已自动禁用
+    records = _read_outbox(tmp_path, "alice")
+    assert len(records) == 1 and records[0]["ok"] is False
+    assert "配置无效" in records[0]["result"]
+    assert engine.ran == []  # 未被执行
+
+    await engine._tick()  # 已禁用：不再重复投递
+    assert len(_read_outbox(tmp_path, "alice")) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_with_lock_takes_over_after_holder_exit(tmp_path: Path, monkeypatch):
+    """锁被他进程占用时等待；持有者退出后自动接管并执行到期任务。
+
+    回归：曾是「拿不到锁就永远不嵌入」——chat 与 serve 同开时，先开方
+    退出后另一方无引擎，任务静默不执行。
+    """
+    from milu.scheduler.lock import SchedulerLock
+
+    (tmp_path / "scheduler.lock").write_text("99999", encoding="utf-8")
+    alive = {"v": True}
+    monkeypatch.setattr(
+        "milu.scheduler.lock.pid_alive",
+        lambda pid: alive["v"] if pid == 99999 else True,
+    )
+
+    store = ScheduleStore(tmp_path)
+    store.add(_mk("t", "alice"))
+    engine = _engine(tmp_path, store)
+    lock = SchedulerLock(tmp_path)
+    task = asyncio.get_running_loop().create_task(
+        engine.start_with_lock(lock, retry_seconds=0.05))
+
+    await asyncio.sleep(0.15)
+    assert engine.ran == []  # 锁被占用：等待中，不执行
+
+    alive["v"] = False  # 持有者“退出”
+    deadline = asyncio.get_running_loop().time() + 3.0
+    while not engine.ran and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.05)
+    assert engine.ran == ["t"], "持有者退出后未接管执行"
+
+    engine.stop()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    assert lock.holder_pid() == 0  # finally 中释放了自己的锁
+
+
+@pytest.mark.asyncio
+async def test_start_with_lock_stop_while_waiting(tmp_path: Path, monkeypatch):
+    """等锁阶段 stop() 能自然退出循环，且不碰他人的锁。"""
+    from milu.scheduler.lock import SchedulerLock
+
+    (tmp_path / "scheduler.lock").write_text("99999", encoding="utf-8")
+    monkeypatch.setattr("milu.scheduler.lock.pid_alive", lambda pid: True)
+
+    store = ScheduleStore(tmp_path)
+    engine = _engine(tmp_path, store)
+    lock = SchedulerLock(tmp_path)
+    task = asyncio.get_running_loop().create_task(
+        engine.start_with_lock(lock, retry_seconds=0.05))
+    await asyncio.sleep(0.12)
+    engine.stop()
+    await asyncio.wait_for(task, timeout=2.0)  # 无需 cancel，循环自然结束
+    assert lock.holder_pid() == 99999  # 他人的锁原样保留
+
+
+def test_engine_thread_runs_while_main_thread_blocked(tmp_path: Path):
+    """模拟 chat 嵌入形态：引擎在独立线程的专属事件循环里运行，主线程
+    同步阻塞（如 REPL 停在 input() 提示符）期间任务仍能执行。
+
+    回归：曾用 start_background() 挂 REPL 主循环——input() 冻结事件循环，
+    tick 永远不触发，任务静默不执行。
+    """
+    store = ScheduleStore(tmp_path)
+    store.add(_mk("t", "alice"))
+    engine = _engine(tmp_path, store)
+
+    threading.Thread(
+        target=lambda: asyncio.run(engine.start()), daemon=True
+    ).start()
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not engine.ran:
+        time.sleep(0.05)  # 主线程纯同步阻塞，不跑任何事件循环
+    engine.stop()
+
+    assert engine.ran == ["t"], "主线程阻塞期间引擎线程未执行到期任务"
+    assert _read_outbox(tmp_path, "alice")[0]["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_background_logs_fatal_exit(tmp_path: Path, caplog):
+    """后台任务异常退出时记 error 日志（无人 await 它，必须可见）。"""
+    import logging
+
+    class _BoomEngine(ScheduleEngine):
+        async def start(self):
+            raise RuntimeError("boom")
+
+    store = ScheduleStore(tmp_path)
+    engine = _BoomEngine(store, config=SchedulerConfig(notify=False),
+                         outbox_dir=tmp_path / "outbox")
+    with caplog.at_level(logging.ERROR, logger="milu.scheduler.engine"):
+        task = engine.start_background()
+        with pytest.raises(RuntimeError):
+            await task
+        await asyncio.sleep(0)  # 让 done-callback 跑完
+    assert any("调度后台任务异常退出" in r.message for r in caplog.records)
 
 
 # ── run_task_now 多用户 ──────────────────────────────────

@@ -66,7 +66,8 @@ def _format_next(cron: str) -> str:
         "  - once：指定时间执行一次（run_at 指定，ISO 格式如 '2026-06-10T09:00:00'）\n"
         "执行时会创建独立 Agent 实例运行 prompt，结果记录到日志目录。\n"
         "查看/删除/启停/立即运行已有任务请用 schedule_manage 工具。\n"
-        "**重要**：任务创建后需运行 `milu scheduler start` 守护进程才能自动触发。\n"
+        "任务由运行中的调度器自动触发（milu chat / milu serve 运行期间已内嵌；"
+        "无人值守场景才需要单独运行 `milu scheduler start`）。\n"
         "**重要**：用户说相对时间（如'5分钟后'、'明天早上9点'）时，必须先用 datetime "
         "工具获取当前时间，再据此计算 run_at——切勿凭记忆猜测日期；run_at 为过去时间会被拒绝。"
     ),
@@ -151,12 +152,24 @@ async def schedule_create(
     else:
         next_hint = f"\n  执行时间: {run_at}"
 
+    # 按单实例锁动态判断调度器状态，给出准确提示（chat/serve 嵌入或 daemon 持锁）
+    from milu.resources import user_data_dir
+    from milu.scheduler.lock import SchedulerLock
+
+    if SchedulerLock(user_data_dir()).holder_pid():
+        sched_hint = "调度器运行中，任务将按时自动触发。"
+    else:
+        sched_hint = (
+            "注意：当前没有运行中的调度器——请保持 milu chat / milu serve 开启，"
+            "或运行 `milu scheduler start`，任务才会自动触发。"
+        )
+
     prompt_preview = prompt[:80] + ("..." if len(prompt) > 80 else "")
     return (
         f"定时任务 '{name}' 已创建。{next_hint}\n\n"
         f"  触发方式: {task.trigger_desc()}\n"
         f"  执行指令: {prompt_preview}\n\n"
-        f"提示：运行 `milu scheduler start` 启动调度守护进程后，任务将按时自动触发。\n"
+        f"{sched_hint}\n"
         f"也可用 `milu schedule run {name}` 立即同步执行一次查看效果。"
     )
 

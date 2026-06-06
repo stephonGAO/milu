@@ -191,7 +191,7 @@
             <option value="cron">cron · 表达式</option>
           </select>
         </label>
-        <label class="fld" id="fldOnce"><span>执行时间 run_at（ISO）</span><input class="t" id="tkRunAt" placeholder="2026-06-10T09:00:00"></label>
+        <label class="fld" id="fldOnce"><span>执行时间 run_at</span><input class="t" id="tkRunAt" type="datetime-local" step="1"></label>
         <label class="fld" id="fldInterval" style="display:none"><span>间隔分钟</span><input class="t" id="tkInterval" type="number" value="30"></label>
         <label class="fld" id="fldCron" style="display:none"><span>cron 表达式</span><input class="t" id="tkCron" placeholder="0 9 * * 1-5"></label>
         <button class="btn" id="tkCreate">创建任务</button>
@@ -460,6 +460,8 @@ $("tools_open").onchange=()=>{
 
 // ── 定时任务 ──
 $("tkType").onchange=()=>{const v=$("tkType").value;$("fldOnce").style.display=v==="once"?"":"none";$("fldInterval").style.display=v==="interval"?"":"none";$("fldCron").style.display=v==="cron"?"":"none"};
+// run_at 预填「5 分钟后」（空 run_at 的 once 任务永远不会触发，后端也会拒绝）
+(function(){const d=new Date(Date.now()+5*60000);d.setSeconds(0,0);const p=n=>String(n).padStart(2,"0");$("tkRunAt").value=d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate())+"T"+p(d.getHours())+":"+p(d.getMinutes())})();
 $("tkCreate").onclick=async()=>{
   const v=$("tkType").value;
   const body={name:$("tkName").value.trim(),prompt:$("tkPrompt").value.trim(),trigger_type:v,run_at:$("tkRunAt").value.trim(),interval_minutes:parseInt($("tkInterval").value||"0"),cron:$("tkCron").value.trim()};
@@ -500,6 +502,32 @@ async function loadResults(){
   box.innerHTML="";
   results.forEach(x=>{const c=el2("card");c.innerHTML=`<div class="title">${esc(x.task)} <span class="badge ${x.ok?'on':'off'}">${x.ok?'成功':'失败'}</span></div><div class="meta">${esc((x.time||"").slice(0,16).replace("T"," "))}<br>${esc((x.result||"").slice(0,120))}</div>`;box.appendChild(c)});
 }
+
+// ── 定时任务结果提醒（全局轮询：新结果插入聊天区 + toast + 面板自动刷新）──
+let lastResultTime=null,lastResultUid=null;
+async function pollSchedResults(){
+  try{
+    const uid=$("uid").value.trim()||"default";
+    if(uid!==lastResultUid){lastResultUid=uid;lastResultTime=null}  // 切换用户重置游标
+    const r=await api("/api/schedule/results");if(!r.ok)return;
+    const {results}=await r.json();
+    // 首轮记游标（outbox 为空也记 ""），此后任何新结果都展示——
+    // 不能在空列表时跳过初始化，否则加载后第一条结果会被当历史吞掉
+    if(lastResultTime===null){lastResultTime=results.length?(results[0].time||""):"";return}
+    if(!results.length)return;
+    const newest=results[0].time||"";              // 接口按时间倒序，[0] 最新
+    if(newest<=lastResultTime)return;
+    const fresh=results.filter(x=>(x.time||"")>lastResultTime).reverse();
+    lastResultTime=newest;
+    fresh.forEach(x=>{
+      sysline("⏰ 定时任务「"+x.task+"」"+(x.ok?"执行完成":"执行失败")+" · "+(x.time||"").slice(11,19));
+      el("bubble assistant",md(x.result||"(空)"));
+    });
+    toast("定时任务有新结果");
+    if(document.querySelector("#tab-sched.active")){loadTasks();loadResults()}
+  }catch(e){}
+}
+setInterval(pollSchedResults,15000);pollSchedResults();
 
 // ── 信息 ──
 document.querySelectorAll("[data-info]").forEach(b=>b.onclick=()=>loadInfo(b.dataset.info));

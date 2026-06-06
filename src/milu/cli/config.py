@@ -42,6 +42,7 @@ class Settings:
     enable_thinking: bool
     use_mcp: bool = True
     use_subagents: bool = True
+    use_scheduler: bool = True   # chat 是否嵌入调度引擎（对话期间自动执行定时任务）
     session_id: str | None = None
     selfguard_enabled: bool = True
     show_subagent_events: bool = False   # 是否在 CLI 渲染子代理内部事件（默认隐藏）
@@ -99,6 +100,7 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         enable_thinking=bool(llm.get("enable_thinking", False)),
         use_mcp=not getattr(args, "no_mcp", False),
         use_subagents=not getattr(args, "no_subagents", False),
+        use_scheduler=not getattr(args, "no_scheduler", False),
         session_id=getattr(args, "session", None),
         selfguard_enabled=bool(security.get("selfguard_enabled", True)),
         show_subagent_events=bool(display.get("show_subagent_events", False)),

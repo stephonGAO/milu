@@ -4,16 +4,21 @@
 写锁），结果投递三通道：outbox JSONL（按用户）→ on_result 回调（服务端
 推送）→ 系统弹窗（CLI 本机）。
 
-两种运行形态：
-  - CLI 守护进程：`milu scheduler start`（前台 start()，PID 单实例锁在 CLI 层）
-  - 嵌入服务进程：FastAPI lifespan 中 `engine.start_background()`，配合
+三种运行形态（共用 lock.py 的 SchedulerLock 单实例锁，杜绝多引擎重复执行）：
+  - CLI 守护进程：`milu scheduler start`（前台 start()，echo=True 控制台回显）
+  - 嵌入 Web 服务：FastAPI lifespan 中 `engine.start_background()`，配合
     agent_pool 注入获得 per-user 实例复用 / 共享 MCP / memory 派生
+  - 嵌入 CLI chat：`run_chat` 起独立 daemon 线程跑 `asyncio.run(start())`，
+    对话期间自动执行、退出即停（echo=False 不污染 REPL，结果走
+    outbox/弹窗/日志）。⚠️ 不能用 start_background() 挂 REPL 主循环——
+    input() 同步阻塞主线程事件循环，tick 永远得不到调度
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import sys
 import traceback
 from collections import defaultdict
 from dataclasses import dataclass
@@ -95,6 +100,7 @@ class ScheduleEngine:
         agent_pool=None,
         on_result: "Callable[[ScheduleTask, str], Awaitable[None]] | None" = None,
         outbox_dir: Path | None = None,
+        echo: bool = False,
     ):
         """
         :param store: 任务存储（按用户分文件）
@@ -107,12 +113,17 @@ class ScheduleEngine:
         :param on_result: 任务完成后的异步回调 (task, result_text)（可选），
             服务端可用于 SSE/WebSocket 推送或写库
         :param outbox_dir: 结果投递目录；None → user_data_dir()/scheduler_outbox
+        :param echo: 是否向 stdout 回显进度（仅 CLI 守护进程前台模式开；
+            嵌入 chat/Web 服务时保持 False——既不污染 REPL，也避免 stdout
+            被重定向为 GBK 等编码时 UnicodeEncodeError 杀死任务执行）。
+            运行形态差异由调用方代码决定，故为构造参数而非 SchedulerConfig 项
         """
         self._store = store
         self._log_dir = log_dir
         self._config = config or SchedulerConfig()
         self._agent_pool = agent_pool
         self._on_result = on_result
+        self._echo = echo
         if outbox_dir is None:
             from milu.resources import user_data_dir
             outbox_dir = user_data_dir() / "scheduler_outbox"
@@ -122,14 +133,36 @@ class ScheduleEngine:
         # 与 AgentPool per-key 锁同思路）
         self._user_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+    def _echo_print(self, text: str) -> None:
+        """安全回显：echo 关闭时静默；开启时打印并容错编码错误。
+
+        stdout 被重定向/管道时编码可能是 GBK 等（Windows 常见），'▶'/'✓'
+        会抛 UnicodeEncodeError——容错降级为 errors='replace'，绝不让一次
+        打印失败杀死任务执行（曾导致 Web 嵌入引擎任务静默不执行）。
+        """
+        if not self._echo:
+            return
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+            print(text.encode(enc, errors="replace").decode(enc))
+
+    async def _safe_tick(self) -> None:
+        """一次 tick 的异常防护：单次失败记日志，不杀主循环。"""
+        try:
+            await self._tick()
+        except Exception:
+            logger.exception("调度 tick 异常（主循环继续）")
+
     async def start(self) -> None:
         """启动调度主循环（前台阻塞，Ctrl+C 停止）。"""
         self._running = True
-        print("调度器已启动，每分钟检查一次任务... 按 Ctrl+C 停止")
+        self._echo_print("调度器已启动，每分钟检查一次任务... 按 Ctrl+C 停止")
         logger.info("调度器启动")
 
         # 立刻做一次检查（初始化 next_run）
-        await self._tick()
+        await self._safe_tick()
 
         while self._running:
             # 睡到下一分钟整点（+2s 避免边界竞争）
@@ -137,15 +170,53 @@ class ScheduleEngine:
             sleep_sec = 60 - now.second + 2
             await asyncio.sleep(sleep_sec)
             if self._running:
-                await self._tick()
+                await self._safe_tick()
 
-    def start_background(self) -> "asyncio.Task[None]":
-        """以后台任务方式启动（嵌入 FastAPI 等服务进程）。
+    async def start_with_lock(self, lock, retry_seconds: float = 30.0) -> None:
+        """持单实例锁运行：抢到锁即启动主循环，抢不到则周期重试，持锁者
+        退出后**自动接管**（如 chat 与 serve 同开，先开方退出后另一方接管，
+        任务不会因锁竞争而静默不执行）。
 
-        返回的 Task 可 cancel() 停止；调用方负责生命周期（lifespan finally
-        中 cancel + 吞 CancelledError）。
+        stop() 在两个阶段都生效：等锁阶段下一轮检查即退出；运行阶段同 start()。
+        锁在本方法 finally 中释放（等锁中被取消不碰他人的锁，release 有持有者守卫）。
+
+        :param lock: SchedulerLock 实例
+        :param retry_seconds: 等锁重试间隔（秒）
         """
-        return asyncio.get_running_loop().create_task(self.start())
+        self._running = True
+        waiting_logged = False
+        while self._running:
+            if lock.try_acquire():
+                logger.info("已获得调度单实例锁，引擎启动")
+                try:
+                    await self.start()
+                finally:
+                    lock.release()
+                return
+            if not waiting_logged:
+                logger.info("调度锁被占用（PID %s），任务由该进程执行；本引擎等待接管",
+                            lock.holder_pid())
+                waiting_logged = True
+            await asyncio.sleep(retry_seconds)
+
+    def start_background(self, lock=None) -> "asyncio.Task[None]":
+        """以后台任务方式启动（嵌入 FastAPI / CLI chat 等进程）。
+
+        返回的 Task 可 cancel() 停止；调用方负责生命周期（finally 中
+        cancel + 吞 CancelledError）。任务异常退出时记 error 日志——
+        没人 await 它，不加 done-callback 的话异常完全静默。
+
+        :param lock: 传入 SchedulerLock 时走 start_with_lock（单实例 + 自动接管）
+        """
+        coro = self.start_with_lock(lock) if lock is not None else self.start()
+        task = asyncio.get_running_loop().create_task(coro)
+
+        def _log_death(t: "asyncio.Task[None]") -> None:
+            if not t.cancelled() and t.exception() is not None:
+                logger.error("调度后台任务异常退出", exc_info=t.exception())
+
+        task.add_done_callback(_log_death)
+        return task
 
     def stop(self) -> None:
         self._running = False
@@ -163,16 +234,26 @@ class ScheduleEngine:
             # 首次运行：初始化 next_run
             if task.next_run is None:
                 next_dt = compute_next_run(task, now)
-                task.next_run = next_dt.isoformat() if next_dt else None
+                if next_dt is None:
+                    # 配置无效（once 缺 run_at / cron 表达式错误 / interval≤0）永远
+                    # 算不出下次运行——静默跳过会让任务「创建了却永不执行」毫无
+                    # 线索，故自动禁用并投递可见失败（outbox/前端提醒/系统弹窗）
+                    task.enabled = False
+                    async with self._user_locks[task.user_id]:
+                        self._store.update(task)
+                    msg = (f"任务配置无效，无法计算下次运行时间（{task.trigger_desc()}），"
+                           f"已自动禁用。请修正触发参数后重新启用或重建任务。")
+                    logger.warning("任务 '%s'（用户 %s）%s", task.name, task.user_id, msg)
+                    await self._deliver(task, now, ok=False, result=msg)
+                    continue
+                task.next_run = next_dt.isoformat()
                 async with self._user_locks[task.user_id]:
                     self._store.update(task)
-                if next_dt is None:
-                    continue
                 # 初始化后立刻检查是否已到期（如启动时 run_at 已过）
                 if next_dt <= now:
                     due.append(task)
                 else:
-                    print(f"  [调度器] '{task.name}' 下次运行: {task.next_run[:16]}")
+                    self._echo_print(f"  [调度器] '{task.name}' 下次运行: {task.next_run[:16]}")
                 continue
 
             try:
@@ -198,7 +279,7 @@ class ScheduleEngine:
     async def _execute(self, task: ScheduleTask) -> None:
         """执行单个任务，更新 last_run / next_run / run_count，投递结果。"""
         now = datetime.now()
-        print(f"\n[调度器] ▶ 执行任务: {task.name}（用户: {task.user_id}）")
+        self._echo_print(f"\n[调度器] ▶ 执行任务: {task.name}（用户: {task.user_id}）")
         logger.info("执行任务: %s（用户: %s）", task.name, task.user_id)
         try:
             result = await asyncio.wait_for(
@@ -211,14 +292,14 @@ class ScheduleEngine:
             async with self._user_locks[task.user_id]:
                 if task.trigger_type == "once":
                     self._store.remove(task.name, task.user_id)
-                    print(f"[调度器] ✓ '{task.name}' 执行完成，已删除")
+                    self._echo_print(f"[调度器] ✓ '{task.name}' 执行完成，已删除")
                 else:
                     next_dt = compute_next_run(task, now)
                     task.next_run = next_dt.isoformat() if next_dt else None
                     self._store.update(task)
-                    print(f"[调度器] ✓ '{task.name}' 执行完成（第 {task.run_count} 次）")
+                    self._echo_print(f"[调度器] ✓ '{task.name}' 执行完成（第 {task.run_count} 次）")
                     if task.next_run:
-                        print(f"[调度器]   下次运行: {task.next_run[:16]}")
+                        self._echo_print(f"[调度器]   下次运行: {task.next_run[:16]}")
 
             if self._log_dir:
                 self._write_log(task, now, result)
@@ -226,9 +307,9 @@ class ScheduleEngine:
             await self._deliver(task, now, ok=True, result=result)
 
         except Exception as e:
-            logger.error("任务 '%s' 执行失败: %s", task.name, e)
-            print(f"[调度器] ✗ '{task.name}' 执行失败: {e}")
-            print(traceback.format_exc())
+            logger.error("任务 '%s' 执行失败: %s\n%s", task.name, e, traceback.format_exc())
+            self._echo_print(f"[调度器] ✗ '{task.name}' 执行失败: {e}")
+            self._echo_print(traceback.format_exc())
             await self._deliver(task, now, ok=False, result=str(e))
 
     async def run_task_now(self, name: str, user_id: str = "default") -> str:

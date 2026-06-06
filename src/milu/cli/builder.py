@@ -67,3 +67,26 @@ def build_agent(s: Settings) -> Agent:
         subagents=None if s.use_subagents else [],
         on_confirm=confirm_unsafe,
     )
+
+
+def build_scheduler_engine(echo: bool):
+    """构造 CLI 形态的调度引擎（daemon 与 chat 嵌入共用，无 agent_pool）。
+
+    :param echo: daemon 前台传 True（控制台回显）；chat 嵌入传 False（静默，
+        不污染 REPL，结果走 outbox/系统弹窗/日志文件）
+    :return: (engine, store, data_dir) 三元组——store 供启动时统计任务数，
+        data_dir 供构造 SchedulerLock
+    """
+    from milu.config import load_config
+    from milu.resources import user_data_dir
+    from milu.scheduler import ScheduleEngine, ScheduleStore
+
+    data_dir = user_data_dir()
+    store = ScheduleStore(data_dir)
+    engine = ScheduleEngine(
+        store,
+        log_dir=data_dir / "scheduler_logs",
+        config=load_config().to_scheduler_config(),
+        echo=echo,
+    )
+    return engine, store, data_dir

@@ -171,6 +171,26 @@ def test_schedule_crud(client):
     assert not any(t["name"] == "t1" for t in tasks2)
 
 
+def test_schedule_create_rejects_invalid_trigger_params(client):
+    """触发参数缺失/无效的任务被 400 拒绝——配置无效的任务永远算不出
+    next_run，会「创建了却永不执行」（回归：曾放行空 run_at 的 once 任务）。"""
+    h = {"X-User-Id": "erin"}
+    # once 缺 run_at
+    r = client.post("/api/schedule/create", headers=h, json={
+        "name": "x1", "prompt": "一分钟后提醒我喝水", "trigger_type": "once"})
+    assert r.status_code == 400 and "run_at" in r.json()["detail"]
+    # interval 无间隔
+    r = client.post("/api/schedule/create", headers=h, json={
+        "name": "x2", "prompt": "p", "trigger_type": "interval", "interval_minutes": 0})
+    assert r.status_code == 400
+    # cron 缺表达式
+    r = client.post("/api/schedule/create", headers=h, json={
+        "name": "x3", "prompt": "p", "trigger_type": "cron"})
+    assert r.status_code == 400
+    # 全部未落库
+    assert client.get("/api/schedule/tasks", headers=h).json()["tasks"] == []
+
+
 def test_schedule_isolated_by_user(client):
     """不同用户的任务互不可见/不可删。"""
     client.post("/api/schedule/create", headers={"X-User-Id": "ua"}, json={

@@ -39,8 +39,8 @@ milu sessions list        # 查看历史会话
 ```
 
 - **配置**：`~/.milu/config.json`（`config` 子命令管理）。解析优先级 **CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 > 内置默认**。
-- **能力**：交互式 `chat` 支持流式输出、工具调用可视化、内置子代理（researcher/reader/coder）、会话持久化、`/mode` 切换操作模式、MCP 自动接入，以及 `/help` 列出的全部 `/命令`。
-- 全局选项写在子命令之后：`-p/--provider`、`-m/--model`、`--api-key`、`--mode {talk,manual,auto,superwork}`、`--no-session`、`--no-mcp`、`--no-subagents`。
+- **能力**：交互式 `chat` 支持流式输出、工具调用可视化、内置子代理（researcher/reader/coder）、会话持久化、`/mode` 切换操作模式、MCP 自动接入、**对话期间自动执行定时任务**（无需单独启动调度服务，退出即停），以及 `/help` 列出的全部 `/命令`。
+- 全局选项写在子命令之后：`-p/--provider`、`-m/--model`、`--api-key`、`--mode {talk,manual,auto,superwork}`、`--no-session`、`--no-mcp`、`--no-subagents`、`--no-scheduler`。
 
 ## 快速开始
 

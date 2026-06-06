@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import threading
 from datetime import datetime
@@ -427,6 +428,40 @@ async def run_chat(agent, settings: Settings) -> None:
 
     print_header(agent, settings)
 
+    # 嵌入式调度引擎：对话期间自动执行定时任务，退出即停。
+    # 单实例锁防重复执行（与 daemon / web serve 共用）；echo=False 不污染
+    # REPL，结果走系统弹窗 + outbox + 日志文件，/schedule 可查。
+    # ⚠️ 必须独立线程跑专属事件循环：REPL 主循环在 input() 上同步阻塞主线程
+    # 的事件循环（停在 You> 提示符时即冻结），start_background() 挂在主循环
+    # 上的话 tick 永远得不到调度。daemon 线程随进程退出，无需 join。
+    sched_engine = sched_lock = None
+    if settings.use_scheduler:
+        from milu.cli.builder import build_scheduler_engine
+        from milu.scheduler.lock import SchedulerLock
+
+        engine, store, data_dir = build_scheduler_engine(echo=False)
+        lock = SchedulerLock(data_dir)
+        sched_engine, sched_lock = engine, lock
+        holder = lock.holder_pid()  # 起线程前探测（线程可能立刻抢到锁，避免把自己误报为他人）
+
+        def _sched_main() -> None:
+            try:
+                # start_with_lock：抢到锁即运行；被占用则等待，持锁者退出后自动接管
+                asyncio.run(engine.start_with_lock(lock))
+            except Exception:
+                logging.getLogger(__name__).exception("嵌入式调度线程异常退出")
+
+        threading.Thread(
+            target=_sched_main, name="milu-scheduler", daemon=True
+        ).start()
+        if holder:
+            print(c("dim", f"  检测到调度器已在运行（PID {holder}），任务由它执行；"
+                           f"其退出后本会话自动接管\n"))
+        else:
+            enabled = sum(1 for t in store.list_all() if t.enabled)
+            print(c("cyan", f"  定时任务调度已启动：{enabled} 个启用任务，对话期间自动执行")
+                  + c("dim", "（--no-scheduler 可关）\n"))
+
     # 连接 MCP（如启用且存在配置文件）
     if settings.use_mcp:
         await agent.connect_mcp()
@@ -489,5 +524,11 @@ async def run_chat(agent, settings: Settings) -> None:
             except Exception as e:  # noqa: BLE001 — REPL 兜底，单轮异常不退出
                 print(f"\n  {c('red', '[EXCEPTION]')} {c('red', str(e))}")
     finally:
+        # 停嵌入式调度：置停止标志 + 释放锁（daemon 线程随进程退出，不 join——
+        # 它可能正睡在分钟级 sleep 上）
+        if sched_engine is not None:
+            sched_engine.stop()
+        if sched_lock is not None:
+            sched_lock.release()
         agent.save_session()
         await agent.disconnect_mcp()

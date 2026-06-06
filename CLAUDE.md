@@ -34,8 +34,8 @@ pip install -e ".[dev,mcp]"
 # CLI 命令行（pip install 后注册入口点 milu）
 milu                       # 无子命令 → 进入交互式对话（chat；首次无 Key 时自动询问进入 setup 引导）
 milu setup                 # 初始化引导：选厂商/模型 → API Key → 搜索工具（密钥写 ~/.milu/.env）
-milu chat -p deepseek      # 指定厂商进入对话
-milu run "你好" -q          # 一次性执行，-q 只输出最终回答（可管道）
+milu chat -p deepseek      # 指定厂商进入对话（默认嵌入调度引擎，定时任务对话期间自动执行；--no-scheduler 关）
+milu run "你好" -q          # 一次性执行，-q 只输出最终回答（可管道；不嵌入调度）
 echo "总结这段话" | milu run # 从 stdin 读取指令
 milu providers             # 列出 9 个厂商及 Key 配置状态
 milu config set provider qwen   # 写入 ~/.milu/config.json
@@ -116,6 +116,7 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **运行时切换厂商/模型/模式**：`app.state.prefs[(user,session)]` 存偏好覆盖、`app.state.llm_cache[(provider,model,...)]` 按型号缓存共享 LLM（AsyncOpenAI 协程安全）；自定义 `agent_factory` 读偏好取缓存 LLM 构造 Agent（memory/schedule_user 按 user_id 派生隔离）。`POST /api/settings` 写偏好 + `pool.remove()` 驱逐 → 下条消息按新设置重建；`POST /api/mode` 即时 `set_mode` 并存偏好
 - **确认流队列桥接**：危险工具确认时 `on_confirm` 会**阻塞** `agent.run()` 生成器，故后台任务跑 `agent.run()` 喂 `asyncio.Queue`，`on_confirm` 在 `await future` 前把「ConfirmationRequest」推进队列，SSE 协程独立排空队列——保证弹窗在阻塞期间即时显示；`POST /api/confirm`（按 user+session 定位 Future）解析放行，120s 超时自动拒绝
 - **端点**：`/`（前端）、`/api/chat`（SSE，`/` 命令复用 `_exec_command`）、`/api/confirm`、`/api/providers`、`/api/settings`、`/api/mode`、`/api/sessions` + `/api/session/action`（new/load/save/reset）、`/api/schedule/{tasks,create,action,results}`、`/api/tools|skills|memory|stats`
+- **定时任务结果提醒**：服务端 `notify=False`（无桌面弹窗），前端全局轮询 `/api/schedule/results`（15s），新结果插入聊天区系统行 + toast、任务面板自动刷新（首轮只记游标不回放历史）；run_at 输入用 `datetime-local` 控件防格式错
 - 前端四面板：设置（厂商下拉含 Key 状态/模型/模式/开关）、会话、定时任务（创建表单 + 启停/删除/立即运行 + 结果轮询）、信息（工具/技能/记忆/统计）；主区流式渲染（文本/思考/工具/子代理 + 轻量 Markdown）+ 危险工具确认弹窗
 - 示例 `examples/multi_user_chat.py` / `examples/scheduler_server.py` 保留作教学（本服务正是其能力的内置化整合）
 
@@ -133,7 +134,10 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 
 - **多用户定时任务**：`ScheduleStore`（`store.py`）按用户分文件 `~/.milu/schedules/{safe_user_id}.json`（与 memory 同一 safe 化规则；旧单文件 `schedules.json` 首次访问自动迁移为 `schedules/default.json`，源文件保留 `.migrated`）。任务名在**同一用户内**唯一；写盘一律原子写（mkstemp+fsync+os.replace）；跨进程丢更新窗口与 session.py 同档取舍（POSIX flock / Windows 接受低概率）
 - `ScheduleEngine`（`engine.py`）：asyncio 主循环每分钟 tick，到期任务 `gather + Semaphore(max_concurrent_tasks)` 并发执行，store 写操作按 `task.user_id` 取 `asyncio.Lock` 防进程内丢更新；单任务 `wait_for(task_timeout)` 超时保护。`SchedulerConfig`（engine.py 顶部，比照 AgentPoolConfig 不单独建文件）进 config.json `scheduler` 分节
-- **两种运行形态**：CLI 守护进程 `milu scheduler start`（前台 `start()`，PID 单实例锁在 CLI 层 `app.py`，不下沉库层）；嵌入服务进程 `engine.start_background()` 返回 asyncio.Task（FastAPI lifespan 中启动，见 `examples/scheduler_server.py`）
+- **三种运行形态**（共用单实例锁，见下）：① CLI 守护进程 `milu scheduler start`（前台 `start()`，`echo=True` 控制台回显）；② 嵌入 Web 服务 `engine.start_background()`（FastAPI lifespan 中启动，见 `serving/web/app.py`）；③ **嵌入 CLI chat**——`run_chat`（repl.py）启动时起**独立 daemon 线程**跑 `asyncio.run(engine.start())`，对话期间定时任务自动执行、退出即停（`--no-scheduler` 关，`Settings.use_scheduler`）；⚠️ 不能用 `start_background()` 挂 REPL 主循环——REPL 的 `input()` 同步阻塞主线程事件循环（停在 You> 提示符时即冻结），tick 永远得不到调度；`milu run` 一次性命令不嵌入
+- **单实例锁 `SchedulerLock`（`lock.py`，已从 CLI 层下沉）**：PID 文件 `~/.milu/scheduler.lock` + 跨平台进程检活 `pid_alive`（Windows 切勿 os.kill 探测）。多引擎并存会重复执行任务（tick 全量扫盘、无任务级防重），故 daemon/chat 嵌入/web 嵌入三方都走锁；`try_acquire()` 同进程重入幂等（探测与正式获取可分离）；`release()` 仅持有者生效（非持有者 no-op，防误删他人锁）；stale 锁（持有者已死）自动覆盖
+- **锁守望/自动接管 `engine.start_with_lock(lock, retry_seconds=30)`**：嵌入方（chat 线程 / web `start_background(lock)`）抢到锁即运行，被占用则周期重试、**持锁者退出后自动接管**——chat 与 serve 同开时先开方退出，另一方接管执行，任务不会因锁竞争静默不执行（曾是「拿不到锁就永远不嵌入」的坑）；等锁阶段 `stop()` 下一轮检查即退出且不碰他人的锁；daemon `milu scheduler start` 仍是「拿不到锁直接拒绝启动」（前台进程语义）
+- **引擎韧性防护（曾修复 Web 嵌入任务静默不执行的 bug）**：`echo` 是 `ScheduleEngine.__init__` 参数（非 SchedulerConfig 项——运行形态差异由调用方代码决定，不进 config.json），`echo=False`（嵌入默认）完全不写 stdout，`echo=True` 经 `_echo_print` 容错编码（stdout 重定向为 GBK 时 `▶`/`✓` 曾抛 UnicodeEncodeError 被 gather 静默吞掉、任务永不执行）；`_safe_tick` 单次 tick 异常不杀主循环；`start_background()` 带 done-callback，后台任务异常退出记 error 日志（无人 await 它）
 - **执行器二选一**：注入 `agent_pool` → 任务经 `pool.get_or_create_agent(task.user_id, ...)` 执行（per-user 实例复用/共享 MCP/memory 派生，**不占在线并发许可**）；不注入 → 每任务自建独立轻量 Agent（CLI 模式）
 - **结果投递三通道**：outbox JSONL `~/.milu/scheduler_outbox/{user_id}.jsonl`（带 flock append）→ `on_result` 异步回调（服务端推送）→ 系统弹窗（`notify.py`，Windows ctypes MessageBoxW / macOS osascript / Linux notify-send；`SchedulerConfig.notify` 可关）
 - **工具层用户上下文**（`schedule_tool.py`）：`_current_schedule_user` ContextVar 由 `Agent.run()` 入口注入（`Agent(schedule_user=...)`，与 `memory` 平级的能力参数）；**未注入时退化为 "default"（与 memory 的写拒绝是有意差异**，因 schedule 工具在 BUILTIN_TOOLS 默认列表，CLI 单人无注入须兼容）；user_id 不暴露为 LLM 参数（防伪造他人身份）。AgentPool 默认工厂**默认**按 user_id 派生 `schedule_user`（不派生则全部用户共用 default 任务空间，跨用户可见/可删）
