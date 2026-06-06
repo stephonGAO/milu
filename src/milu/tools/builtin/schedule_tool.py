@@ -38,7 +38,9 @@ def _format_next(cron: str) -> str:
         "  - interval：每隔 N 分钟执行一次（interval_minutes 指定间隔，最小 1）\n"
         "  - once：指定时间执行一次（run_at 指定，ISO 格式如 '2026-06-10T09:00:00'）\n"
         "执行时会创建独立 Agent 实例运行 prompt，结果记录到日志目录。\n"
-        "**重要**：任务创建后需运行 `milu scheduler start` 守护进程才能自动触发。"
+        "**重要**：任务创建后需运行 `milu scheduler start` 守护进程才能自动触发。\n"
+        "**重要**：用户说相对时间（如'5分钟后'、'明天早上9点'）时，必须先用 datetime "
+        "工具获取当前时间，再据此计算 run_at——切勿凭记忆猜测日期；run_at 为过去时间会被拒绝。"
     ),
     is_safe=False,
 )
@@ -83,9 +85,17 @@ async def schedule_create(
         if not run_at:
             return "错误：trigger_type=once 时必须提供 run_at（ISO 格式如 '2026-06-10T09:00:00'）"
         try:
-            datetime.fromisoformat(run_at)
+            run_dt = datetime.fromisoformat(run_at)
         except ValueError:
             return f"错误：run_at 格式无效 '{run_at}'，请用 ISO 格式如 '2026-06-10T09:00:00'"
+        now = datetime.now()
+        if run_dt <= now:
+            return (
+                f"错误：run_at '{run_at}' 是过去的时间，任务不会被触发。\n"
+                f"当前时间是 {now.strftime('%Y-%m-%d %H:%M:%S')}，"
+                f"请基于当前时间重新计算执行时间（如'5分钟后'即 "
+                f"{now.replace(microsecond=0).isoformat()} 往后加 5 分钟）。"
+            )
 
     store = _get_store()
     task = ScheduleTask.create(

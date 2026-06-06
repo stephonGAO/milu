@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import traceback
 from datetime import datetime
 from pathlib import Path
 
+from milu.scheduler.notify import send as notify
 from milu.scheduler.store import ScheduleStore, ScheduleTask
 
 logger = logging.getLogger(__name__)
@@ -132,9 +134,15 @@ class ScheduleEngine:
             if self._log_dir:
                 self._write_log(task, now, result)
 
+            # 系统通知：摘取回答前 80 字作为通知正文
+            summary = (result[:80] + "…") if len(result) > 80 else result
+            notify(f"milu · {task.name}", summary or task.description or task.prompt)
+
         except Exception as e:
             logger.error("任务 '%s' 执行失败: %s", task.name, e)
             print(f"[调度器] ✗ '{task.name}' 执行失败: {e}")
+            print(traceback.format_exc())
+            notify(f"milu · {task.name} 执行失败", str(e)[:120])
 
     async def run_task_now(self, name: str) -> str:
         """立刻同步执行指定任务（CLI 使用），返回最终文本。"""

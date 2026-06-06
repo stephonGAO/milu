@@ -364,6 +364,32 @@ def _cmd_schedule_list(store) -> int:
     return 0
 
 
+def _pid_alive(pid: int) -> bool:
+    """检查指定 PID 的进程是否存活（跨平台）。
+
+    注意：Windows 下切勿用 os.kill(pid, 0) 探测——它会直接 TerminateProcess。
+    """
+    if sys.platform == "win32":
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+            return bool(ok) and code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _cmd_scheduler(args) -> int:
     """调度守护进程（start）。"""
     from milu._env import ensure_dotenv_loaded
@@ -376,6 +402,22 @@ def _cmd_scheduler(args) -> int:
     if action == "start":
         ensure_dotenv_loaded()
         data_dir = user_data_dir()
+
+        # 单实例锁：防止多个守护进程并存导致任务被重复执行
+        lock_path = data_dir / "scheduler.lock"
+        if lock_path.exists():
+            try:
+                # utf-8-sig：兼容带 BOM 的锁文件（如被外部工具写入）
+                old_pid = int(lock_path.read_text(encoding="utf-8-sig").strip())
+            except (ValueError, OSError):
+                old_pid = 0
+            if old_pid and _pid_alive(old_pid):
+                print(c("red", f"调度器已在运行（PID {old_pid}），同一时间只能有一个守护进程。"), file=sys.stderr)
+                print(c("dim", f"如确认它已不存在，请删除锁文件后重试: {lock_path}"), file=sys.stderr)
+                return 1
+        data_dir.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(str(os.getpid()), encoding="utf-8")
+
         store = ScheduleStore(data_dir / "schedules.json")
         log_dir = data_dir / "scheduler_logs"
         engine = ScheduleEngine(store, log_dir=log_dir)
@@ -397,6 +439,8 @@ def _cmd_scheduler(args) -> int:
             asyncio.run(engine.start())
         except KeyboardInterrupt:
             print(c("dim", "\n  调度器已停止。"))
+        finally:
+            lock_path.unlink(missing_ok=True)
         return 0
 
     print(c("red", f"未知操作: {action}（可用: start）"), file=sys.stderr)

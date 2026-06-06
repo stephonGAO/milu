@@ -146,4 +146,4 @@ def test_write_project_template(paths):
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["agent"]["max_turns"] == 100
     assert data["agent"]["llm"]["provider"] == "qwen"
-    assert set(data.keys()) == {"agent", "compact", "pool", "default_models"}
+    assert set(data.keys()) == {"agent", "compact", "pool", "default_models", "security"}
