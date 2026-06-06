@@ -48,6 +48,11 @@ def test_builtin_defaults_derived_from_dataclasses():
     assert d["default_models"] == DEFAULT_MODELS
     # pool 仅暴露可序列化子集
     assert "max_agents" in d["pool"] and "mcp_config_path" not in d["pool"]
+    # scheduler 分节从 SchedulerConfig 派生
+    from milu.scheduler.engine import SchedulerConfig
+    assert d["scheduler"]["max_concurrent_tasks"] == SchedulerConfig().max_concurrent_tasks
+    assert d["scheduler"]["task_timeout"] == SchedulerConfig().task_timeout
+    assert d["scheduler"]["notify"] == SchedulerConfig().notify
 
 
 # ── 分层合并优先级 ────────────────────────────────────────
@@ -136,6 +141,16 @@ def test_to_dataclasses(paths):
     assert cc.recent_rounds == 5
     pc = cfg.to_pool_config()
     assert pc.max_agents == 200 and pc.max_concurrent_runs == 50
+    sc = cfg.to_scheduler_config()
+    assert sc.max_concurrent_tasks == 4 and sc.notify is True
+
+
+def test_scheduler_section_overridable(paths):
+    _write(user_config_path(), {"scheduler": {"max_concurrent_tasks": 8, "notify": False}})
+    sc = load_config().to_scheduler_config()
+    assert sc.max_concurrent_tasks == 8
+    assert sc.notify is False
+    assert sc.task_timeout == 300.0  # 未覆盖 → dataclass 默认
 
 
 # ── config init 模板 ──────────────────────────────────────
@@ -146,4 +161,6 @@ def test_write_project_template(paths):
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["agent"]["max_turns"] == 100
     assert data["agent"]["llm"]["provider"] == "qwen"
-    assert set(data.keys()) == {"agent", "compact", "pool", "default_models", "security"}
+    assert set(data.keys()) == {
+        "agent", "compact", "pool", "scheduler", "default_models", "security",
+    }

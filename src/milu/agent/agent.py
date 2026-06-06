@@ -52,6 +52,7 @@ from milu.tools.builtin.image_tool import (
     _current_pending_images,
     _current_vision_support,
 )
+from milu.tools.builtin.schedule_tool import _current_schedule_user
 from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
     _current_subagent_events,
@@ -187,6 +188,7 @@ class Agent:
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
         subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
         memory: "bool | str" = False,                       # 长期记忆开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→启用并按该用户标识隔离存储
+        schedule_user: "str | None" = None,                 # 定时任务用户标识：None→工具层退化为 "default"（CLI 单人）；多用户场景传 user_id（任务文件按用户隔离）
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
     ):
@@ -266,6 +268,12 @@ class Agent:
                 memory if isinstance(memory, str) else "default"
             )
             self._registry.register_many([memory_write, memory_read])
+
+        # ── 定时任务用户标识（与 memory 平级的能力参数）──
+        # None → 工具层 _resolve_user() 退化为 "default"（CLI 单人行为不变）；
+        # 字符串 → schedule 工具按该用户隔离任务文件。run() 入口经 ContextVar
+        # 注入工具层（显式注入 None 也起隔离作用：子代理不会继承父的标识）。
+        self._schedule_user = schedule_user
 
         # 子代理默认（同一约定）：
         #   None + 顶层 Agent → 内置三件套（researcher/reader/coder）；显式 [] → 无；
@@ -666,6 +674,8 @@ class Agent:
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
         memory_token = _current_memory_path.set(self._memory_path)
+        # 定时任务用户标识（未设置时注入 None → 工具层退化 "default"）
+        schedule_user_token = _current_schedule_user.set(self._schedule_user)
         mode_token = _current_parent_mode.set(self._mode)
         # 确认回调透传：子代理继承父的 on_confirm（manual 模式不安全工具、
         # auto 模式 AI 判定 confirm 的调用同样走审批），委派不构成安全旁路
@@ -1233,6 +1243,7 @@ class Agent:
             if plan_items_token is not None:
                 _safe_reset(_current_todo_plan_items, plan_items_token)
             _safe_reset(_current_memory_path, memory_token)
+            _safe_reset(_current_schedule_user, schedule_user_token)
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)
             _safe_reset(_current_parent_judge, judge_token)

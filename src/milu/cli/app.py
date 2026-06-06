@@ -97,18 +97,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("providers", help="列出支持的厂商及 Key 配置状态")
     sub.add_parser("version", help="显示版本")
 
-    # schedule — 定时任务管理
+    # schedule — 定时任务管理（多用户：--user 指定用户，默认 default）
     p_sch = sub.add_parser("schedule", help="定时任务管理（list/run/delete/enable/disable）")
     sch_sub = p_sch.add_subparsers(dest="schedule_action")
-    sch_sub.add_parser("list", help="列出所有定时任务（默认）")
+    sl = sch_sub.add_parser("list", help="列出定时任务（默认）")
+    sl.add_argument("--user", default="default", help="用户标识（默认 default）")
+    sl.add_argument("--all", action="store_true", help="列出全部用户的任务")
     sr = sch_sub.add_parser("run", help="立即同步执行指定任务")
     sr.add_argument("name", help="任务名称")
+    sr.add_argument("--user", default="default", help="用户标识（默认 default）")
     sd = sch_sub.add_parser("delete", help="删除指定任务")
     sd.add_argument("name", help="任务名称")
+    sd.add_argument("--user", default="default", help="用户标识（默认 default）")
     se = sch_sub.add_parser("enable", help="启用指定任务")
     se.add_argument("name", help="任务名称")
+    se.add_argument("--user", default="default", help="用户标识（默认 default）")
     sdi = sch_sub.add_parser("disable", help="禁用指定任务")
     sdi.add_argument("name", help="任务名称")
+    sdi.add_argument("--user", default="default", help="用户标识（默认 default）")
 
     # scheduler — 调度守护进程
     p_sched = sub.add_parser("scheduler", help="调度守护进程管理（start）")
@@ -289,10 +295,12 @@ def _cmd_schedule(args) -> int:
     from milu.scheduler.store import ScheduleStore
 
     action = getattr(args, "schedule_action", None) or "list"
-    store = ScheduleStore(user_data_dir() / "schedules.json")
+    user = getattr(args, "user", "default")
+    store = ScheduleStore(user_data_dir())
 
     if action == "list":
-        tasks = store.list_all()
+        show_all = getattr(args, "all", False)
+        tasks = store.list_all() if show_all else store.list_user(user)
         if not tasks:
             print(c("dim", "暂无定时任务。可在对话中让 Agent 调用 schedule_create 工具创建。"))
             return 0
@@ -302,8 +310,9 @@ def _cmd_schedule(args) -> int:
             status_str = "启用" if t.enabled else "禁用"
             last = t.last_run[:16].replace("T", " ") if t.last_run else "从未"
             nxt = t.next_run[:16].replace("T", " ") if t.next_run else "待计算"
+            user_tag = f"  {c('dim', f'@{t.user_id}')}" if show_all else ""
             print(
-                f"  {c('cyan', t.name)}  {c(status_color, f'[{status_str}]')}  "
+                f"  {c('cyan', t.name)}{user_tag}  {c(status_color, f'[{status_str}]')}  "
                 f"运行 {t.run_count} 次\n"
                 f"    触发: {c('yellow', t.trigger_desc())}\n"
                 f"    说明: {t.description or t.prompt[:60]}\n"
@@ -317,14 +326,14 @@ def _cmd_schedule(args) -> int:
         from milu.scheduler.engine import ScheduleEngine
 
         ensure_dotenv_loaded()
-        task = store.get(args.name)
+        task = store.get(args.name, user)
         if not task:
             print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
             return 1
         print(c("cyan", f"  正在执行任务 '{args.name}'..."))
         engine = ScheduleEngine(store)
         try:
-            result = asyncio.run(engine.run_task_now(args.name))
+            result = asyncio.run(engine.run_task_now(args.name, user))
             print(f"\n{DIVIDER}")
             print(c("green", f"  任务 '{args.name}' 执行完成"))
             print(DIVIDER)
@@ -336,14 +345,14 @@ def _cmd_schedule(args) -> int:
         return 0
 
     if action == "delete":
-        if not store.remove(args.name):
+        if not store.remove(args.name, user):
             print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
             return 1
         print(c("green", f"  任务 '{args.name}' 已删除"))
         return 0
 
     if action in ("enable", "disable"):
-        task = store.get(args.name)
+        task = store.get(args.name, user)
         if not task:
             print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
             return 1
@@ -353,15 +362,8 @@ def _cmd_schedule(args) -> int:
         print(c("green", f"  任务 '{args.name}' {verb}"))
         return 0
 
-    # 默认 list
-    return _cmd_schedule_list(store)
-
-
-def _cmd_schedule_list(store) -> int:
-    tasks = store.list_all()
-    if not tasks:
-        print(c("dim", "暂无定时任务。"))
-    return 0
+    print(c("red", f"未知操作: {action}"), file=sys.stderr)
+    return 2
 
 
 def _pid_alive(pid: int) -> bool:
@@ -418,21 +420,27 @@ def _cmd_scheduler(args) -> int:
         data_dir.mkdir(parents=True, exist_ok=True)
         lock_path.write_text(str(os.getpid()), encoding="utf-8")
 
-        store = ScheduleStore(data_dir / "schedules.json")
+        from milu.config import load_config
+
+        store = ScheduleStore(data_dir)
         log_dir = data_dir / "scheduler_logs"
-        engine = ScheduleEngine(store, log_dir=log_dir)
+        engine = ScheduleEngine(
+            store, log_dir=log_dir, config=load_config().to_scheduler_config()
+        )
 
         tasks = store.list_all()
         enabled = [t for t in tasks if t.enabled]
+        users = sorted({t.user_id for t in tasks})
         print(f"{DIVIDER}")
         print(c("bold", c("cyan", "  milu 调度守护进程")))
         print(DIVIDER)
-        print(f"  任务文件: {c('dim', str(data_dir / 'schedules.json'))}")
+        print(f"  任务目录: {c('dim', str(data_dir / 'schedules'))}")
         print(f"  日志目录: {c('dim', str(log_dir))}")
-        print(f"  已启用任务: {c('yellow', str(len(enabled)))} / {len(tasks)} 个")
+        print(f"  已启用任务: {c('yellow', str(len(enabled)))} / {len(tasks)} 个"
+              f"（{len(users)} 个用户）")
         if enabled:
             for t in enabled:
-                print(f"    {c('cyan', t.name):<20} {t.trigger_desc()}")
+                print(f"    {c('cyan', t.name):<20} @{t.user_id}  {t.trigger_desc()}")
         print(DIVIDER + "\n")
 
         try:

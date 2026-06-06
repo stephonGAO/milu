@@ -112,6 +112,15 @@ milu sessions list         # 查看历史会话
 - `render.py` / `repl.py`：终端渲染（ANSI 颜色、不安全工具确认回调、事件流渲染）与交互式 REPL（全部 `/命令`），**迁移并整理自 `examples/multi_turn_chat.py`**
 - Windows 注意：`main()` 启动时 `os.system("")` 启用 ANSI；stdin 管道按 `sys.stdin.buffer` 显式 UTF-8 解码（规避控制台代码页 + surrogateescape 把中文解成孤立代理字符）
 
+### 8. 调度层 (`src/milu/scheduler/`)
+
+- **多用户定时任务**：`ScheduleStore`（`store.py`）按用户分文件 `~/.milu/schedules/{safe_user_id}.json`（与 memory 同一 safe 化规则；旧单文件 `schedules.json` 首次访问自动迁移为 `schedules/default.json`，源文件保留 `.migrated`）。任务名在**同一用户内**唯一；写盘一律原子写（mkstemp+fsync+os.replace）；跨进程丢更新窗口与 session.py 同档取舍（POSIX flock / Windows 接受低概率）
+- `ScheduleEngine`（`engine.py`）：asyncio 主循环每分钟 tick，到期任务 `gather + Semaphore(max_concurrent_tasks)` 并发执行，store 写操作按 `task.user_id` 取 `asyncio.Lock` 防进程内丢更新；单任务 `wait_for(task_timeout)` 超时保护。`SchedulerConfig`（engine.py 顶部，比照 AgentPoolConfig 不单独建文件）进 config.json `scheduler` 分节
+- **两种运行形态**：CLI 守护进程 `milu scheduler start`（前台 `start()`，PID 单实例锁在 CLI 层 `app.py`，不下沉库层）；嵌入服务进程 `engine.start_background()` 返回 asyncio.Task（FastAPI lifespan 中启动，见 `examples/scheduler_server.py`）
+- **执行器二选一**：注入 `agent_pool` → 任务经 `pool.get_or_create_agent(task.user_id, ...)` 执行（per-user 实例复用/共享 MCP/memory 派生，**不占在线并发许可**）；不注入 → 每任务自建独立轻量 Agent（CLI 模式）
+- **结果投递三通道**：outbox JSONL `~/.milu/scheduler_outbox/{user_id}.jsonl`（带 flock append）→ `on_result` 异步回调（服务端推送）→ 系统弹窗（`notify.py`，Windows ctypes MessageBoxW / macOS osascript / Linux notify-send；`SchedulerConfig.notify` 可关）
+- **工具层用户上下文**（`schedule_tool.py`）：`_current_schedule_user` ContextVar 由 `Agent.run()` 入口注入（`Agent(schedule_user=...)`，与 `memory` 平级的能力参数）；**未注入时退化为 "default"（与 memory 的写拒绝是有意差异**，因 schedule 工具在 BUILTIN_TOOLS 默认列表，CLI 单人无注入须兼容）；user_id 不暴露为 LLM 参数（防伪造他人身份）。AgentPool 默认工厂**默认**按 user_id 派生 `schedule_user`（不派生则全部用户共用 default 任务空间，跨用户可见/可删）
+
 ## 关键设计约束（多用户并发 / 无状态化）
 
 这是近期重构的核心，改动相关代码前必读 `serving/pool.py` 顶部的长注释：

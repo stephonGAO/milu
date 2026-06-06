@@ -4,18 +4,38 @@ schedule_toggle / schedule_run_now）。
 工具不直接执行任务，任务由 `milu scheduler start` 守护进程按时触发。
 schedule_run_now 将 next_run 设为过去时间，让调度器下次 tick 立即执行；
 CLI `milu schedule run <name>` 则同步执行并返回结果。
+
+多用户隔离：当前用户标识由 Agent.run() 入口经 ContextVar 注入
+（Agent(schedule_user=...)，AgentPool 默认工厂自动派生为 user_id），
+工具按用户操作各自的任务文件，user_id 不暴露为 LLM 参数（防伪造他人身份）。
 """
 from __future__ import annotations
 
+import contextvars
 from datetime import datetime
 
 from milu.tools.decorator import tool
+
+# per-run 用户标识（Agent.run() 入口注入；asyncio 任务级隔离，勿用模块级全局变量）
+_current_schedule_user: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_schedule_user", default=None
+)
+
+
+def _resolve_user() -> str:
+    """解析当前用户标识。
+
+    注意：与 memory 的「未注入即写拒绝」是**有意差异**——schedule 工具在
+    BUILTIN_TOOLS 默认列表中，CLI 单人场景不注入用户标识，未注入时必须
+    退化为 "default" 保持旧行为兼容（有测试固化此约定）。
+    """
+    return _current_schedule_user.get() or "default"
 
 
 def _get_store():
     from milu.resources import user_data_dir
     from milu.scheduler.store import ScheduleStore
-    return ScheduleStore(user_data_dir() / "schedules.json")
+    return ScheduleStore(user_data_dir())
 
 
 def _format_next(cron: str) -> str:
@@ -108,6 +128,7 @@ async def schedule_create(
         description=description,
         provider=provider,
         model=model,
+        user_id=_resolve_user(),
     )
     try:
         store.add(task)
@@ -138,9 +159,9 @@ async def schedule_create(
     is_safe=True,
 )
 async def schedule_list() -> str:
-    """列出全部定时任务。"""
+    """列出当前用户的全部定时任务。"""
     store = _get_store()
-    tasks = store.list_all()
+    tasks = store.list_user(_resolve_user())
     if not tasks:
         return "暂无定时任务。可用 schedule_create 工具创建任务。"
 
@@ -167,7 +188,7 @@ async def schedule_list() -> str:
 async def schedule_delete(name: str) -> str:
     """:param name: 要删除的任务名称"""
     store = _get_store()
-    if store.remove(name):
+    if store.remove(name, _resolve_user()):
         return f"任务 '{name}' 已删除。"
     return f"错误：任务 '{name}' 不存在。"
 
@@ -182,7 +203,7 @@ async def schedule_toggle(name: str, enabled: bool) -> str:
     :param enabled: True 启用，False 禁用
     """
     store = _get_store()
-    task = store.get(name)
+    task = store.get(name, _resolve_user())
     if not task:
         return f"错误：任务 '{name}' 不存在。"
     task.enabled = enabled
@@ -202,7 +223,7 @@ async def schedule_toggle(name: str, enabled: bool) -> str:
 async def schedule_run_now(name: str) -> str:
     """:param name: 要立即运行的任务名称"""
     store = _get_store()
-    task = store.get(name)
+    task = store.get(name, _resolve_user())
     if not task:
         return f"错误：任务 '{name}' 不存在。"
 

@@ -610,6 +610,12 @@ class AgentPool:
         # 显式传字符串则尊重调用方（如多 Agent 共享一份团队记忆的场景）。
         if kwargs.get("memory") is True:
             kwargs["memory"] = user_id
+        # 定时任务多用户隔离：池上下文**默认**按 user_id 派生（与 memory 的
+        # opt-in 不同——schedule 工具在 BUILTIN_TOOLS 默认列表中，不派生则全部
+        # 用户共用 "default" 任务空间，跨用户可见/可删）。显式传字符串则尊重
+        # 调用方；传 True 同样派生（与 memory 约定对齐）。
+        if kwargs.get("schedule_user") in (None, True):
+            kwargs["schedule_user"] = user_id
         return Agent(
             llm=llm,
             config=self._agent_config,

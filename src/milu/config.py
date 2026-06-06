@@ -15,6 +15,7 @@
                provider / model / web_search / enable_thinking）/ AgentConfig 运行限额
     compact —— CompactConfig 上下文压缩
     pool    —— AgentPoolConfig 多用户资源池（可序列化子集）
+    scheduler —— SchedulerConfig 定时任务调度引擎（并发上限/任务超时/通知开关）
     default_models —— 各厂商默认模型表（仅供查看/参考；agent.llm.model 留 null 时按它取默认）
 """
 from __future__ import annotations
@@ -54,6 +55,8 @@ _POOL_KEYS = (
     "max_agents", "max_concurrent_runs", "idle_ttl_seconds",
     "sweep_interval_seconds", "acquire_timeout", "shared_mcp",
 )
+# scheduler 分节暴露的可调字段（SchedulerConfig 全量）
+_SCHEDULER_KEYS = ("max_concurrent_tasks", "task_timeout", "notify")
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 _FALSY = {"0", "false", "no", "off", "n"}
@@ -65,9 +68,11 @@ _warned_legacy_keys = False
 def _builtin_defaults() -> dict:
     """基线默认配置：全部从现有 dataclass 派生，默认值不在此重复定义。"""
     from milu.agent.config import AgentConfig, CompactConfig
+    from milu.scheduler.engine import SchedulerConfig
     from milu.serving.pool import AgentPoolConfig
 
     pool_defaults = AgentPoolConfig()
+    scheduler_defaults = SchedulerConfig()
     return {
         "agent": {
             "mode": "auto",
@@ -83,6 +88,7 @@ def _builtin_defaults() -> dict:
         },
         "compact": asdict(CompactConfig()),
         "pool": {k: getattr(pool_defaults, k) for k in _POOL_KEYS},
+        "scheduler": {k: getattr(scheduler_defaults, k) for k in _SCHEDULER_KEYS},
         "security": {
             "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
         },
@@ -165,6 +171,10 @@ class MiluConfig:
         return self.data["pool"]
 
     @property
+    def scheduler(self) -> dict:
+        return self.data.get("scheduler", {})
+
+    @property
     def security(self) -> dict:
         return self.data.get("security", {})
 
@@ -189,6 +199,12 @@ class MiluConfig:
         from milu.serving.pool import AgentPoolConfig
         p = self.pool
         return AgentPoolConfig(**{k: p[k] for k in _POOL_KEYS if k in p})
+
+    def to_scheduler_config(self):
+        """构造 SchedulerConfig（调度引擎参数）。"""
+        from milu.scheduler.engine import SchedulerConfig
+        s = self.scheduler
+        return SchedulerConfig(**{k: s[k] for k in _SCHEDULER_KEYS if k in s})
 
     # ── dotted 读取 ──────────────────────────────────────
     def get(self, dotted: str):
