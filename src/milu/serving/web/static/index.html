@@ -96,6 +96,21 @@
   .typing .tlabel{margin-left:5px;font-style:normal}
   @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
+  /* 侧栏隐藏 */
+  body.sb-hidden aside{display:none}
+  #sbToggle{background:none;border:1px solid #374151;color:#cbd5e1;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:14px;line-height:1}
+  #sbToggle:hover{background:#1f2937}
+
+  /* 工具过程折叠容器 */
+  .toollog{border:1px solid var(--line);border-radius:8px;margin:6px 0;background:#fafafb;overflow:hidden}
+  .toollog .tl-head{padding:6px 10px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+  .toollog .tl-head:hover{background:#f0f0f3}
+  .toollog .tl-head .arr{display:inline-block;transition:transform .15s;font-size:10px}
+  .toollog.open .tl-head .arr{transform:rotate(90deg)}
+  .toollog .tl-head.haserr{color:var(--err)}
+  .toollog .tl-body{display:none;padding:4px 8px 8px;border-top:1px dashed var(--line)}
+  .toollog.open .tl-body{display:block}
+
   /* 弹窗 */
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:100}
   .modal-bg.show{display:flex}
@@ -109,6 +124,7 @@
 </head>
 <body>
 <header>
+  <button id="sbToggle" title="隐藏/显示侧栏">☰</button>
   <span class="logo">milu</span>
   <span class="field">用户<input id="uid"></span>
   <span class="field">会话<input id="sid" value="default"></span>
@@ -146,6 +162,9 @@
         <label class="chk"><input type="checkbox" id="show_subagent">显示子代理过程 subagent</label>
         <button class="btn" id="saveSet">保存并切换</button>
         <p class="hint">切换厂商/模型会驱逐当前实例，下一条消息按新设置重建。</p>
+        <h3 style="margin-top:16px">界面</h3>
+        <label class="chk"><input type="checkbox" id="tools_open">默认展开工具调用过程</label>
+        <p class="hint">工具过程默认折叠为一行；点击该行可随时展开/折叠（即时生效）。</p>
       </div>
 
       <!-- 会话 -->
@@ -275,6 +294,38 @@ function md(src){
 function el(cls,html){const d=document.createElement("div");d.className=cls;if(html!==undefined)d.innerHTML=html;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
 function sysline(t){el("sysline",esc(t))}
 
+// ── 侧栏隐藏（持久化）──
+if(localStorage.getItem("milu_sb_hidden")==="1") document.body.classList.add("sb-hidden");
+$("sbToggle").onclick=()=>{const h=document.body.classList.toggle("sb-hidden");localStorage.setItem("milu_sb_hidden",h?"1":"0")};
+
+// ── 工具过程折叠块（每个工具序列一块，点击表头即时展开/折叠）──
+let toolsOpenDefault=localStorage.getItem("milu_tools_open")==="1";
+let toolLog=null, toolNames=[], toolSteps=0;
+function ensureToolLog(){
+  if(!toolLog){
+    toolLog=document.createElement("div");
+    toolLog.className="toollog"+(toolsOpenDefault?" open":"");
+    toolLog.innerHTML='<div class="tl-head"><span class="arr">▶</span><span class="tl-sum">工具过程</span></div><div class="tl-body"></div>';
+    toolLog.querySelector(".tl-head").onclick=()=>toolLog.classList.toggle("open");
+    chat.appendChild(toolLog);
+  }
+  return toolLog;
+}
+function toolLine(cls,html,isErr){
+  const tl=ensureToolLog();
+  const d=document.createElement("div");d.className=cls;d.innerHTML=html;
+  tl.querySelector(".tl-body").appendChild(d);
+  toolSteps++;
+  if(isErr) tl.querySelector(".tl-head").classList.add("haserr");
+  const uniq=[...new Set(toolNames)].filter(Boolean);
+  tl.querySelector(".tl-sum").textContent="🔧 工具过程"+(uniq.length?(" · "+uniq.slice(0,4).join(", ")+(uniq.length>4?"…":"")):"")+"（"+toolSteps+" 步）";
+  chat.scrollTop=chat.scrollHeight;
+}
+function resetToolLog(){toolLog=null;toolNames=[];toolSteps=0;}
+
+// 清空聊天窗口（重置/新建会话用）
+function clearChat(){chat.innerHTML="";resetToolLog();statusEl=null;}
+
 // ── 发送消息（SSE 流）──
 function quickCmd(c){$("input").value=c;sendMsg()}
 
@@ -300,13 +351,14 @@ async function sendMsg(){
   if(busy)return;
   const input=$("input").value.trim();
   if(!input)return;
+  const isReset=input==="/reset";
   busy=true;
   const sb=$("send"); sb.textContent="■ 停止"; sb.classList.add("stop");
   el("turn"); el("bubble user",esc(input)); $("input").value="";$("input").style.height="auto";
   setStatus("思考中…");
   // 流式上下文
   let asstWrap=null, asstText="", asstEl=null, thinkEl=null;
-  const ensureAsst=()=>{if(!asstEl){asstWrap=el("turn");asstWrap.innerHTML='<div class="role">🤖 assistant</div>';asstEl=document.createElement("div");asstEl.className="bubble assistant";asstWrap.appendChild(asstEl)}return asstEl};
+  const ensureAsst=()=>{if(!asstEl){resetToolLog();asstWrap=el("turn");asstWrap.innerHTML='<div class="role">🤖 assistant</div>';asstEl=document.createElement("div");asstEl.className="bubble assistant";asstWrap.appendChild(asstEl)}return asstEl};
   aborter=new AbortController();
   try{
     const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input}),signal:aborter.signal});
@@ -326,15 +378,15 @@ async function sendMsg(){
         let d={};try{d=JSON.parse(data)}catch(e){}
         if(ev==="TextDelta"){clearStatus();asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);chat.scrollTop=chat.scrollHeight}
         else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";setStatus("推理中…");chat.scrollTop=chat.scrollHeight}
-        else if(ev==="ToolCallStart"){el("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,120)));setStatus("调用工具 "+esc(d.tool_name)+"…")}
-        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,300);el("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o));setStatus("处理结果…")}
-        else if(ev==="ToolConfirmRequired"){el("tool",(d.approved?"✅ 已同意":"❌ 已拒绝")+" "+esc(d.tool_name))}
+        else if(ev==="ToolCallStart"){toolNames.push(d.tool_name);toolLine("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,160)));setStatus("调用工具 "+esc(d.tool_name)+"…")}
+        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,400);toolLine("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o),d.is_error);setStatus("处理结果…")}
+        else if(ev==="ToolConfirmRequired"){toolLine("tool",(d.approved?"✅ 已同意":"❌ 已拒绝")+" "+esc(d.tool_name))}
         else if(ev==="ConfirmationRequest"){setStatus("等待确认…");showConfirm(d)}
-        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;el("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus("子代理 "+esc(n)+" 运行中…")}
-        else if(ev==="SubAgentDone"){el("sub","🏁 ["+esc(d.subagent_name)+"] 完成")}
+        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus("子代理 "+esc(n)+" 运行中…")}
+        else if(ev==="SubAgentDone"){toolLine("sub","🏁 ["+esc(d.subagent_name)+"] 完成")}
         else if(ev==="HistoryCompacted"){sysline("📦 历史已压缩 "+d.original_count+" → "+d.compacted_count+" 条")}
         else if(ev==="SessionLoaded"){sysline("会话已加载 "+d.session_id)}
-        else if(ev==="AgentDone"){clearStatus();asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(", tokens="+u.total_tokens):""))}
+        else if(ev==="AgentDone"){clearStatus();resetToolLog();asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(", tokens="+u.total_tokens):""))}
         else if(ev==="AgentError"){clearStatus();el("tool err","⚠ "+esc(d.message||""))}
         else if(ev==="ServerError"){clearStatus();el("tool err","服务端错误："+esc(d.message||""))}
         else if(ev==="CommandResult"){clearStatus();const t=d.type;el(t==="error"?"tool err":(t==="info"?"sysline":"bubble assistant"),(t==="text")?("<pre>"+esc(d.text)+"</pre>"):esc(d.text))}
@@ -344,7 +396,7 @@ async function sendMsg(){
     if(e.name==="AbortError"){sysline("⏹ 已停止本次回复")}
     else{el("tool err","请求失败："+esc(e.message))}
   }
-  finally{busy=false;aborter=null;clearStatus();sb.textContent="发送";sb.classList.remove("stop");refreshStats()}
+  finally{busy=false;aborter=null;clearStatus();sb.textContent="发送";sb.classList.remove("stop");if(isReset){clearChat();sysline("✅ 对话已重置");}refreshStats()}
 }
 
 // ── 危险工具确认 ──
@@ -383,14 +435,28 @@ async function loadSessions(){
   box.innerHTML="";
   sessions.forEach(s=>{
     const c=el2("card");c.innerHTML=`<div class="title">${esc(s.session_id||"")}</div><div class="meta">${s.message_count||0} 条消息 · ${s.model||""}</div><div class="actions"><button class="btn sm sec">加载</button></div>`;
-    c.querySelector("button").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"load",session_id:s.session_id})});toast("已加载 "+s.session_id);sysline("会话已加载："+s.session_id)};
+    c.querySelector("button").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"load",session_id:s.session_id})});clearChat();toast("已加载 "+s.session_id);sysline("📂 会话已加载："+s.session_id+"（继续对话即接上历史）")};
     box.appendChild(c);
   });
 }
-$("sessNew").onclick=async()=>{const r=await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"new"})});const d=await r.json();toast("新会话："+(d.session_id||""));sysline("已新建会话");loadSessions()};
+// 新建会话：切换到一个全新的会话ID（路由到独立的 pool 实例 + 会话目录，持久且隔离）
+$("sessNew").onclick=()=>{
+  const nid="s"+Date.now().toString(36);
+  $("sid").value=nid; localStorage.setItem("milu_sid",nid);
+  clearChat(); toast("新会话："+nid); sysline("✨ 已切换到新会话："+nid);
+  loadSettings(); loadSessions();
+};
 $("sessSave").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"save"})});toast("已保存")};
-$("sessReset").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"reset"})});toast("已重置");chat.innerHTML="";sysline("对话已重置")};
+$("sessReset").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"reset"})});clearChat();toast("已重置");sysline("✅ 对话已重置")};
 $("sessReload").onclick=loadSessions;
+
+// ── 工具过程显示偏好（即时生效）──
+$("tools_open").checked=toolsOpenDefault;
+$("tools_open").onchange=()=>{
+  toolsOpenDefault=$("tools_open").checked;
+  localStorage.setItem("milu_tools_open",toolsOpenDefault?"1":"0");
+  document.querySelectorAll(".toollog").forEach(b=>b.classList.toggle("open",toolsOpenDefault));
+};
 
 // ── 定时任务 ──
 $("tkType").onchange=()=>{const v=$("tkType").value;$("fldOnce").style.display=v==="once"?"":"none";$("fldInterval").style.display=v==="interval"?"":"none";$("fldCron").style.display=v==="cron"?"":"none"};
