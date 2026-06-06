@@ -32,7 +32,8 @@ pip install -e ".[dev,mcp]"
 .venv/Scripts/python examples/multi_user_chat.py       # AgentPool 多用户并发
 
 # CLI 命令行（pip install 后注册入口点 milu）
-milu                       # 无子命令 → 进入交互式对话（chat）
+milu                       # 无子命令 → 进入交互式对话（chat；首次无 Key 时自动询问进入 setup 引导）
+milu setup                 # 初始化引导：选厂商/模型 → API Key → 搜索工具（密钥写 ~/.milu/.env）
 milu chat -p deepseek      # 指定厂商进入对话
 milu run "你好" -q          # 一次性执行，-q 只输出最终回答（可管道）
 echo "总结这段话" | milu run # 从 stdin 读取指令
@@ -121,8 +122,9 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 ### 7. CLI 层 (`src/milu/cli/`)
 
 - 入口点：`pyproject.toml` 的 `[project.scripts]` 注册 `milu`，解析到 `milu.cli:main`；亦支持 `python -m milu.cli`
-- `app.py`：argparse 命令面 + `main()`。子命令 `chat`（无子命令时的默认）/ `run`（一次性，支持 stdin 管道、`-q` 只输出最终文本）/ `config`（show/path/get/set/init）/ `sessions`（list/show）/ `providers` / `version`。全局选项（`-p/--provider`、`-m/--model`、`--api-key`、`--mode`、`--no-session/--no-mcp/--no-subagents`）写在子命令**之后**。`config get/set` 用**点号路径**操作分层配置（如 `milu config set agent.max_turns 50` 写用户级），`config init` 在项目生成 `config/milu.json` 全量模板。`main()` 统一捕获 `AuthenticationError`/`ValueError`/`MiluError` 给中文友好提示与退出码
+- `app.py`：argparse 命令面 + `main()`。子命令 `chat`（无子命令时的默认）/ `run`（一次性，支持 stdin 管道、`-q` 只输出最终文本）/ `setup`（初始化引导）/ `config`（show/path/get/set/init）/ `sessions`（list/show）/ `providers` / `version`。全局选项（`-p/--provider`、`-m/--model`、`--api-key`、`--mode`、`--no-session/--no-mcp/--no-subagents`）写在子命令**之后**。`config get/set` 用**点号路径**操作分层配置（如 `milu config set agent.max_turns 50` 写用户级），`config init` 在项目生成 `config/milu.json` 全量模板。`main()` 统一捕获 `AuthenticationError`/`ValueError`/`MiluError` 给中文友好提示与退出码
 - `config.py`（`src/milu/config.py`，**核心分层配置**，见下「分层配置体系」）+ `cli/config.py`（CLI 参数层：`Settings` + `resolve_settings()`，把文件配置叠加 CLI 参数 + 解析 API Key）。**解析优先级**：provider/model/mode 等 = CLI 参数 > 用户 `~/.milu/config.json` > 项目 `config/milu.json` > 内置默认；api_key = CLI 参数 > 环境变量 `{PROVIDER}_API_KEY`（**密钥不再落 config.json**）。注意：配置里的 `model` 只在「未切换厂商」时沿用，避免给 deepseek 套上 qwen 的模型名
+- `setup_wizard.py`（`milu setup` **初始化引导**，pip 安装后零手工配置）：4 步交互——选厂商（带中文名/Key 状态/默认模型）→ 选模型 → API Key（带各厂商申请地址，已有 Key 回车保留）→ 搜索后端（bocha/tavily/ddg + 对应 Key）；可选发一次最小请求验证 Key。**密钥写用户级 `~/.milu/.env`**（`update_env_file` 合并写：已有键原位更新、注释保留），厂商/模型经 `set_user_value` 写 `~/.milu/config.json`；写入后同步 `os.environ` 当前进程即时生效。配套 `_env.py` 的 `ensure_dotenv_loaded()` 在项目级 .env（CWD 向上）之后**兜底加载用户级 `~/.milu/.env`**（override=False，进程环境变量 > 项目级 > 用户级），任意目录运行 CLI 均生效。`milu chat` 入口（TTY 下）检测不到当前厂商 Key 时经 `offer_first_run_setup` 自动询问进入引导，完成后重新加载配置继续对话。输入统一剥离 BOM/零宽字符（Windows 管道喂入首行带 BOM）
 - `builder.py`：`build_llm()` / `build_agent()`——**最简创建**，依托 Agent「全配默认」：tools/skills/prompt 不传 → 自动注入全套内置工具、内置技能、内置 main 提示词；`subagents=None` → 内置三件套（`--no-subagents` 传 `[]` 关闭）；运行限额/压缩来自分层配置（`settings.agent` 构造 `AgentConfig`、`settings.compact` 经 `ConversationHistory` 传 `CompactConfig`）
 - `render.py` / `repl.py`：终端渲染（ANSI 颜色、不安全工具确认回调、事件流渲染）与交互式 REPL（全部 `/命令`），**迁移并整理自 `examples/multi_turn_chat.py`**
 - Windows 注意：`main()` 启动时 `os.system("")` 启用 ANSI；stdin 管道按 `sys.stdin.buffer` 显式 UTF-8 解码（规避控制台代码页 + surrogateescape 把中文解成孤立代理字符）

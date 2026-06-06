@@ -3,6 +3,7 @@
 子命令：
     chat                 交互式多轮对话（无子命令时的默认行为）
     run [PROMPT]         一次性执行（PROMPT 省略时从 stdin 读，支持管道）
+    setup                初始化引导（选厂商/模型、配置 API Key 与搜索工具）
     config ...           查看/修改配置文件
     sessions [list|show] 查看历史会话
     providers            列出支持的厂商及 Key 配置状态
@@ -74,6 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("prompt", nargs="?", help="指令文本（省略则从 stdin 读取）")
     p_run.add_argument("-q", "--quiet", action="store_true", help="只输出最终回答（适合管道）")
     p_run.add_argument("--session", help="续接指定会话 ID")
+
+    # setup — 初始化引导
+    sub.add_parser("setup", help="初始化引导：选厂商/模型、配置 API Key 与搜索工具")
 
     # config
     p_cfg = sub.add_parser("config", help="查看/修改配置")
@@ -178,9 +182,25 @@ def _cmd_chat(args) -> int:
 
     config = load_config()
     settings = resolve_settings(config, args)
+
+    # 首次使用引导：交互终端下检测不到该厂商的 API Key → 询问进入初始化引导
+    if not settings.api_key and sys.stdin.isatty():
+        from milu.cli.setup_wizard import offer_first_run_setup
+
+        if offer_first_run_setup(settings.provider):
+            # 引导可能更换了厂商/模型并写入了 Key → 重新加载配置解析
+            config = load_config()
+            settings = resolve_settings(config, args)
+
     agent = build_agent(settings)
     asyncio.run(run_chat(agent, settings))
     return 0
+
+
+def _cmd_setup(_args) -> int:
+    from milu.cli.setup_wizard import run_setup_wizard
+
+    return run_setup_wizard()
 
 
 def _cmd_run(args) -> int:
@@ -293,6 +313,7 @@ def _cmd_providers(_args) -> int:
         default_model = default_models.get(name, "—")
         mark = c("bold", " *默认") if name == default_provider else ""
         print(f"  {c('cyan', name):<22} 默认模型 {c('dim', default_model):<32} {status}{mark}")
+    print(c("dim", "\n  提示：运行 `milu setup` 可交互式配置厂商、模型与 API Key。"))
     return 0
 
 
@@ -539,6 +560,7 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "chat": _cmd_chat,
         "run": _cmd_run,
+        "setup": _cmd_setup,
         "config": _cmd_config,
         "sessions": _cmd_sessions,
         "providers": _cmd_providers,
@@ -561,7 +583,8 @@ def main(argv: list[str] | None = None) -> int:
         provider = (getattr(args, "provider", None)
                     or load_config().llm.get("provider") or DEFAULT_PROVIDER)
         print(c("red", f"\n鉴权失败：{e}"), file=sys.stderr)
-        print(c("dim", f"请在 .env 或环境变量中设置 {env_key_name(provider)}。"),
+        print(c("dim", f"可运行 `milu setup` 进行初始化引导，"
+                       f"或在 .env / 环境变量中设置 {env_key_name(provider)}。"),
               file=sys.stderr)
         return 1
     except ValueError as e:

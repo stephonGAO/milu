@@ -29,6 +29,11 @@ def _disabled() -> bool:
 def ensure_dotenv_loaded() -> None:
     """库内部使用：进程内首次调用时加载 .env（幂等、可关闭、不抛异常）。
 
+    加载顺序（dotenv 默认 override=False，先到先得，进程已有环境变量始终最优先）：
+    1. 项目级 .env：从 CWD 向上查找（项目自带配置）；
+    2. 用户级兜底 `user_data_dir()/.env`（默认 ~/.milu/.env，由 `milu setup`
+       引导写入）——pip 安装后在任意目录运行 CLI 都能取到密钥。
+
     - 已加载过 → 直接返回；
     - 设置了 MILU_NO_DOTENV → 跳过，不触碰 CWD；
     - python-dotenv 缺失或 .env 读取失败 → 静默忽略。
@@ -40,6 +45,11 @@ def ensure_dotenv_loaded() -> None:
     try:
         from dotenv import load_dotenv
         load_dotenv()
+        # 用户级兜底（不覆盖进程环境变量与项目级 .env 已加载的键）
+        from milu.resources import user_data_dir
+        user_env = user_data_dir() / ".env"
+        if user_env.is_file():
+            load_dotenv(user_env)
     except Exception:
         pass
     finally:
