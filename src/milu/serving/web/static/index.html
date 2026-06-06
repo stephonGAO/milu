@@ -87,6 +87,14 @@
   #input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;resize:none;min-height:42px;max-height:160px}
   #send{padding:0 20px;border:none;border-radius:9px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
   #send:disabled{background:#94a3b8}
+  #send.stop{background:var(--err)}
+  /* 运行状态指示器（跳动点 + 当前活动文字）*/
+  .typing{display:flex;align-items:center;gap:5px;margin:6px 0 10px;color:var(--dim);font-size:13px}
+  .typing .dot{width:7px;height:7px;border-radius:50%;background:var(--brand);animation:blink 1.2s infinite}
+  .typing .dot:nth-child(2){animation-delay:.2s}
+  .typing .dot:nth-child(3){animation-delay:.4s}
+  .typing .tlabel{margin-left:5px;font-style:normal}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
   /* 弹窗 */
   .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:100}
@@ -200,7 +208,7 @@
       </div>
       <div class="inrow">
         <textarea id="input" rows="1" placeholder="输入消息或 / 命令（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button id="send" onclick="sendMsg()">发送</button>
+        <button id="send" onclick="onSendBtn()">发送</button>
       </div>
     </footer>
   </main>
@@ -268,21 +276,44 @@ function sysline(t){el("sysline",esc(t))}
 
 // ── 发送消息（SSE 流）──
 function quickCmd(c){$("input").value=c;sendMsg()}
+
+let aborter=null;
+// 发送按钮：空闲→发送；运行中→中断本次回复
+function onSendBtn(){ if(busy){ if(aborter) aborter.abort(); return; } sendMsg(); }
+
+// 运行状态指示器（跳动点 + 当前活动文字），随事件更新、始终置底
+let statusEl=null;
+function setStatus(label){
+  if(!statusEl){
+    statusEl=document.createElement("div");
+    statusEl.className="typing";
+    statusEl.innerHTML='<span class="dot"></span><span class="dot"></span><span class="dot"></span><em class="tlabel"></em>';
+  }
+  statusEl.querySelector(".tlabel").textContent=label;
+  chat.appendChild(statusEl);            // 移到底部
+  chat.scrollTop=chat.scrollHeight;
+}
+function clearStatus(){ if(statusEl){statusEl.remove();statusEl=null;} }
+
 async function sendMsg(){
   if(busy)return;
   const input=$("input").value.trim();
   if(!input)return;
-  busy=true;$("send").disabled=true;
+  busy=true;
+  const sb=$("send"); sb.textContent="■ 停止"; sb.classList.add("stop");
   el("turn"); el("bubble user",esc(input)); $("input").value="";$("input").style.height="auto";
+  setStatus("思考中…");
   // 流式上下文
   let asstWrap=null, asstText="", asstEl=null, thinkEl=null;
   const ensureAsst=()=>{if(!asstEl){asstWrap=el("turn");asstWrap.innerHTML='<div class="role">🤖 assistant</div>';asstEl=document.createElement("div");asstEl.className="bubble assistant";asstWrap.appendChild(asstEl)}return asstEl};
+  aborter=new AbortController();
   try{
-    const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input})});
+    const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input}),signal:aborter.signal});
     const reader=resp.body.getReader();const dec=new TextDecoder();let buf="";
     while(true){
       const {done,value}=await reader.read();if(done)break;
       buf+=dec.decode(value,{stream:true});
+      buf=buf.replace(/\r\n/g,"\n");           // 归一化行尾（sse_starlette 默认 \r\n）
       const chunks=buf.split("\n\n");buf=chunks.pop();
       for(const ch of chunks){
         let ev=null,data=null;
@@ -292,24 +323,27 @@ async function sendMsg(){
         }
         if(!ev||data===null)continue;
         let d={};try{d=JSON.parse(data)}catch(e){}
-        if(ev==="TextDelta"){asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);chat.scrollTop=chat.scrollHeight}
-        else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";chat.scrollTop=chat.scrollHeight}
-        else if(ev==="ToolCallStart"){el("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,120)))}
-        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,300);el("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o))}
+        if(ev==="TextDelta"){clearStatus();asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);chat.scrollTop=chat.scrollHeight}
+        else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";setStatus("推理中…");chat.scrollTop=chat.scrollHeight}
+        else if(ev==="ToolCallStart"){el("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,120)));setStatus("调用工具 "+esc(d.tool_name)+"…")}
+        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,300);el("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o));setStatus("处理结果…")}
         else if(ev==="ToolConfirmRequired"){el("tool",(d.approved?"✅ 已同意":"❌ 已拒绝")+" "+esc(d.tool_name))}
-        else if(ev==="ConfirmationRequest"){showConfirm(d)}
-        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};const it=inner.type||inner.__class__;let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;el("sub","["+esc(n)+"] "+esc(tx).slice(0,200))}
+        else if(ev==="ConfirmationRequest"){setStatus("等待确认…");showConfirm(d)}
+        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;el("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus("子代理 "+esc(n)+" 运行中…")}
         else if(ev==="SubAgentDone"){el("sub","🏁 ["+esc(d.subagent_name)+"] 完成")}
         else if(ev==="HistoryCompacted"){sysline("📦 历史已压缩 "+d.original_count+" → "+d.compacted_count+" 条")}
         else if(ev==="SessionLoaded"){sysline("会话已加载 "+d.session_id)}
-        else if(ev==="AgentDone"){asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};const w=el("meta-done","turns="+d.turn_count+(u.total_tokens?(", tokens="+u.total_tokens):""));}
-        else if(ev==="AgentError"){el("tool err","⚠ "+esc(d.message||""))}
-        else if(ev==="ServerError"){el("tool err","服务端错误："+esc(d.message||""))}
-        else if(ev==="CommandResult"){const t=d.type;el(t==="error"?"tool err":(t==="info"?"sysline":"bubble assistant"),(t==="text")?("<pre>"+esc(d.text)+"</pre>"):esc(d.text))}
+        else if(ev==="AgentDone"){clearStatus();asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(", tokens="+u.total_tokens):""))}
+        else if(ev==="AgentError"){clearStatus();el("tool err","⚠ "+esc(d.message||""))}
+        else if(ev==="ServerError"){clearStatus();el("tool err","服务端错误："+esc(d.message||""))}
+        else if(ev==="CommandResult"){clearStatus();const t=d.type;el(t==="error"?"tool err":(t==="info"?"sysline":"bubble assistant"),(t==="text")?("<pre>"+esc(d.text)+"</pre>"):esc(d.text))}
       }
     }
-  }catch(e){el("tool err","请求失败："+esc(e.message))}
-  finally{busy=false;$("send").disabled=false;refreshStats()}
+  }catch(e){
+    if(e.name==="AbortError"){sysline("⏹ 已停止本次回复")}
+    else{el("tool err","请求失败："+esc(e.message))}
+  }
+  finally{busy=false;aborter=null;clearStatus();sb.textContent="发送";sb.classList.remove("stop");refreshStats()}
 }
 
 // ── 危险工具确认 ──
