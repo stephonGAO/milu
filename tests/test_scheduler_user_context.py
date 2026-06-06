@@ -20,7 +20,7 @@ from milu.tools.builtin.schedule_tool import (
     _current_schedule_user,
     _resolve_user,
     schedule_create,
-    schedule_list,
+    schedule_manage,
 )
 
 
@@ -94,7 +94,7 @@ def _make_agent(llm: BaseLLM, schedule_user: str | None) -> Agent:
     return Agent(
         llm=llm,
         system_prompt="test",
-        tools=[schedule_create, schedule_list],
+        tools=[schedule_create, schedule_manage],
         subagents=[],
         config=AgentConfig(max_turns=5),
         session_enabled=False,
@@ -154,6 +154,52 @@ async def test_tool_unset_writes_default_file(tmp_path: Path, monkeypatch):
     )
     assert "已创建" in result
     assert (tmp_path / "schedules" / "default.json").exists()
+
+
+def test_safety_split():
+    """安全性约定：create 整体不安全；manage 动态判定（list 只读安全）。"""
+    assert schedule_create._tool_wrapper.is_safe is False
+    assert schedule_create._tool_wrapper.safe_check is None
+
+    check = schedule_manage._tool_wrapper.safe_check
+    assert schedule_manage._tool_wrapper.is_safe is False
+    assert check({"action": "list"}) is True
+    for action in ("delete", "enable", "disable", "run_now"):
+        assert check({"action": action}) is False
+    assert check({}) is False  # 缺 action 视为不安全
+
+
+@pytest.mark.asyncio
+async def test_manage_actions_scoped_by_user(tmp_path: Path, monkeypatch):
+    """manage 的删/启停/立即运行按用户隔离。"""
+    monkeypatch.setenv("MILU_HOME", str(tmp_path))
+    # alice 创建任务
+    token = _current_schedule_user.set("alice")
+    try:
+        await schedule_create._tool_wrapper.func(
+            name="t1", prompt="p", trigger_type="once",
+            run_at="2099-01-01T09:00:00",
+        )
+    finally:
+        _current_schedule_user.reset(token)
+
+    # bob 删不到 alice 的任务
+    token = _current_schedule_user.set("bob")
+    try:
+        result = await schedule_manage._tool_wrapper.func(action="delete", name="t1")
+    finally:
+        _current_schedule_user.reset(token)
+    assert "不存在" in result
+
+    # alice 自己可禁用/删除
+    token = _current_schedule_user.set("alice")
+    try:
+        assert "已禁用" in await schedule_manage._tool_wrapper.func(
+            action="disable", name="t1")
+        assert "已删除" in await schedule_manage._tool_wrapper.func(
+            action="delete", name="t1")
+    finally:
+        _current_schedule_user.reset(token)
 
 
 # ── Agent 注入链路 ───────────────────────────────────────

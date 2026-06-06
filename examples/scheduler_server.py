@@ -5,7 +5,7 @@
   AgentPool 共存于同一 lifespan
 - 注入 agent_pool：任务经 pool.get_or_create_agent(user_id, ...) 执行——
   per-user 实例复用、memory/schedule_user 自动派生、不占在线并发许可
-- 多用户任务隔离：不同 X-User-Id 的对话里让 Agent 调 schedule_create，
+- 多用户任务隔离：不同 X-User-Id 的对话里让 Agent 调 schedule_create 创建任务，
   任务落各自的 ~/.milu/schedules/{user_id}.json
 - on_result 回调：任务完成时服务端可推送（此处示例为记录到内存，可换成
   SSE/WebSocket 推送或写库）

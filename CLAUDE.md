@@ -120,6 +120,7 @@ milu sessions list         # 查看历史会话
 - **执行器二选一**：注入 `agent_pool` → 任务经 `pool.get_or_create_agent(task.user_id, ...)` 执行（per-user 实例复用/共享 MCP/memory 派生，**不占在线并发许可**）；不注入 → 每任务自建独立轻量 Agent（CLI 模式）
 - **结果投递三通道**：outbox JSONL `~/.milu/scheduler_outbox/{user_id}.jsonl`（带 flock append）→ `on_result` 异步回调（服务端推送）→ 系统弹窗（`notify.py`，Windows ctypes MessageBoxW / macOS osascript / Linux notify-send；`SchedulerConfig.notify` 可关）
 - **工具层用户上下文**（`schedule_tool.py`）：`_current_schedule_user` ContextVar 由 `Agent.run()` 入口注入（`Agent(schedule_user=...)`，与 `memory` 平级的能力参数）；**未注入时退化为 "default"（与 memory 的写拒绝是有意差异**，因 schedule 工具在 BUILTIN_TOOLS 默认列表，CLI 单人无注入须兼容）；user_id 不暴露为 LLM 参数（防伪造他人身份）。AgentPool 默认工厂**默认**按 user_id 派生 `schedule_user`（不派生则全部用户共用 default 任务空间，跨用户可见/可删）
+- **工具拆分（参数正交性原则）**：LLM 侧暴露两个工具——`schedule_create`（专职创建，9 个参数全部相关，整体不安全）+ `schedule_manage`（action=list/delete/enable/disable/run_now，schema 极简仅 action+name；`safe_check` 动态判定 list 只读安全，其余走审批/AI 判定）。不合并为单工具的原因：create 专属参数占比过高，管理操作的 schema 会充满无关参数噪音；也不再拆细——delete/enable/disable/run_now 形态一致（都只要 name）
 
 ## 关键设计约束（多用户并发 / 无状态化）
 

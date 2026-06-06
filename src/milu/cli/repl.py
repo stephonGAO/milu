@@ -369,10 +369,10 @@ async def handle_command(agent, cmd: str) -> bool:
         from milu.resources import user_data_dir
         from milu.scheduler.store import ScheduleStore
 
-        store = ScheduleStore(user_data_dir() / "schedules.json")
-        tasks = store.list_all()
+        store = ScheduleStore(user_data_dir())
+        tasks = store.list_user("default")  # REPL 为 CLI 单人场景，列默认用户
         if not tasks:
-            print(f"\n  {c('dim', '暂无定时任务。可在对话中让 Agent 调用 schedule_create 创建。')}\n")
+            print(f"\n  {c('dim', '暂无定时任务。可在对话中让 Agent 调用 schedule_create 工具创建。')}\n")
             return True
         print(f"\n{DIVIDER}")
         print(c("bold", "  定时任务") + c("dim", f" ({len(tasks)} 个)"))
