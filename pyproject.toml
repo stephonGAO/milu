@@ -29,6 +29,12 @@ dev = [
 mcp = [
     "mcp>=1.0.0",
 ]
+# 内置 Web 服务（milu serve）：FastAPI + uvicorn + SSE 流式
+serve = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.27.0",
+    "sse-starlette>=2.0.0",
+]
 
 [project.scripts]
 # 入口点（pip install 后可直接在终端调用）

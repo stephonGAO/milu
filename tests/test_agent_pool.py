@@ -81,6 +81,26 @@ async def test_pool_isolates_different_users(llm_factory):
 
 
 @pytest.mark.asyncio
+async def test_pool_remove_evicts_and_rebuilds(llm_factory):
+    """pool.remove() 关闭并从池移除指定实例；再次获取得到全新实例。"""
+    pool = AgentPool(llm_factory=llm_factory, config=AgentPoolConfig(max_agents=10))
+    await pool.start()
+    try:
+        a1 = await pool.get_or_create_agent("u1", "s1")
+        assert ("u1", "s1") in pool._entries
+        # 命中移除 → True，且从池字典摘除
+        assert await pool.remove("u1", "s1") is True
+        assert ("u1", "s1") not in pool._entries
+        # 再次获取 → 按工厂重建新实例（非同一对象）
+        a2 = await pool.get_or_create_agent("u1", "s1")
+        assert id(a1) != id(a2)
+        # 移除不存在的 → False（幂等、无副作用）
+        assert await pool.remove("u1", "missing") is False
+    finally:
+        await pool.stop()
+
+
+@pytest.mark.asyncio
 async def test_pool_lru_eviction(llm_factory):
     pool = AgentPool(llm_factory=llm_factory,
                      config=AgentPoolConfig(max_agents=2))

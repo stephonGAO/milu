@@ -573,6 +573,24 @@ class AgentPool:
         entry = await self._get_or_create(user_id, session_id)
         return entry.agent
 
+    async def remove(self, user_id: str, session_id: str) -> bool:
+        """主动移除并关闭指定 (user_id, session_id) 的 Agent 实例。
+
+        用于「运行时切换设置（如厂商/模型）后强制按新配置重建」：移除后下次
+        acquire / get_or_create_agent 会重新走工厂创建。运行中的实例也可移除——
+        正在执行的协程持有自己的 agent 引用，移除只是把它从池字典摘除，不影响其
+        完成本次运行（共享 MCP 由池拥有，Agent.disconnect_mcp 不会断开它）。
+
+        :return: 命中并移除返回 True；本就不存在返回 False。
+        """
+        key = (user_id, session_id)
+        async with self._global_lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return False
+            await self._close_entry(entry, key, reason="manual")
+            return True
+
     # ── 内部 ──────────────────────────────────────────
 
     @staticmethod

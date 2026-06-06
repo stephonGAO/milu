@@ -39,6 +39,8 @@ echo "总结这段话" | milu run # 从 stdin 读取指令
 milu providers             # 列出 9 个厂商及 Key 配置状态
 milu config set provider qwen   # 写入 ~/.milu/config.json
 milu sessions list         # 查看历史会话
+milu serve                 # 启动内置 Web 服务（多用户对话 + 全功能演示前端，默认 127.0.0.1:8000）
+milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任务调度
 # 开发期未重装时也可：.venv/Scripts/python -m milu.cli <args>
 ```
 
@@ -102,6 +104,19 @@ milu sessions list         # 查看历史会话
 - `AgentPool`（`pool.py`）：多用户并发资源池。**按 `(user_id, session_id)` 缓存独立 Agent 实例**，`async with pool.acquire(uid, sid) as h: h.agent.run(...)`。LRU + idle TTL 淘汰、全局 `Semaphore` 并发限流、后台 sweep 清理、`get_stats()` 监控（含 hit_rate）
 - 便利构造：**`AgentPool.from_llm(llm)`** 一行起池（共享同一 LLM 实例，AsyncOpenAI 协程安全）。「全配默认」由 Agent 自身提供（见 Agent 层），默认工厂只叠加服务层语义：确定性 session_id 派生 + 共享 MCP 注入；运行限额经 `agent_config=AgentConfig(...)`、其余 Agent 参数经 `agent_kwargs={"mode": ..., "tools": [...], "subagents": [...]}` 原样透传
 - 四个硬不变量：每个 `(user_id, session_id)` ≤1 实例；实例数 ≤ `max_agents`；并发 run ≤ `max_concurrent_runs`；空闲超 `idle_ttl_seconds` 被清理
+- `pool.remove(user_id, session_id)`：主动驱逐并关闭指定实例（`_global_lock` 下复用 `_close_entry`），供「运行时切换设置后按新配置重建」用；运行中也可移除（运行协程持自身 agent 引用不受影响，共享 MCP 由池拥有不被 `disconnect_mcp` 断开）
+
+### 6.5 内置 Web 服务 (`src/milu/serving/web/`，CLI `milu serve` 一键启动)
+
+把 AgentPool（多用户 SSE 流式对话）+ 可选嵌入式 ScheduleEngine（定时任务，`--no-scheduler` 关）+ 共享 MCP，沉淀为**包内置的正规服务**，配一个**全功能单页演示前端**（`static/index.html`，纯 vanilla 无构建链/无外部 CDN，随 wheel 分发）。
+
+- **应用工厂 `create_app(...)`**（`app.py`）+ 入口 `run_server(host, port, reload, **opts)`；CLI `_cmd_serve` 经 `resolve_settings` 取默认厂商/模型/模式后启动 uvicorn
+- **依赖隔离**：fastapi/uvicorn/sse-starlette 为 `[serve]` 可选依赖（`pip install "milu[serve]"`）；子包 `__init__` 延迟导入，`import milu.serving.web` 不强依赖它们，未装时 `milu serve` 给中文提示。⚠️ `app.py` 顶层必须导入 `Request` 等 FastAPI 类型——配合 `from __future__ import annotations`，函数内局部导入会让 FastAPI 无法从模块全局解析字符串注解（误判为 query 参数 → 422）
+- **运行时切换厂商/模型/模式**：`app.state.prefs[(user,session)]` 存偏好覆盖、`app.state.llm_cache[(provider,model,...)]` 按型号缓存共享 LLM（AsyncOpenAI 协程安全）；自定义 `agent_factory` 读偏好取缓存 LLM 构造 Agent（memory/schedule_user 按 user_id 派生隔离）。`POST /api/settings` 写偏好 + `pool.remove()` 驱逐 → 下条消息按新设置重建；`POST /api/mode` 即时 `set_mode` 并存偏好
+- **确认流队列桥接**：危险工具确认时 `on_confirm` 会**阻塞** `agent.run()` 生成器，故后台任务跑 `agent.run()` 喂 `asyncio.Queue`，`on_confirm` 在 `await future` 前把「ConfirmationRequest」推进队列，SSE 协程独立排空队列——保证弹窗在阻塞期间即时显示；`POST /api/confirm`（按 user+session 定位 Future）解析放行，120s 超时自动拒绝
+- **端点**：`/`（前端）、`/api/chat`（SSE，`/` 命令复用 `_exec_command`）、`/api/confirm`、`/api/providers`、`/api/settings`、`/api/mode`、`/api/sessions` + `/api/session/action`（new/load/save/reset）、`/api/schedule/{tasks,create,action,results}`、`/api/tools|skills|memory|stats`
+- 前端四面板：设置（厂商下拉含 Key 状态/模型/模式/开关）、会话、定时任务（创建表单 + 启停/删除/立即运行 + 结果轮询）、信息（工具/技能/记忆/统计）；主区流式渲染（文本/思考/工具/子代理 + 轻量 Markdown）+ 危险工具确认弹窗
+- 示例 `examples/multi_user_chat.py` / `examples/scheduler_server.py` 保留作教学（本服务正是其能力的内置化整合）
 
 ### 7. CLI 层 (`src/milu/cli/`)
 

@@ -33,8 +33,14 @@ class FakeLLM(BaseLLM):
 
 class TestModelRegistry:
     def setup_method(self):
-        """每个测试前清空注册表"""
+        """每个测试前快照并清空注册表。"""
+        self._saved = dict(ModelRegistry._providers)
         ModelRegistry._providers.clear()
+
+    def teardown_method(self):
+        """还原全局注册表，避免清空泄漏污染后续测试（如 list_providers 断言）。"""
+        ModelRegistry._providers.clear()
+        ModelRegistry._providers.update(self._saved)
 
     def test_register_and_create(self):
         ModelRegistry.register("fake", FakeLLM)

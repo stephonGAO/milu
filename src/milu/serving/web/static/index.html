@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>milu · 多用户 Agent 服务</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --panel:#ffffff; --ink:#1d1d1f; --dim:#86868b; --line:#e3e3e6;
+    --brand:#2563eb; --brand-d:#1d4ed8; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+    --purple:#7c3aed; --sub:#6366f1;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--ink);height:100vh;display:flex;flex-direction:column;font-size:14px}
+  header{background:#111827;color:#fff;padding:8px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+  header .logo{font-weight:700;color:#60a5fa;font-size:16px}
+  header .field{display:flex;align-items:center;gap:4px;font-size:12px;color:#cbd5e1}
+  header input{background:#1f2937;color:#fff;border:1px solid #374151;padding:4px 8px;border-radius:6px;font-size:12px;width:120px}
+  header .stat{margin-left:auto;font-size:12px;color:#94a3b8}
+  header .stat b{color:#4ade80;font-weight:600}
+
+  .body{flex:1;display:flex;min-height:0}
+  /* 侧栏 */
+  aside{width:340px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;flex-shrink:0}
+  .tabs{display:flex;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;padding:10px 4px;border:none;background:none;cursor:pointer;font-size:13px;color:var(--dim);border-bottom:2px solid transparent}
+  .tabs button.active{color:var(--brand);border-bottom-color:var(--brand);font-weight:600}
+  .tabwrap{flex:1;overflow-y:auto;padding:14px}
+  .tabpane{display:none}
+  .tabpane.active{display:block}
+  .tabpane h3{font-size:13px;color:var(--dim);margin:4px 0 10px;text-transform:uppercase;letter-spacing:.5px}
+  label.fld{display:block;margin-bottom:12px;font-size:13px}
+  label.fld span{display:block;color:var(--dim);margin-bottom:4px;font-size:12px}
+  select,input.t,textarea.t{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-family:inherit;background:#fff}
+  textarea.t{resize:vertical;min-height:60px}
+  .row{display:flex;gap:8px}
+  .row>*{flex:1}
+  .chk{display:flex;align-items:center;gap:6px;margin-bottom:10px;font-size:13px;cursor:pointer}
+  .chk input{width:16px;height:16px}
+  .btn{padding:8px 14px;border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:500;background:var(--brand);color:#fff}
+  .btn:hover{background:var(--brand-d)}
+  .btn.sec{background:#fff;border:1px solid var(--line);color:var(--ink)}
+  .btn.sec:hover{background:#f3f4f6}
+  .btn.sm{padding:4px 9px;font-size:12px}
+  .btn.danger{background:#fff;border:1px solid #fecaca;color:var(--err)}
+  .btn.danger:hover{background:#fef2f2}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .hint{font-size:12px;color:var(--dim);margin:6px 0}
+
+  .card{border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:8px;background:#fff}
+  .card .title{font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px}
+  .card .meta{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.5}
+  .badge{font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600}
+  .badge.on{background:#dcfce7;color:var(--ok)} .badge.off{background:#f1f5f9;color:var(--dim)}
+  .badge.key{background:#dcfce7;color:var(--ok)} .badge.nokey{background:#fef2f2;color:var(--err)}
+  .actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .empty{color:var(--dim);font-size:13px;text-align:center;padding:20px 0}
+
+  /* 聊天区 */
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #chat{flex:1;overflow-y:auto;padding:18px 20px}
+  .turn{margin-bottom:18px}
+  .bubble{line-height:1.65;word-wrap:break-word;overflow-wrap:anywhere}
+  .bubble.user{background:var(--brand);color:#fff;padding:9px 13px;border-radius:12px 12px 2px 12px;margin-left:auto;max-width:78%;width:fit-content}
+  .bubble.assistant{padding:2px 0}
+  .role{font-size:11px;color:var(--dim);margin-bottom:3px}
+  .think{color:#9ca3af;font-style:italic;font-size:13px;border-left:2px solid #e5e7eb;padding-left:8px;margin:4px 0;white-space:pre-wrap}
+  .tool{font-family:"SF Mono",Consolas,monospace;font-size:12px;background:#faf5ff;border:1px solid #f0e6ff;color:var(--purple);padding:5px 9px;border-radius:7px;margin:4px 0}
+  .tool.res{background:#f0fdf4;border-color:#dcfce7;color:var(--ok)}
+  .tool.err{background:#fef2f2;border-color:#fee2e2;color:var(--err)}
+  .sub{margin-left:18px;border-left:2px solid #e0e7ff;padding-left:10px;color:var(--sub);font-size:13px;margin:3px 0}
+  .sysline{font-size:12px;color:var(--dim);text-align:center;margin:8px 0}
+  .meta-done{font-size:11px;color:var(--dim);margin-top:4px}
+  .bubble pre{background:#1e293b;color:#e2e8f0;padding:10px;border-radius:8px;overflow-x:auto;font-size:12.5px;margin:6px 0}
+  .bubble code{background:#eef2ff;color:#4338ca;padding:1px 5px;border-radius:4px;font-size:12.5px;font-family:"SF Mono",Consolas,monospace}
+  .bubble pre code{background:none;color:inherit;padding:0}
+  .bubble h1,.bubble h2,.bubble h3{margin:8px 0 4px;font-size:15px}
+  .bubble ul,.bubble ol{margin:4px 0 4px 22px}
+  .bubble a{color:var(--brand)}
+
+  footer{border-top:1px solid var(--line);padding:10px 16px 14px;background:var(--panel);flex-shrink:0}
+  .cmds{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
+  .cmds button{font-size:11px;padding:3px 8px;border:1px solid var(--line);background:#fff;border-radius:11px;cursor:pointer;color:var(--dim)}
+  .cmds button:hover{background:#f3f4f6}
+  .inrow{display:flex;gap:8px}
+  #input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;resize:none;min-height:42px;max-height:160px}
+  #send{padding:0 20px;border:none;border-radius:9px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
+  #send:disabled{background:#94a3b8}
+
+  /* 弹窗 */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:100}
+  .modal-bg.show{display:flex}
+  .modal{background:#fff;border-radius:12px;padding:20px;min-width:420px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+  .modal h3{margin-bottom:12px;color:var(--err)}
+  .modal pre{background:#f8fafc;border:1px solid var(--line);padding:10px;border-radius:7px;font-size:12.5px;max-height:220px;overflow:auto;white-space:pre-wrap}
+  .modal .btns{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111827;color:#fff;padding:9px 18px;border-radius:9px;font-size:13px;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">milu</span>
+  <span class="field">用户<input id="uid"></span>
+  <span class="field">会话<input id="sid" value="default"></span>
+  <span class="stat" id="stat">Pool: --</span>
+</header>
+
+<div class="body">
+  <aside>
+    <div class="tabs">
+      <button class="active" data-tab="set">设置</button>
+      <button data-tab="sess">会话</button>
+      <button data-tab="sched">定时任务</button>
+      <button data-tab="info">信息</button>
+    </div>
+    <div class="tabwrap">
+      <!-- 设置 -->
+      <div class="tabpane active" id="tab-set">
+        <h3>模型与模式</h3>
+        <label class="fld"><span>厂商 Provider</span>
+          <select id="provider"></select>
+        </label>
+        <label class="fld"><span>模型 Model（留空用厂商默认）</span>
+          <input class="t" id="model" placeholder="">
+        </label>
+        <label class="fld"><span>操作模式 Mode</span>
+          <select id="mode">
+            <option value="talk">talk · 只读</option>
+            <option value="manual">manual · 人工审批</option>
+            <option value="auto" selected>auto · 自主（AI 判定兜底）</option>
+            <option value="superwork">superwork · 全权限</option>
+          </select>
+        </label>
+        <label class="chk"><input type="checkbox" id="web_search">联网搜索 web_search</label>
+        <label class="chk"><input type="checkbox" id="enable_thinking">思考模式 thinking</label>
+        <button class="btn" id="saveSet">保存并切换</button>
+        <p class="hint">切换厂商/模型会驱逐当前实例，下一条消息按新设置重建。</p>
+      </div>
+
+      <!-- 会话 -->
+      <div class="tabpane" id="tab-sess">
+        <h3>会话管理</h3>
+        <div class="actions" style="margin-bottom:10px">
+          <button class="btn sm" id="sessNew">新建</button>
+          <button class="btn sm sec" id="sessSave">保存</button>
+          <button class="btn sm sec" id="sessReset">重置</button>
+          <button class="btn sm sec" id="sessReload">刷新</button>
+        </div>
+        <div id="sessList"></div>
+      </div>
+
+      <!-- 定时任务 -->
+      <div class="tabpane" id="tab-sched">
+        <h3>新建定时任务</h3>
+        <label class="fld"><span>任务名</span><input class="t" id="tkName" placeholder="daily-report"></label>
+        <label class="fld"><span>指令 prompt</span><textarea class="t" id="tkPrompt" placeholder="让 Agent 做什么"></textarea></label>
+        <label class="fld"><span>触发类型</span>
+          <select id="tkType">
+            <option value="once">once · 一次性</option>
+            <option value="interval">interval · 每隔 N 分钟</option>
+            <option value="cron">cron · 表达式</option>
+          </select>
+        </label>
+        <label class="fld" id="fldOnce"><span>执行时间 run_at（ISO）</span><input class="t" id="tkRunAt" placeholder="2026-06-10T09:00:00"></label>
+        <label class="fld" id="fldInterval" style="display:none"><span>间隔分钟</span><input class="t" id="tkInterval" type="number" value="30"></label>
+        <label class="fld" id="fldCron" style="display:none"><span>cron 表达式</span><input class="t" id="tkCron" placeholder="0 9 * * 1-5"></label>
+        <button class="btn" id="tkCreate">创建任务</button>
+        <h3 style="margin-top:18px">任务列表</h3>
+        <div id="tkList"></div>
+        <h3 style="margin-top:14px">最近执行结果</h3>
+        <div id="tkResults"></div>
+      </div>
+
+      <!-- 信息 -->
+      <div class="tabpane" id="tab-info">
+        <div class="actions" style="margin-bottom:10px">
+          <button class="btn sm sec" data-info="tools">工具</button>
+          <button class="btn sm sec" data-info="skills">技能</button>
+          <button class="btn sm sec" data-info="memory">记忆</button>
+          <button class="btn sm sec" data-info="stats">统计</button>
+        </div>
+        <div id="infoBox"><p class="empty">点击上方按钮查看</p></div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="chat"></div>
+    <footer>
+      <div class="cmds">
+        <button onclick="quickCmd('/help')">/help</button>
+        <button onclick="quickCmd('/tools')">/tools</button>
+        <button onclick="quickCmd('/skills')">/skills</button>
+        <button onclick="quickCmd('/plan')">/plan</button>
+        <button onclick="quickCmd('/history')">/history</button>
+        <button onclick="quickCmd('/compact')">/compact</button>
+        <button onclick="quickCmd('/reset')">/reset</button>
+      </div>
+      <div class="inrow">
+        <textarea id="input" rows="1" placeholder="输入消息或 / 命令（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="send" onclick="sendMsg()">发送</button>
+      </div>
+    </footer>
+  </main>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3>⚠ 危险工具确认</h3>
+    <div>工具：<strong id="mTool"></strong></div>
+    <pre id="mArgs"></pre>
+    <input class="t" id="mMsg" placeholder="拒绝时可填给 LLM 的指示（可选）" style="margin-top:8px">
+    <div class="btns">
+      <button class="btn danger" onclick="respondConfirm(false)">拒绝</button>
+      <button class="btn" onclick="respondConfirm(true)">同意执行</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const chat=$("chat");
+let busy=false, confirmPending=false;
+
+// ── 用户/会话标识（localStorage 持久化）──
+$("uid").value = localStorage.getItem("milu_uid") || ("user_"+Math.random().toString(36).slice(2,7));
+$("sid").value = localStorage.getItem("milu_sid") || "default";
+$("uid").onchange=e=>{localStorage.setItem("milu_uid",e.target.value);refreshAll()};
+$("sid").onchange=e=>{localStorage.setItem("milu_sid",e.target.value);refreshAll()};
+function H(){return {"X-User-Id":$("uid").value.trim()||"default","X-Session-Id":$("sid").value.trim()||"default"}}
+function api(path,opts={}){return fetch(path,{...opts,headers:{...H(),"Content-Type":"application/json",...(opts.headers||{})}})}
+function toast(t){const el=$("toast");el.textContent=t;el.classList.add("show");setTimeout(()=>el.classList.remove("show"),1800)}
+
+// ── 标签切换 ──
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".tabpane").forEach(x=>x.classList.remove("active"));
+  b.classList.add("active"); $("tab-"+b.dataset.tab).classList.add("active");
+  if(b.dataset.tab==="sess") loadSessions();
+  if(b.dataset.tab==="sched"){loadTasks();loadResults()}
+});
+
+// ── 轻量 Markdown 渲染 ──
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function md(src){
+  let out="", parts=src.split(/```/);
+  for(let i=0;i<parts.length;i++){
+    if(i%2===1){const seg=parts[i].replace(/^[a-zA-Z0-9]*\n/,"");out+="<pre><code>"+esc(seg)+"</code></pre>";continue}
+    let t=esc(parts[i]);
+    t=t.replace(/`([^`]+)`/g,"<code>$1</code>");
+    t=t.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+    t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank">$1</a>');
+    t=t.replace(/^### (.+)$/gm,"<h3>$1</h3>").replace(/^## (.+)$/gm,"<h2>$1</h2>").replace(/^# (.+)$/gm,"<h1>$1</h1>");
+    t=t.replace(/^[-*] (.+)$/gm,"<li>$1</li>");
+    t=t.replace(/(<li>.*<\/li>)/s,"<ul>$1</ul>");
+    out+=t;
+  }
+  return out;
+}
+
+// ── 渲染辅助 ──
+function el(cls,html){const d=document.createElement("div");d.className=cls;if(html!==undefined)d.innerHTML=html;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;return d}
+function sysline(t){el("sysline",esc(t))}
+
+// ── 发送消息（SSE 流）──
+function quickCmd(c){$("input").value=c;sendMsg()}
+async function sendMsg(){
+  if(busy)return;
+  const input=$("input").value.trim();
+  if(!input)return;
+  busy=true;$("send").disabled=true;
+  el("turn"); el("bubble user",esc(input)); $("input").value="";$("input").style.height="auto";
+  // 流式上下文
+  let asstWrap=null, asstText="", asstEl=null, thinkEl=null;
+  const ensureAsst=()=>{if(!asstEl){asstWrap=el("turn");asstWrap.innerHTML='<div class="role">🤖 assistant</div>';asstEl=document.createElement("div");asstEl.className="bubble assistant";asstWrap.appendChild(asstEl)}return asstEl};
+  try{
+    const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input})});
+    const reader=resp.body.getReader();const dec=new TextDecoder();let buf="";
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      const chunks=buf.split("\n\n");buf=chunks.pop();
+      for(const ch of chunks){
+        let ev=null,data=null;
+        for(const ln of ch.split("\n")){
+          if(ln.startsWith("event:"))ev=ln.slice(6).trim();
+          else if(ln.startsWith("data:"))data=ln.slice(5).trim();
+        }
+        if(!ev||data===null)continue;
+        let d={};try{d=JSON.parse(data)}catch(e){}
+        if(ev==="TextDelta"){asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);chat.scrollTop=chat.scrollHeight}
+        else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";chat.scrollTop=chat.scrollHeight}
+        else if(ev==="ToolCallStart"){el("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,120)))}
+        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,300);el("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o))}
+        else if(ev==="ToolConfirmRequired"){el("tool",(d.approved?"✅ 已同意":"❌ 已拒绝")+" "+esc(d.tool_name))}
+        else if(ev==="ConfirmationRequest"){showConfirm(d)}
+        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};const it=inner.type||inner.__class__;let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;el("sub","["+esc(n)+"] "+esc(tx).slice(0,200))}
+        else if(ev==="SubAgentDone"){el("sub","🏁 ["+esc(d.subagent_name)+"] 完成")}
+        else if(ev==="HistoryCompacted"){sysline("📦 历史已压缩 "+d.original_count+" → "+d.compacted_count+" 条")}
+        else if(ev==="SessionLoaded"){sysline("会话已加载 "+d.session_id)}
+        else if(ev==="AgentDone"){asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};const w=el("meta-done","turns="+d.turn_count+(u.total_tokens?(", tokens="+u.total_tokens):""));}
+        else if(ev==="AgentError"){el("tool err","⚠ "+esc(d.message||""))}
+        else if(ev==="ServerError"){el("tool err","服务端错误："+esc(d.message||""))}
+        else if(ev==="CommandResult"){const t=d.type;el(t==="error"?"tool err":(t==="info"?"sysline":"bubble assistant"),(t==="text")?("<pre>"+esc(d.text)+"</pre>"):esc(d.text))}
+      }
+    }
+  }catch(e){el("tool err","请求失败："+esc(e.message))}
+  finally{busy=false;$("send").disabled=false;refreshStats()}
+}
+
+// ── 危险工具确认 ──
+function showConfirm(d){confirmPending=true;$("mTool").textContent=d.tool_name;$("mArgs").textContent=d.arguments||"";$("mMsg").value="";$("modalBg").classList.add("show")}
+async function respondConfirm(approved){
+  if(!confirmPending)return;confirmPending=false;
+  const message=$("mMsg").value;$("modalBg").classList.remove("show");
+  try{await api("/api/confirm",{method:"POST",body:JSON.stringify({approved,message})})}
+  catch(e){toast("确认失败："+e.message)}
+}
+
+// ── 设置 ──
+async function loadProviders(){
+  const r=await fetch("/api/providers");const {providers}=await r.json();
+  const sel=$("provider");sel.innerHTML="";
+  providers.forEach(p=>{const o=document.createElement("option");o.value=p.name;o.textContent=p.name+(p.key_configured?"":" （未配置Key）")+(p.default_model?(" · "+p.default_model):"");if(!p.key_configured)o.style.color="#dc2626";sel.appendChild(o)});
+}
+async function loadSettings(){
+  const r=await api("/api/settings");const s=await r.json();
+  $("provider").value=s.provider;$("model").value=s.model||"";$("mode").value=s.mode;
+  $("web_search").checked=!!s.web_search;$("enable_thinking").checked=!!s.enable_thinking;
+}
+$("saveSet").onclick=async()=>{
+  const body={provider:$("provider").value,model:$("model").value.trim()||null,mode:$("mode").value,web_search:$("web_search").checked,enable_thinking:$("enable_thinking").checked};
+  await api("/api/settings",{method:"POST",body:JSON.stringify(body)});
+  await api("/api/mode",{method:"POST",body:JSON.stringify({mode:$("mode").value})});
+  toast("已保存，下一条消息生效");
+};
+
+// ── 会话 ──
+async function loadSessions(){
+  const r=await api("/api/sessions");const {sessions}=await r.json();
+  const box=$("sessList");
+  if(!sessions.length){box.innerHTML='<p class="empty">暂无会话</p>';return}
+  box.innerHTML="";
+  sessions.forEach(s=>{
+    const c=el2("card");c.innerHTML=`<div class="title">${esc(s.session_id||"")}</div><div class="meta">${s.message_count||0} 条消息 · ${s.model||""}</div><div class="actions"><button class="btn sm sec">加载</button></div>`;
+    c.querySelector("button").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"load",session_id:s.session_id})});toast("已加载 "+s.session_id);sysline("会话已加载："+s.session_id)};
+    box.appendChild(c);
+  });
+}
+$("sessNew").onclick=async()=>{const r=await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"new"})});const d=await r.json();toast("新会话："+(d.session_id||""));sysline("已新建会话");loadSessions()};
+$("sessSave").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"save"})});toast("已保存")};
+$("sessReset").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"reset"})});toast("已重置");chat.innerHTML="";sysline("对话已重置")};
+$("sessReload").onclick=loadSessions;
+
+// ── 定时任务 ──
+$("tkType").onchange=()=>{const v=$("tkType").value;$("fldOnce").style.display=v==="once"?"":"none";$("fldInterval").style.display=v==="interval"?"":"none";$("fldCron").style.display=v==="cron"?"":"none"};
+$("tkCreate").onclick=async()=>{
+  const v=$("tkType").value;
+  const body={name:$("tkName").value.trim(),prompt:$("tkPrompt").value.trim(),trigger_type:v,run_at:$("tkRunAt").value.trim(),interval_minutes:parseInt($("tkInterval").value||"0"),cron:$("tkCron").value.trim()};
+  const r=await api("/api/schedule/create",{method:"POST",body:JSON.stringify(body)});
+  if(r.ok){toast("任务已创建");$("tkName").value="";$("tkPrompt").value="";loadTasks()}
+  else{const d=await r.json().catch(()=>({}));toast("创建失败："+(d.detail||r.status))}
+};
+async function loadTasks(){
+  const r=await api("/api/schedule/tasks");const {tasks}=await r.json();
+  const box=$("tkList");
+  if(!tasks.length){box.innerHTML='<p class="empty">暂无任务</p>';return}
+  box.innerHTML="";
+  tasks.forEach(t=>{
+    const c=el2("card");
+    const trig=t.trigger_type==="cron"?("cron "+t.cron):(t.trigger_type==="interval"?("每 "+t.interval_minutes+" 分钟"):("once "+t.run_at));
+    c.innerHTML=`<div class="title">${esc(t.name)} <span class="badge ${t.enabled?'on':'off'}">${t.enabled?'启用':'禁用'}</span></div>
+      <div class="meta">${esc(trig)} · 运行 ${t.run_count} 次<br>${esc(t.description||t.prompt||"").slice(0,60)}</div>
+      <div class="actions">
+        <button class="btn sm sec" data-a="run_now">立即运行</button>
+        <button class="btn sm sec" data-a="${t.enabled?'disable':'enable'}">${t.enabled?'禁用':'启用'}</button>
+        <button class="btn sm danger" data-a="delete">删除</button>
+      </div>`;
+    c.querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+      const act=b.dataset.a;
+      const r=await api("/api/schedule/action",{method:"POST",body:JSON.stringify({action:act,name:t.name})});
+      const d=await r.json().catch(()=>({}));
+      if(act==="run_now"&&r.ok){sysline("任务 "+t.name+" 执行结果：");el("bubble assistant",md(d.result||"(空)"))}
+      toast(r.ok?"已"+ ({run_now:"触发",enable:"启用",disable:"禁用",delete:"删除"}[act]||"操作"):"失败");
+      loadTasks();loadResults();
+    });
+    box.appendChild(c);
+  });
+}
+async function loadResults(){
+  const r=await api("/api/schedule/results");const {results}=await r.json();
+  const box=$("tkResults");
+  if(!results.length){box.innerHTML='<p class="empty">暂无结果</p>';return}
+  box.innerHTML="";
+  results.forEach(x=>{const c=el2("card");c.innerHTML=`<div class="title">${esc(x.task)} <span class="badge ${x.ok?'on':'off'}">${x.ok?'成功':'失败'}</span></div><div class="meta">${esc((x.time||"").slice(0,16).replace("T"," "))}<br>${esc((x.result||"").slice(0,120))}</div>`;box.appendChild(c)});
+}
+
+// ── 信息 ──
+document.querySelectorAll("[data-info]").forEach(b=>b.onclick=()=>loadInfo(b.dataset.info));
+async function loadInfo(kind){
+  const box=$("infoBox");box.innerHTML='<p class="empty">加载中…</p>';
+  if(kind==="stats"){const r=await fetch("/api/stats");const s=await r.json();box.innerHTML="<pre>"+esc(JSON.stringify(s,null,2))+"</pre>";return}
+  if(kind==="tools"){const r=await api("/api/tools");const d=await r.json();box.innerHTML=`<div class="hint">活跃 ${d.active.length} · 休眠 ${d.dormant_count}</div>`+d.active.map(t=>`<div class="card"><div class="title">${esc(t.name)} ${t.is_safe?"":'<span class="badge nokey">需确认</span>'}</div><div class="meta">${esc(t.description)}</div></div>`).join("");return}
+  if(kind==="skills"){const r=await api("/api/skills");const d=await r.json();box.innerHTML=d.skills.map(s=>`<div class="card"><div class="title">${esc(s.name)}</div><div class="meta">${esc(s.description)}</div></div>`).join("")||'<p class="empty">无</p>';return}
+  if(kind==="memory"){const r=await api("/api/memory");const d=await r.json();box.innerHTML=d.items.length?d.items.map(m=>`<div class="card"><div class="meta">${esc(m.content||JSON.stringify(m))}</div></div>`).join(""):'<p class="empty">暂无长期记忆</p>';return}
+}
+function el2(cls){const d=document.createElement("div");d.className=cls;return d}
+
+// ── 统计轮询 ──
+async function refreshStats(){try{const r=await fetch("/api/stats");const s=await r.json();$("stat").textContent="Pool: 活跃"+s.active_entries+"/"+s.max_agents+" · 复用"+(s.reused||0)}catch(e){}}
+setInterval(refreshStats,4000);
+
+// ── 输入框 ──
+$("input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg()}});
+$("input").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,160)+"px"});
+
+// ── 初始化 ──
+function refreshAll(){loadSettings();refreshStats()}
+(async function init(){
+  await loadProviders();await loadSettings();refreshStats();
+  sysline("✨ milu 多用户 Agent 服务已就绪。左侧可切换厂商/模型/模式、管理会话与定时任务。");
+})();
+</script>
+</body>
+</html>

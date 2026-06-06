@@ -9,6 +9,7 @@
     version              显示版本
     schedule             定时任务管理（list/run/delete/enable/disable）
     scheduler            调度守护进程（start）
+    serve                启动内置 Web 服务（多用户对话 + 全功能演示前端）
 
 全局选项（厂商/模型/模式等）写在子命令之后，例如：
     milu chat -p deepseek -m deepseek-chat --mode superwork
@@ -120,6 +121,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched = sub.add_parser("scheduler", help="调度守护进程管理（start）")
     sched_sub = p_sched.add_subparsers(dest="scheduler_action")
     sched_sub.add_parser("start", help="启动调度守护进程（前台运行，Ctrl+C 停止）")
+
+    # serve — 内置 Web 服务（FastAPI + 全功能演示前端）
+    p_serve = sub.add_parser("serve", help="启动内置 Web 服务（多用户对话 + 演示前端）")
+    p_serve.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
+    p_serve.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
+    p_serve.add_argument("-p", "--provider", help="默认厂商（默认按配置）")
+    p_serve.add_argument("-m", "--model", help="默认模型（默认按厂商内置）")
+    p_serve.add_argument("--api-key", help="临时 API Key（一般用 .env 配置）")
+    p_serve.add_argument("--mode", choices=["talk", "manual", "auto", "superwork"],
+                         help="默认操作模式")
+    p_serve.add_argument("--no-mcp", action="store_true", help="不连接 MCP 服务器")
+    p_serve.add_argument("--no-subagents", action="store_true", help="不挂载内置子代理")
+    p_serve.add_argument("--no-session", action="store_true", help="禁用会话持久化")
+    p_serve.add_argument("--no-scheduler", action="store_true", help="不嵌入定时任务调度引擎")
+    p_serve.add_argument("--reload", action="store_true", help="开发模式：代码变更自动重载")
 
     return parser
 
@@ -455,6 +471,58 @@ def _cmd_scheduler(args) -> int:
     return 2
 
 
+def _cmd_serve(args) -> int:
+    """启动内置 Web 服务（FastAPI + AgentPool + 可选嵌入调度 + 演示前端）。"""
+    try:
+        from milu.serving.web import run_server
+    except ImportError as e:  # 理论上不会（懒导入），保险起见
+        print(c("red", f"加载 Web 服务失败：{e}"), file=sys.stderr)
+        return 1
+
+    config = load_config()
+    settings = resolve_settings(config, args)
+
+    # 临时 API Key（一般走 .env；这里显式设进环境供 ModelRegistry.create 读取）
+    if getattr(args, "api_key", None):
+        os.environ[env_key_name(settings.provider)] = args.api_key
+
+    opts = dict(
+        provider=settings.provider,
+        model=settings.model,
+        mode=settings.mode,
+        session_enabled=settings.session_enabled,
+        web_search=settings.web_search,
+        enable_thinking=settings.enable_thinking,
+        use_mcp=not getattr(args, "no_mcp", False),
+        use_subagents=not getattr(args, "no_subagents", False),
+        use_scheduler=not getattr(args, "no_scheduler", False),
+        selfguard_enabled=settings.selfguard_enabled,
+    )
+
+    host, port = args.host, args.port
+    print(f"{DIVIDER}")
+    print(c("bold", c("cyan", "  milu Web 服务")))
+    print(DIVIDER)
+    print(f"  访问地址: {c('cyan', f'http://{host}:{port}')}")
+    print(f"  默认厂商: {c('yellow', settings.provider)}  模型: {c('dim', settings.model)}")
+    print(f"  操作模式: {c('yellow', settings.mode)}  "
+          f"调度: {'开' if opts['use_scheduler'] else '关'}  "
+          f"MCP: {'开' if opts['use_mcp'] else '关'}")
+    print(c("dim", "  不同浏览器标签用不同「用户ID」即可演示多用户隔离。Ctrl+C 停止。"))
+    print(DIVIDER + "\n")
+
+    try:
+        run_server(host=host, port=port, reload=getattr(args, "reload", False), **opts)
+    except ImportError:
+        print(c("red", "缺少 Web 服务依赖。请安装："), file=sys.stderr)
+        print(c("yellow", '  pip install "milu[serve]"'), file=sys.stderr)
+        print(c("dim", "  或: pip install fastapi uvicorn sse-starlette"), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print(c("dim", "\n  Web 服务已停止。"))
+    return 0
+
+
 # ── main ─────────────────────────────────────────────────
 
 def main(argv: list[str] | None = None) -> int:
@@ -477,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         "version": _cmd_version,
         "schedule": _cmd_schedule,
         "scheduler": _cmd_scheduler,
+        "serve": _cmd_serve,
     }
     handler = handlers.get(command)
     if handler is None:
