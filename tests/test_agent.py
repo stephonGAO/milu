@@ -2,7 +2,15 @@
 import pytest
 from unittest.mock import AsyncMock
 from milu.agent import Agent, AgentConfig
-from milu.agent.events import TextDelta, ToolCallStart, ToolResult, AgentDone, AgentError
+from milu.agent.events import (
+    AgentDone,
+    AgentError,
+    SafetyCheckStart,
+    TextDelta,
+    ToolCallPreparing,
+    ToolCallStart,
+    ToolResult,
+)
 from milu.llm.base.message import MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.tools import tool
@@ -81,6 +89,110 @@ async def test_tool_call_flow(simple_tool):
     tool_result = next(e for e in events if isinstance(e, ToolResult))
     assert tool_result.output == "2026-05-23 10:00"
     assert tool_result.is_error is False
+
+
+@pytest.mark.asyncio
+async def test_tool_call_preparing_event(simple_tool):
+    """参数流式生成期发出 ToolCallPreparing：每个调用仅一次、先于 ToolCallStart。
+
+    回归：正文结束后参数流式生成期（长代码参数可达数十秒）原本零事件，
+    前端无从显示活动状态（"聊天框静止"）。
+    """
+    call_count = 0
+
+    async def mock_chat(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # 名字先到、参数分两片后到（模拟长参数流式生成）
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': 'call_1',
+                    'function': type('obj', (), {'name': 'get_time', 'arguments': ''})()
+                })()
+            ])
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': '',
+                    'function': type('obj', (), {'name': '', 'arguments': '{'})()
+                })()
+            ])
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': '',
+                    'function': type('obj', (), {'name': '', 'arguments': '}'})()
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        else:
+            yield StreamChunk(content="完成", finish_reason="stop")
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+    agent = Agent(llm=llm, system_prompt="你是助手", tools=[simple_tool])
+
+    events = []
+    async for event in agent.run("现在几点？"):
+        events.append(event)
+
+    preparing = [e for e in events if isinstance(e, ToolCallPreparing)]
+    assert len(preparing) == 1                 # 多个参数分片只发一次
+    assert preparing[0].tool_name == "get_time"
+    first_start = next(i for i, e in enumerate(events)
+                       if isinstance(e, ToolCallStart))
+    assert events.index(preparing[0]) < first_start
+    assert any(isinstance(e, AgentDone) for e in events)
+
+
+@pytest.mark.asyncio
+async def test_safety_check_start_event():
+    """auto 模式不安全工具送 AI 判定前发出 SafetyCheckStart。
+
+    判定是阻塞式 LLM 调用、期间无其他事件——此事件让前端能显示
+    「安全判定中」。判定返回非法 JSON 时 fail-open，工具仍执行。
+    """
+    @tool(name="rm_file", description="删除文件", is_safe=False)
+    async def rm_file(path: str) -> str:
+        return f"已删除 {path}"
+
+    call_count = 0
+
+    async def mock_chat(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:      # 主循环第 1 轮 → 调不安全工具
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': 'call_1',
+                    'function': type('obj', (), {
+                        'name': 'rm_file',
+                        'arguments': '{"path": "a.txt"}'})()
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        elif call_count == 2:    # 安全判定器调用（非法 JSON → fail-open）
+            yield StreamChunk(content="无法判定", finish_reason="stop")
+        else:                    # 工具结果回传后的最终回答
+            yield StreamChunk(content="完成", finish_reason="stop")
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+    # 默认 auto 模式 + judge_llm=None → 判定器复用主 llm
+    agent = Agent(llm=llm, system_prompt="你是助手", tools=[rm_file])
+
+    events = []
+    async for event in agent.run("删除 a.txt"):
+        events.append(event)
+
+    checks = [e for e in events if isinstance(e, SafetyCheckStart)]
+    assert len(checks) == 1
+    assert checks[0].tool_names == ("rm_file",)
+    # 判定先于 ToolCallStart；fail-open 后工具仍执行成功
+    first_start = next(i for i, e in enumerate(events)
+                       if isinstance(e, ToolCallStart))
+    assert events.index(checks[0]) < first_start
+    result = next(e for e in events if isinstance(e, ToolResult))
+    assert result.output == "已删除 a.txt"
 
 
 @pytest.mark.asyncio

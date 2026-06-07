@@ -63,7 +63,7 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 ### 2. Agent 层 (`src/milu/agent/`)
 
 - `Agent.run()` 核心循环（`agent.py`，~880 行）：每轮 `重建 system prompt → 自动压缩 → LLM 流式调用 → 解析文本/工具调用 → 安全检查 → 执行工具 → 回传结果`，返回 `AsyncIterator[AgentEvent]`
-- 事件类型（`events.py`）：`TextDelta`, `ReasoningDelta`, `ToolCallStart`, `ToolConfirmRequired`, `ToolResult`, `AgentDone`, `AgentError`, `SubAgentEvent`, `SubAgentDone`, `HistoryCompacted`, `SessionLoaded`
+- 事件类型（`events.py`）：`TextDelta`, `ReasoningDelta`, `ToolCallPreparing`（参数流式生成期状态信号，每个调用首次出现发一次）, `ToolCallStart`, `SafetyCheckStart`（AI 安全判定开始，阻塞式 LLM 调用期间的状态信号）, `ToolConfirmRequired`, `ToolResult`, `AgentDone`, `AgentError`, `SubAgentEvent`, `SubAgentDone`, `HistoryCompacted`, `SessionLoaded`。两个状态信号事件覆盖原本零事件的静默窗口（正文结束→参数生成完、判定调用中），消费者可忽略
 - **Agent 构造（全配默认，开箱即用）**：`Agent(llm)` 即得完整体——顶层 Agent 各参数为 `None`（默认）时自动注入：内置 `main` 角色提示词（`prompt_dir`，传了 `system_prompt` 则只用它）、内置技能（`skills_dir`）、**全套内置工具 `BUILTIN_TOOLS`（`tools`，显式 `[]` 即无工具）、内置子代理三件套（`subagents`，显式 `[]` 即关闭）**。统一约定：`None`→内置默认、`[]`/显式值→覆盖；子代理 `register_catalog=False`，所有默认注入对其不生效（保持精简 + 结构性不嵌套）。**「全配默认」只在 Agent 一处实现——直接构造与经 AgentPool 构造拿到同规格实例**。能力参数 `mode` / `session_enabled` / `session_dir` / `mcp_tools_active_by_default` / `subagents` 是 `Agent.__init__` 的直接参数（`AgentConfig` 仅含运行限额 `max_turns`/`timeout`/`total_timeout`/`max_total_tokens`/`tool_call_limit`）。`session_dir` 默认 `~/.milu/sessions`（与 CWD 解耦，可用环境变量 `MILU_HOME` 覆盖；见 `resources.user_data_dir()`）
 - **操作模式 `AgentMode`（枚举定义于 `config.py`，作为 `Agent(mode=...)` 直接参数）** —— 安全模型的核心，运行时可 `agent.set_mode(...)` 切换（写实例字段 `self._mode`，天然无跨用户串扰）：
   - `talk`：只读，调用前用 `_is_safe_call()` 拦截所有不安全工具

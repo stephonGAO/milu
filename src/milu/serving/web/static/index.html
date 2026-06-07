@@ -475,13 +475,15 @@ async function sendMsg(){
         }
         if(!ev||data===null)continue;
         let d={};try{d=JSON.parse(data)}catch(e){}
-        if(ev==="TextDelta"){clearStatus();asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);chat.scrollTop=chat.scrollHeight}
+        if(ev==="TextDelta"){asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);setStatus("回复中…");chat.scrollTop=chat.scrollHeight}
         else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";setStatus("推理中…");chat.scrollTop=chat.scrollHeight}
+        else if(ev==="ToolCallPreparing"){setStatus("生成工具调用 "+esc(d.tool_name)+"…")}
+        else if(ev==="SafetyCheckStart"){setStatus("安全判定中…")}
         else if(ev==="ToolCallStart"){toolNames.push(d.tool_name);toolLine("tool","🔧 "+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,160)));setStatus("调用工具 "+esc(d.tool_name)+"…")}
         else if(ev==="ToolResult"){const o=(d.output||"").slice(0,400);toolLine("tool "+(d.is_error?"err":"res"),(d.is_error?"❌ ":"✅ ")+esc(d.tool_name)+": "+esc(o),d.is_error);setStatus("处理结果…")}
         else if(ev==="ToolConfirmRequired"){toolLine("tool",(d.approved?"✅ 已同意":"❌ 已拒绝")+" "+esc(d.tool_name))}
         else if(ev==="ConfirmationRequest"){setStatus("等待确认…");showConfirm(d)}
-        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name)tx="→ "+inner.tool_name;toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus("子代理 "+esc(n)+" 运行中…")}
+        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name&&inner.tool_call_id)tx="→ "+inner.tool_name;if(tx)toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus("子代理 "+esc(n)+" 运行中…")}
         else if(ev==="SubAgentDone"){toolLine("sub","🏁 ["+esc(d.subagent_name)+"] 完成")}
         else if(ev==="HistoryCompacted"){sysline("📦 历史已压缩 "+d.original_count+" → "+d.compacted_count+" 条")}
         else if(ev==="SessionLoaded"){sysline("会话已加载 "+d.session_id)}

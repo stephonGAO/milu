@@ -25,10 +25,12 @@ from milu.agent.events import (
     ConfirmResponse,
     HistoryCompacted,
     ReasoningDelta,
+    SafetyCheckStart,
     SessionLoaded,
     SubAgentDone,
     SubAgentEvent,
     TextDelta,
+    ToolCallPreparing,
     ToolCallStart,
     ToolConfirmRequired,
     ToolResult,
@@ -807,6 +809,7 @@ class Agent:
                 # 4. 流式调用 LLM
                 tool_call_buffer: list[dict] = []
                 turn_text_parts: list[str] = []
+                announced_calls: set[int] = set()  # 已发 ToolCallPreparing 的 buffer 下标
 
                 try:
                     async with asyncio.timeout(self._config.timeout):
@@ -822,6 +825,15 @@ class Agent:
                             # 6. 合并工具调用片段
                             if chunk.tool_calls:
                                 _merge_tool_calls(tool_call_buffer, chunk.tool_calls)
+                                # 每个调用首次拿到名字时发一次 ToolCallPreparing——
+                                # 正文结束后参数流式生成期（长代码可达数十秒）原本
+                                # 零事件，前端无从显示活动状态（"聊天框静止"）
+                                for idx, item in enumerate(tool_call_buffer):
+                                    if (idx not in announced_calls
+                                            and item["function"]["name"]):
+                                        announced_calls.add(idx)
+                                        yield ToolCallPreparing(
+                                            tool_name=item["function"]["name"])
 
                             # 累积 usage
                             if chunk.usage:
@@ -1063,6 +1075,11 @@ class Agent:
                         to_judge.append(call)
                     if to_judge:
                         from milu.agent.judge import judge_tool_calls
+                        # 判定是一次阻塞式 LLM 调用（数秒），期间无其他事件——
+                        # 先发状态事件，让前端能显示「安全判定中」而非静止
+                        yield SafetyCheckStart(tool_names=tuple(
+                            c.get("function", {}).get("name", "") for c in to_judge
+                        ))
                         try:
                             judge_verdicts = await judge_tool_calls(
                                 self._judge_llm, user_input, to_judge,

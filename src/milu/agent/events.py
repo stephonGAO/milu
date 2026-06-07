@@ -26,11 +26,32 @@ class ReasoningDelta(AgentEvent):
 
 
 @dataclass(frozen=True)
+class ToolCallPreparing(AgentEvent):
+    """LLM 正在流式生成某个工具调用的参数（每个调用首次出现时发出一次）。
+
+    模型正文结束后、参数生成完成前可能有数秒至数十秒的静默期（如长代码
+    参数），此事件让消费者（前端状态指示器等）在此期间有活动信号可显示。
+    仅作状态提示——参数就绪后仍以 ToolCallStart 为准。
+    """
+    tool_name: str
+
+
+@dataclass(frozen=True)
 class ToolCallStart(AgentEvent):
     """LLM 决定调用工具"""
     tool_name: str
     tool_call_id: str
     arguments: str  # JSON 字符串
+
+
+@dataclass(frozen=True)
+class SafetyCheckStart(AgentEvent):
+    """auto 模式 AI 安全判定开始（阻塞式 LLM 调用，期间无其他事件）。
+
+    判定结果体现在后续事件中：allow → ToolCallStart 后直接执行；
+    confirm/deny → ToolConfirmRequired / 错误 ToolResult。
+    """
+    tool_names: tuple[str, ...]  # 本批送判定的工具名
 
 
 @dataclass(frozen=True)
