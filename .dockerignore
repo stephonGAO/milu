@@ -1,0 +1,33 @@
+# 构建上下文只需要 pyproject.toml / README.md / LICENSE / src/
+.git
+.gitignore
+.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+dist
+build
+*.egg-info
+
+# 密钥与本地配置——绝不进镜像（运行时经 --env-file 注入）
+.env
+.env.*
+config/mcp_servers.json
+
+# 开发与文档产物
+docs
+tests
+examples
+workspace
+.claude
+.vscode
+.pytest_cache
+.pytest_tmp
+.sessions
+.sessions_test
+.compact_outputs
+.plan.json
+CLAUDE.md
+CHANGELOG.md
+docker-compose.yml
+Dockerfile

@@ -1,0 +1,32 @@
+# ════════════════════════════════════════════════════════════
+# milu Web 服务 — 一键起多用户 Agent 服务
+#
+# 准备：cp .env.example .env，填入至少一个厂商的 API Key
+# 启动：docker compose up -d
+# 访问：http://localhost:8000
+# 详细说明见 docs/Docker部署.md
+# ════════════════════════════════════════════════════════════
+services:
+  milu:
+    build:
+      context: .
+      # 国内网络取消下行注释，走清华 PyPI 镜像加速构建
+      # args:
+      #   PIP_INDEX_URL: https://pypi.tuna.tsinghua.edu.cn/simple
+    image: milu:latest
+    container_name: milu
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                      # API Key（{PROVIDER}_API_KEY）与搜索后端配置
+    environment:
+      TZ: Asia/Shanghai           # 定时任务（cron）按此时区执行
+    volumes:
+      - milu-data:/data/milu      # 会话/记忆/知识库/定时任务持久化（MILU_HOME）
+      - ./config:/app/config:ro   # 可选：项目级配置（config/milu.json、mcp_servers.json）
+    restart: unless-stopped
+    # 自定义启动参数示例（覆盖默认命令）：
+    # command: ["milu", "serve", "--host", "0.0.0.0", "--port", "8000", "-p", "deepseek", "--no-scheduler"]
+
+volumes:
+  milu-data:
