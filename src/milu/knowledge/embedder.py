@@ -9,6 +9,7 @@ deepseek/kimi 没有 embedding API，对话用它们时 embedding 仍需配到�
 """
 from __future__ import annotations
 
+import asyncio
 import os
 
 from milu.llm.base.exceptions import AuthenticationError
@@ -37,12 +38,15 @@ class Embedder:
         model: str = "",
         api_key: str | None = None,
         batch_size: int = 10,
+        concurrency: int = 4,
     ):
         """
         :param provider: embedding 厂商名（见 _EMBEDDING_PROVIDERS）。
         :param model: embedding 模型名；空 → 厂商默认。
         :param api_key: 显式密钥；None → 环境变量 {PROVIDER}_API_KEY。
         :param batch_size: 单批条数（多数国产厂商单批上限 10）。
+        :param concurrency: 批次并发数（大文档入库吞吐受 API 往返延迟主导，
+            并发批次可提速数倍；4 路在各厂商默认限流内安全）。
         :raises ValueError: 厂商不在支持表内（含无 embedding API 厂商的改配指引）。
         """
         if provider not in _EMBEDDING_PROVIDERS:
@@ -62,6 +66,7 @@ class Embedder:
         self._model = model or default_model
         self._api_key = api_key
         self._batch_size = max(1, batch_size)
+        self._concurrency = max(1, concurrency)
         self._client = None
 
     @property
@@ -93,18 +98,30 @@ class Embedder:
         return self._client
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """批量计算向量（按 batch_size 自动分批，结果顺序与输入对齐）。"""
+        """批量计算向量（按 batch_size 自动分批、批次间并发，结果顺序与输入对齐）。
+
+        吞吐由 API 往返延迟主导（单批 ~300ms），Semaphore 限幅的并发批次
+        可把大文档入库提速约 concurrency 倍；asyncio.gather 保证结果按
+        批次顺序拼接，与输入顺序严格对齐。
+        """
         if not texts:
             return []
         client = self._get_client()
-        result: list[list[float]] = []
-        for i in range(0, len(texts), self._batch_size):
-            batch = texts[i:i + self._batch_size]
-            resp = await client.embeddings.create(model=self._model, input=batch)
-            # 按 index 还原顺序（OpenAI 兼容端点通常有序，防御性排序一次）
+        batches = [texts[i:i + self._batch_size]
+                   for i in range(0, len(texts), self._batch_size)]
+        sem = asyncio.Semaphore(self._concurrency)
+
+        async def _embed_batch(batch: list[str]) -> list[list[float]]:
+            async with sem:
+                resp = await client.embeddings.create(model=self._model, input=batch)
+            # 按 index 还原批内顺序（OpenAI 兼容端点通常有序，防御性排序一次）
             data = sorted(resp.data, key=lambda d: d.index)
-            result.extend(d.embedding for d in data)
-        return result
+            return [d.embedding for d in data]
+
+        if len(batches) == 1:
+            return await _embed_batch(batches[0])
+        results = await asyncio.gather(*(_embed_batch(b) for b in batches))
+        return [v for batch_vecs in results for v in batch_vecs]
 
     async def aclose(self) -> None:
         """关闭 HTTP 客户端，释放连接池。"""

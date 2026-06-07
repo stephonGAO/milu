@@ -182,6 +182,18 @@ async def kb_search(query: str, top_k: int = 0) -> str:
     except Exception as e:
         return f"检索失败（embedding 调用异常）：{e}"
 
+    # 相似度阈值过滤：把低于阈值的无关片段挡在 LLM 上下文之外（防诱导幻觉）
+    min_score = rt.config.min_score
+    filtered = [(s, c) for s, c in results if s >= min_score]
+    if not filtered:
+        top1 = results[0][0] if results else 0.0
+        return (
+            f"知识库中没有与「{query}」足够相关的内容"
+            f"（最高相似度 {top1:.3f}，低于阈值 {min_score}）。"
+            "该问题可能超出知识库覆盖范围，请改用其他工具或直接回答。"
+        )
+    results = filtered
+
     lines = [f"与「{query}」最相关的 {len(results)} 个片段（知识库共 {rt.store.count()} 块）："]
     for i, (score, chunk) in enumerate(results, 1):
         lines.append(
@@ -216,6 +228,11 @@ async def kb_ingest(path: str = "", text: str = "", source: str = "") -> str:
     note = ""
     if path:
         abs_path = os.path.abspath(path)
+        # 自我保护守卫：与 file_read 同栈，禁止把 milu 自身源码/配置入库
+        # （kb_ingest 直接读文件，不走 file_read，须独立检查防旁路）
+        from milu.tools._selfguard import is_protected_path
+        if is_protected_path(abs_path):
+            return f"安全限制：禁止访问 milu 自身代码/配置（受保护路径：{abs_path}）"
         if not os.path.isfile(abs_path):
             return f"文件不存在: {abs_path}"
         extracted = _extract_file(abs_path)

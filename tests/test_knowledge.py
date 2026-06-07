@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -271,6 +272,27 @@ class TestStore:
         assert s["provider"] == "fake" and s["dim"] == 2
         assert s["disk_bytes"] > 0
 
+    def test_load_cache_hit_and_invalidate(self, tmp_path):
+        """mtime 缓存：文件未变复用内存对象；写入后签名变化自动失效。"""
+        store = KnowledgeStore(tmp_path / "kb")
+        store.add(["一"], [[1.0, 0.0]], source="a", provider="fake", model="m1")
+        c1, v1 = store.load()
+        c2, v2 = store.load()
+        assert c1 is c2 and v1 is v2  # 缓存命中：同一对象
+        store.add(["二"], [[0.0, 1.0]], source="b", provider="fake", model="m1")
+        c3, _ = store.load()
+        assert c3 is not c1 and len(c3) == 2  # 写入后失效重载
+
+    def test_cache_invalidated_by_external_write(self, tmp_path):
+        """跨进程写入（模拟为第二个 store 实例写盘）后，旧实例缓存自动失效。"""
+        store_a = KnowledgeStore(tmp_path / "kb")
+        store_a.add(["一"], [[1.0, 0.0]], source="a", provider="fake", model="m1")
+        store_a.load()  # 灌入缓存
+        store_b = KnowledgeStore(tmp_path / "kb")
+        store_b.add(["二"], [[0.0, 1.0]], source="b", provider="fake", model="m1")
+        chunks, _ = store_a.load()
+        assert len(chunks) == 2  # 磁盘即真相，签名变化触发重载
+
 
 # ── Embedder ────────────────────────────────────────────
 
@@ -317,10 +339,39 @@ class TestEmbedder:
 
         monkeypatch.setattr(e, "_get_client", lambda: _Client())
         vectors = await e.embed([f"t{i}" for i in range(25)])
-        assert [len(b) for b in created] == [10, 10, 5]
+        # 批次并发执行，调用顺序不保证；按多重集比较批大小
+        assert sorted(len(b) for b in created) == [5, 10, 10]
         assert len(vectors) == 25
-        # 每批内按 index 升序还原
+        # gather 保证批次结果顺序 + 批内按 index 升序还原
         assert vectors[0] == [0.0] and vectors[9] == [9.0]
+
+    async def test_concurrent_batches_keep_order(self, monkeypatch):
+        """并发批次下结果与输入顺序严格对齐（gather 顺序保证）。"""
+        import asyncio as _asyncio
+
+        e = Embedder(provider="qwen", api_key="k", batch_size=2, concurrency=3)
+
+        class _Data:
+            def __init__(self, i, v):
+                self.index = i
+                self.embedding = v
+
+        class _Embeddings:
+            async def create(self, model, input):
+                # 故意让早批次更慢，验证 gather 仍按批次顺序拼接
+                await _asyncio.sleep(0.02 if input[0] == "a0" else 0.001)
+
+                class _Resp:
+                    data = [_Data(i, [float(ord(t[0]))]) for i, t in enumerate(input)]
+                return _Resp()
+
+        class _Client:
+            embeddings = _Embeddings()
+
+        monkeypatch.setattr(e, "_get_client", lambda: _Client())
+        texts = ["a0", "a1", "b0", "b1", "c0", "c1"]
+        vectors = await e.embed(texts)
+        assert vectors == [[float(ord(t[0]))] for t in texts]
 
     async def test_embed_empty(self):
         e = Embedder(provider="qwen", api_key="k")
@@ -393,6 +444,38 @@ class TestKnowledgeTools:
         try:
             assert "知识库为空" in await kb_search._tool_wrapper.func(query="任意")
         finally:
+            _current_knowledge.reset(token)
+
+    async def test_search_min_score_filter(self):
+        """相似度低于阈值时不返回片段，给出明确的"无相关内容"提示。"""
+        rt = KnowledgeRuntime(KnowledgeConfig(user_id="thresh", min_score=0.99))
+        rt._embedder = FakeEmbedder()
+        token = _current_knowledge.set(rt)
+        try:
+            await kb_ingest._tool_wrapper.func(text="知识库里的某段内容", source="doc")
+            # 完全相同文本 → 相似度 1.0，过阈值
+            hit = await kb_search._tool_wrapper.func(query="知识库里的某段内容")
+            assert "相似度" in hit and "doc" in hit
+            # 不同文本 → 相似度 < 0.99，被阈值拦下
+            miss = await kb_search._tool_wrapper.func(query="毫不相干的天文话题")
+            assert "足够相关" in miss and "阈值" in miss
+        finally:
+            _current_knowledge.reset(token)
+
+    async def test_ingest_selfguard_blocked(self):
+        """kb_ingest 不得绕过自我保护守卫读取 milu 自身源码。"""
+        import milu
+        from milu.tools import _selfguard
+        protected = str(Path(milu.__file__).parent / "knowledge" / "store.py")
+        rt = _make_runtime("guard")
+        token = _current_knowledge.set(rt)
+        old = _selfguard._ENABLED
+        _selfguard.set_enabled(True)
+        try:
+            result = await kb_ingest._tool_wrapper.func(path=protected)
+            assert "安全限制" in result
+        finally:
+            _selfguard.set_enabled(old)
             _current_knowledge.reset(token)
 
     async def test_manage_stats_delete_clear(self):

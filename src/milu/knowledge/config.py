@@ -29,6 +29,8 @@ class KnowledgeConfig:
     chunk_size: int = 800             # 分块目标长度（字符）
     chunk_overlap: int = 200          # 超长段落滑动窗口的重叠长度（字符）
     top_k: int = 5                    # kb_search 默认返回片段数
+    min_score: float = 0.35           # 检索相似度阈值：低于该值的片段不返回（防把无关内容喂给 LLM
+                                      # 诱导幻觉；基准评测正负分离度 +0.388，0.35 居正负区间之间。0 = 不过滤）
     batch_size: int = 10              # embedding 单批条数（DashScope 等厂商单批上限 10，取最保守值）
 
     @classmethod

@@ -86,10 +86,30 @@ def _atomic_write_bytes(path: Path, write_fn) -> None:
 
 
 class KnowledgeStore:
-    """单个知识库的读写与检索（无状态薄封装，磁盘即真相，每次操作即时读盘）。"""
+    """单个知识库的读写与检索（磁盘即真相 + mtime 失效的内存缓存）。
+
+    load() 带实例级缓存：三个数据文件的 (mtime_ns, size) 签名未变则直接复用
+    内存对象——万级 chunks 时每次检索从"重读 ~40MB 磁盘"降回毫秒级。
+    跨进程写入会改变文件签名，缓存自动失效，"磁盘即真相"语义不变。
+    注意：load() 返回的是共享缓存对象，调用方**不得原地修改**（本类内部
+    一律以"新列表/新矩阵"方式写回）。
+    """
 
     def __init__(self, dir_path: Path):
         self._dir = Path(dir_path)
+        # (文件签名, chunks, vectors)；签名不匹配即失效
+        self._cache: tuple[tuple, list[dict[str, Any]], Any] | None = None
+
+    def _files_signature(self) -> tuple:
+        """三个数据文件的 (mtime_ns, size) 签名（文件缺失记 None）。"""
+        sig = []
+        for name in ("chunks.jsonl", "vectors.npy", "meta.json"):
+            try:
+                st = (self._dir / name).stat()
+                sig.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append(None)
+        return tuple(sig)
 
     @property
     def dir_path(self) -> Path:
@@ -127,15 +147,20 @@ class KnowledgeStore:
         return chunks
 
     def load(self) -> tuple[list[dict[str, Any]], Any]:
-        """加载全部块与向量矩阵，并做一致性校验。
+        """加载全部块与向量矩阵，并做一致性校验（带 mtime 缓存）。
 
-        :return: (chunks, vectors)；空库返回 ([], None)。
+        :return: (chunks, vectors)；空库返回 ([], None)。返回共享缓存对象，勿原地修改。
         :raises RuntimeError: 三个文件数量不一致（写入中断/手工破坏），提示重建。
         """
         np = _require_numpy()
+        sig = self._files_signature()
+        if self._cache is not None and self._cache[0] == sig:
+            return self._cache[1], self._cache[2]
+
         chunks = self._load_chunks()
         vec_path = self._dir / "vectors.npy"
         if not chunks and not vec_path.exists():
+            self._cache = (sig, [], None)
             return [], None
         vectors = np.load(vec_path) if vec_path.exists() else None
         n_vec = 0 if vectors is None else int(vectors.shape[0])
@@ -145,6 +170,7 @@ class KnowledgeStore:
                 f"meta.count={self.count()}），可能写入中断。"
                 f"请删除目录后重新入库：{self._dir}"
             )
+        self._cache = (sig, chunks, vectors)
         return chunks, vectors
 
     # ── 写 ──────────────────────────────────────────────
@@ -170,11 +196,12 @@ class KnowledgeStore:
 
         self.check_model(provider, model)
 
-        chunks, old_vectors = self.load()
+        old_chunks, old_vectors = self.load()
         created = datetime.now().isoformat(timespec="seconds")
-        chunks.extend(
+        # 拼接为新列表（load() 返回共享缓存对象，不可原地 extend）
+        chunks = old_chunks + [
             {"text": t, "source": source, "created_at": created} for t in texts
-        )
+        ]
         new_vectors = np.asarray(vectors, dtype=np.float32)
         if old_vectors is not None:
             if old_vectors.shape[1] != new_vectors.shape[1]:

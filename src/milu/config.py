@@ -63,7 +63,7 @@ _SCHEDULER_KEYS = ("max_concurrent_tasks", "task_timeout", "notify")
 # api_key 走 .env / {PROVIDER}_API_KEY，均不入 config.json）
 _KNOWLEDGE_KEYS = (
     "embedding_provider", "embedding_model",
-    "chunk_size", "chunk_overlap", "top_k", "batch_size",
+    "chunk_size", "chunk_overlap", "top_k", "min_score", "batch_size",
 )
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
