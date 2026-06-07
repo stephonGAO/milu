@@ -84,6 +84,15 @@
   .cmds button{font-size:11px;padding:3px 8px;border:1px solid var(--line);background:#fff;border-radius:11px;cursor:pointer;color:var(--dim)}
   .cmds button:hover{background:#f3f4f6}
   .inrow{display:flex;gap:8px}
+  /* 聊天附件 */
+  .attbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+  .attchip{display:flex;align-items:center;gap:6px;font-size:12px;background:#eef2ff;color:#4338ca;border:1px solid #e0e7ff;padding:3px 9px;border-radius:11px;max-width:260px}
+  .attchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .attchip .rm{cursor:pointer;font-weight:700;padding:0 2px}
+  .attchip .rm:hover{color:var(--err)}
+  #attach{padding:0 13px;border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;font-size:16px}
+  #attach:hover{background:#f3f4f6}
+  .bubble .atts{font-size:12px;opacity:.85;margin-top:5px;border-top:1px solid rgba(255,255,255,.3);padding-top:4px}
   #input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:14px;font-family:inherit;resize:none;min-height:42px;max-height:160px}
   #send{padding:0 20px;border:none;border-radius:9px;background:var(--brand);color:#fff;cursor:pointer;font-weight:600}
   #send:disabled{background:#94a3b8}
@@ -257,8 +266,11 @@
         <button onclick="quickCmd('/compact')">/compact</button>
         <button onclick="quickCmd('/reset')">/reset</button>
       </div>
+      <div class="attbar" id="attBar" style="display:none"></div>
       <div class="inrow">
-        <textarea id="input" rows="1" placeholder="输入消息或 / 命令（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="attach" title="上传附件分析（图片/文档，可粘贴或拖拽）" onclick="document.getElementById('attFile').click()">📎</button>
+        <input type="file" id="attFile" multiple style="display:none">
+        <textarea id="input" rows="1" placeholder="输入消息或 / 命令（Enter 发送，Shift+Enter 换行；📎 可上传文件分析，支持粘贴截图/拖拽）"></textarea>
         <button id="send" onclick="onSendBtn()">发送</button>
       </div>
     </footer>
@@ -365,6 +377,42 @@ let aborter=null;
 // 发送按钮：空闲→发送；运行中→中断本次回复
 function onSendBtn(){ if(busy){ if(aborter) aborter.abort(); return; } sendMsg(); }
 
+// ── 聊天附件（发送时先经 /api/upload 上传，路径随消息传给 /api/chat）──
+let attFiles=[];   // 待发送的 File 对象列表
+const IMG_EXTS=["png","jpg","jpeg","webp","gif","bmp"];
+function isImg(name){return IMG_EXTS.includes((name.split(".").pop()||"").toLowerCase())}
+function renderAtts(){
+  const bar=$("attBar");
+  if(!attFiles.length){bar.style.display="none";bar.innerHTML="";return}
+  bar.style.display="flex";bar.innerHTML="";
+  attFiles.forEach((f,i)=>{
+    const c=el2("attchip");
+    c.innerHTML=`<span>${isImg(f.name)?"🖼":"📄"}</span><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span><span>${(f.size/1024).toFixed(0)}KB</span><span class="rm" title="移除">×</span>`;
+    c.querySelector(".rm").onclick=()=>{attFiles.splice(i,1);renderAtts()};
+    bar.appendChild(c);
+  });
+}
+function addAttFiles(list){
+  for(const f of list){
+    if(attFiles.length>=10){toast("附件最多 10 个");break}
+    const limit=isImg(f.name)?10*1024*1024:30*1024*1024;
+    if(f.size>limit){toast(f.name+" 超过 "+(limit/1024/1024)+"MB 上限");continue}
+    attFiles.push(f);
+  }
+  renderAtts();
+}
+$("attFile").onchange=e=>{addAttFiles(e.target.files);e.target.value=""};
+// 粘贴截图 / 拖拽文件到输入框
+$("input").addEventListener("paste",e=>{
+  const fs=[...((e.clipboardData||{}).files||[])];
+  if(fs.length){e.preventDefault();addAttFiles(fs)}
+});
+$("input").addEventListener("dragover",e=>e.preventDefault());
+$("input").addEventListener("drop",e=>{
+  e.preventDefault();
+  if(e.dataTransfer&&e.dataTransfer.files.length)addAttFiles(e.dataTransfer.files);
+});
+
 // 运行状态指示器（跳动点 + 当前活动文字），随事件更新、始终置底
 let statusEl=null;
 function setStatus(label){
@@ -382,18 +430,37 @@ function clearStatus(){ if(statusEl){statusEl.remove();statusEl=null;} }
 async function sendMsg(){
   if(busy)return;
   const input=$("input").value.trim();
-  if(!input)return;
+  const isCmd=input.startsWith("/");
+  const atts=isCmd?[]:attFiles.slice();   // / 命令不消费附件（保留待下条消息）
+  if(!input&&!atts.length)return;
   const isReset=input==="/reset";
   busy=true;
   const sb=$("send"); sb.textContent="■ 停止"; sb.classList.add("stop");
-  el("turn"); el("bubble user",esc(input)); $("input").value="";$("input").style.height="auto";
+  // 用户气泡：文字 + 附件清单
+  let ub=esc(input||"（请分析附件）");
+  if(atts.length)ub+='<div class="atts">'+atts.map(f=>(isImg(f.name)?"🖼 ":"📎 ")+esc(f.name)).join("<br>")+"</div>";
+  el("turn"); el("bubble user",ub); $("input").value="";$("input").style.height="auto";
+  if(!isCmd){attFiles=[];renderAtts();}
   setStatus("思考中…");
   // 流式上下文
   let asstWrap=null, asstText="", asstEl=null, thinkEl=null;
   const ensureAsst=()=>{if(!asstEl){resetToolLog();asstWrap=el("turn");asstWrap.innerHTML='<div class="role">🤖 assistant</div>';asstEl=document.createElement("div");asstEl.className="bubble assistant";asstWrap.appendChild(asstEl)}return asstEl};
   aborter=new AbortController();
   try{
-    const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input}),signal:aborter.signal});
+    // 先上传附件（base64 JSON 通道），收集服务端路径
+    const filePaths=[];
+    for(let i=0;i<atts.length;i++){
+      const f=atts[i];
+      setStatus("上传附件 "+(i+1)+"/"+atts.length+"："+f.name.slice(0,24)+"…");
+      const b64=await fileB64(f);
+      const r=await api("/api/upload",{method:"POST",body:JSON.stringify({filename:f.name,content_base64:b64}),signal:aborter.signal});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok){el("tool err","附件上传失败："+esc(f.name)+" — "+esc(d.detail||("HTTP "+r.status)));continue}
+      filePaths.push(d.path);
+    }
+    if(atts.length&&!filePaths.length&&!input){sysline("附件全部上传失败，已取消发送");return}
+    setStatus("思考中…");
+    const resp=await api("/api/chat",{method:"POST",body:JSON.stringify({input,files:filePaths}),signal:aborter.signal});
     const reader=resp.body.getReader();const dec=new TextDecoder();let buf="";
     while(true){
       const {done,value}=await reader.read();if(done)break;
@@ -652,7 +719,7 @@ $("input").addEventListener("input",e=>{e.target.style.height="auto";e.target.st
 function refreshAll(){loadSettings();refreshStats()}
 (async function init(){
   await loadProviders();await loadSettings();refreshStats();
-  sysline("✨ milu 多用户 Agent 服务已就绪。左侧可切换厂商/模型/模式、管理会话与定时任务。");
+  sysline("✨ milu 多用户 Agent 服务已就绪。左侧可切换厂商/模型/模式、管理会话与定时任务；📎 可上传图片/文档让 Agent 分析。");
 })();
 </script>
 </body>

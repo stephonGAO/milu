@@ -243,6 +243,98 @@ def test_confirm_no_pending(client):
     assert r.status_code == 404
 
 
+# ── 聊天附件上传 ──────────────────────────────────────────
+
+def _b64(data: bytes) -> str:
+    import base64
+    return base64.b64encode(data).decode()
+
+
+def test_upload_and_chat_with_file(client):
+    """上传附件 → 带 files 发消息：附件说明块被注入用户消息。"""
+    h = _h(uid="ivy")
+    r = client.post("/api/upload", headers=h,
+                    json={"filename": "数据.csv",
+                          "content_base64": _b64("a,b\n1,2".encode())})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["name"] == "数据.csv" and d["is_image"] is False
+    assert d["size"] == len("a,b\n1,2".encode())
+
+    import os
+    assert os.path.isfile(d["path"])
+
+    events = []
+    with client.stream("POST", "/api/chat", headers=h,
+                       json={"input": "分析一下", "files": [d["path"]]}) as resp:
+        assert resp.status_code == 200
+        for line in resp.iter_lines():
+            if line.startswith("event:"):
+                events.append(line[6:].strip())
+                if events[-1] == "AgentDone":
+                    break
+    assert "AgentDone" in events
+
+    # 用户消息被附加了附件说明块（含路径与工具引导）
+    agent = client.app.state.pool._entries[("ivy", "s1")].agent
+    user_msgs = [m for m in agent.history.all_messages
+                 if m.role.value == "user"]
+    assert "[附件]" in user_msgs[-1].content
+    assert "数据.csv" in user_msgs[-1].content
+    assert "file_read" in user_msgs[-1].content
+
+
+def test_chat_files_only_no_input(client):
+    """只传附件不输文字：用默认指令，不再 400。"""
+    h = _h(uid="jack")
+    d = client.post("/api/upload", headers=h, json={
+        "filename": "note.txt", "content_base64": _b64(b"hello")}).json()
+    with client.stream("POST", "/api/chat", headers=h,
+                       json={"input": "", "files": [d["path"]]}) as resp:
+        assert resp.status_code == 200
+        for line in resp.iter_lines():
+            if line.startswith("event:") and "AgentDone" in line:
+                break
+    agent = client.app.state.pool._entries[("jack", "s1")].agent
+    user_msgs = [m for m in agent.history.all_messages
+                 if m.role.value == "user"]
+    assert "请分析这些附件文件" in user_msgs[-1].content
+
+
+def test_chat_rejects_foreign_file_path(client, tmp_path):
+    """files 路径不在本用户上传目录内（伪造任意路径/他人文件）→ 400。"""
+    h = _h(uid="kate")
+    # 任意磁盘路径
+    outside = tmp_path / "secret.txt"
+    outside.write_text("x", encoding="utf-8")
+    r = client.post("/api/chat", headers=h,
+                    json={"input": "读它", "files": [str(outside)]})
+    assert r.status_code == 400
+    # 他人上传的文件
+    d = client.post("/api/upload", headers=_h(uid="leo"), json={
+        "filename": "mine.txt", "content_base64": _b64(b"y")}).json()
+    r = client.post("/api/chat", headers=h,
+                    json={"input": "读它", "files": [d["path"]]})
+    assert r.status_code == 400
+
+
+def test_upload_validation(client):
+    h = _h(uid="mia")
+    # 缺参数 / 非法 base64 → 400
+    assert client.post("/api/upload", headers=h, json={}).status_code == 400
+    assert client.post("/api/upload", headers=h, json={
+        "filename": "a.txt", "content_base64": "!!!"}).status_code == 400
+    # 空消息且无附件 → 400（原有行为保持）
+    assert client.post("/api/chat", headers=h,
+                       json={"input": ""}).status_code == 400
+    # 同名文件二次上传不覆盖（时间戳+序号去重）
+    p1 = client.post("/api/upload", headers=h, json={
+        "filename": "a.txt", "content_base64": _b64(b"1")}).json()["path"]
+    p2 = client.post("/api/upload", headers=h, json={
+        "filename": "a.txt", "content_base64": _b64(b"2")}).json()["path"]
+    assert p1 != p2
+
+
 # ── 知识库管理 ────────────────────────────────────────────
 
 class _FakeKbEmbedder:

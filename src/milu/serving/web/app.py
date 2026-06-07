@@ -23,6 +23,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
@@ -50,6 +52,7 @@ from milu.agent.events import (
     ToolConfirmRequired,
 )
 from milu.cli.config import DEFAULT_MODELS, DEFAULT_PROVIDER, env_key_name
+from milu.llm.base.vision import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES
 from milu.llm.providers import ModelRegistry
 from milu.resources import default_session_dir, user_data_dir
 from milu.serving import AgentPool
@@ -102,6 +105,58 @@ def _to_jsonable(obj: Any) -> Any:
 def _sse(event: str, data: Any) -> dict:
     """构造一条 SSE 消息（event + JSON data）。"""
     return {"event": event, "data": json.dumps(data, ensure_ascii=False)}
+
+
+# ── 聊天附件上传 ──────────────────────────────────────────
+# 文件经 base64 JSON 通道上传（与知识库入库一致，不引入 python-multipart），
+# 落 ~/.milu/uploads/{user}/ 后把绝对路径经 /api/chat 的 files 参数传回——
+# 图片走 Agent.run(images=...) 视觉通路，文档/文本由模型用 doc_read/file_read 读取。
+
+UPLOAD_MAX_BYTES = 30 * 1024 * 1024     # 非图片附件上限（图片按 MAX_IMAGE_BYTES）
+UPLOAD_TTL_SECONDS = 7 * 24 * 3600      # 附件保留 7 天（上传时顺带清理过期文件）
+UPLOAD_MAX_FILES_PER_MSG = 10           # 单条消息附件数上限
+
+_DOC_EXTS = frozenset({
+    ".docx", ".doc", ".xlsx", ".xlsm", ".xls", ".pdf", ".pptx", ".ppt",
+})
+
+
+def _upload_dir(user_id: str) -> Path:
+    """用户聊天附件目录 ~/.milu/uploads/{safe_user}/（与 scheduler 同款 safe 化）。"""
+    from milu.scheduler.store import _safe_user
+    d = user_data_dir() / "uploads" / _safe_user(user_id)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cleanup_uploads(updir: Path, ttl: float = UPLOAD_TTL_SECONDS) -> None:
+    """清理过期附件（按 mtime）。尽力而为：失败静默，不阻断上传。"""
+    cutoff = time.time() - ttl
+    try:
+        for f in updir.iterdir():
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _format_attachments(paths: list[Path]) -> str:
+    """组装附件说明块（附在用户消息末尾，引导模型选对读取工具）。"""
+    lines = ["[附件] 用户随本条消息上传了以下文件，请按需读取分析："]
+    for p in paths:
+        ext = p.suffix.lower()
+        if ext in IMAGE_EXTENSIONS:
+            hint = "图片，已随消息注入视觉上下文，可直接查看"
+        elif ext in _DOC_EXTS:
+            hint = "文档，用 doc_read 工具读取"
+        else:
+            hint = "文本/数据文件，用 file_read 工具读取"
+        try:
+            size = f"{p.stat().st_size / 1024:.0f} KB"
+        except OSError:
+            size = "未知大小"
+        lines.append(f"- {p}（{hint}，{size}）")
+    return "\n".join(lines)
 
 
 # ── LLM 解析与缓存 ────────────────────────────────────────
@@ -371,7 +426,8 @@ def create_app(
 
     # ── 对话（SSE，队列桥接确认流）────────────────────────
 
-    async def _stream_chat(app, user_id, session_id, user_input, request) -> AsyncIterator[dict]:
+    async def _stream_chat(app, user_id, session_id, user_input, request,
+                           images: list[str] | None = None) -> AsyncIterator[dict]:
         st = app.state
         pool: AgentPool = st.pool
         key = (user_id, session_id)
@@ -387,7 +443,7 @@ def create_app(
 
                 async def _run():
                     try:
-                        async for evt in agent.run(user_input):
+                        async for evt in agent.run(user_input, images=images or None):
                             # 子代理内部事件：按配置开关决定是否转发给前端（默认隐藏）
                             if not show_subagent and isinstance(evt, (SubAgentEvent, SubAgentDone)):
                                 continue
@@ -430,7 +486,24 @@ def create_app(
     ):
         body = await request.json()
         user_input = (body.get("input") or "").strip()
-        if not user_input:
+        raw_files = body.get("files") or []
+
+        # 附件校验：仅接受本用户上传目录内的真实文件（防伪造任意磁盘路径，
+        # 路径由 /api/upload 返回）
+        file_paths: list[Path] = []
+        if isinstance(raw_files, list) and raw_files:
+            updir = _upload_dir(x_user_id).resolve()
+            for raw in raw_files[:UPLOAD_MAX_FILES_PER_MSG]:
+                try:
+                    p = Path(str(raw)).resolve()
+                    ok = p.is_file() and p.is_relative_to(updir)
+                except (OSError, ValueError):
+                    ok = False
+                if not ok:
+                    raise HTTPException(400, f"附件无效或不属于当前用户: {raw}")
+                file_paths.append(p)
+
+        if not user_input and not file_paths:
             raise HTTPException(400, "input 不能为空")
 
         if user_input.startswith("/"):
@@ -446,8 +519,17 @@ def create_app(
                     yield _sse("ServerError", {"message": str(e)})
             return EventSourceResponse(_cmd_stream(), ping=15)
 
+        # 附件注入：图片经 images= 走视觉通路（不支持视觉的模型由 Agent 降级），
+        # 全部附件以说明块附在消息尾，引导模型用 doc_read / file_read 读取分析
+        images = [str(p) for p in file_paths if p.suffix.lower() in IMAGE_EXTENSIONS]
+        if file_paths:
+            if not user_input:
+                user_input = "请分析这些附件文件。"
+            user_input = f"{user_input}\n\n{_format_attachments(file_paths)}"
+
         return EventSourceResponse(
-            _stream_chat(request.app, x_user_id, x_session_id, user_input, request),
+            _stream_chat(request.app, x_user_id, x_session_id, user_input, request,
+                         images=images),
             ping=15,
         )
 
@@ -466,6 +548,52 @@ def create_app(
             message=str(body.get("message", "")),
         ))
         return {"status": "ok"}
+
+    # ── 聊天附件上传 ──────────────────────────────────────
+
+    @app.post("/api/upload")
+    async def upload_file(
+        request: Request,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+    ):
+        """聊天附件上传（filename + content_base64）。
+
+        文件保存到本用户附件目录并返回绝对路径，前端随后把路径经 /api/chat 的
+        files 参数传回（chat 端会校验路径归属，防伪造）。图片按视觉上限
+        10MB、其他文件 30MB；上传时顺带清理 7 天前的过期附件。
+        """
+        import base64
+
+        body = await request.json()
+        filename = os.path.basename(str(body.get("filename") or "").strip())
+        content_b64 = body.get("content_base64") or ""
+        if not filename or not content_b64:
+            raise HTTPException(400, "需提供 filename + content_base64")
+        try:
+            raw = base64.b64decode(content_b64, validate=True)
+        except Exception:
+            raise HTTPException(400, "content_base64 解码失败")
+
+        ext = os.path.splitext(filename)[1].lower()
+        is_image = ext in IMAGE_EXTENSIONS
+        limit = MAX_IMAGE_BYTES if is_image else UPLOAD_MAX_BYTES
+        if len(raw) > limit:
+            raise HTTPException(
+                413, f"文件超过 {limit // 1024 // 1024}MB 上限: {filename}")
+
+        updir = _upload_dir(x_user_id)
+        _cleanup_uploads(updir)
+        # 文件名安全化（剔除 Windows 非法字符）+ 时间戳前缀防同名覆盖
+        safe_name = re.sub(r'[\\/:*?"<>|]', "_", filename) or "file"
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        path = updir / f"{stamp}_{safe_name}"
+        n = 1
+        while path.exists():
+            path = updir / f"{stamp}_{n}_{safe_name}"
+            n += 1
+        path.write_bytes(raw)
+        return {"path": str(path), "name": filename,
+                "size": len(raw), "is_image": is_image}
 
     # ── 设置 / 厂商 ───────────────────────────────────────
 
