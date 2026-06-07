@@ -34,6 +34,7 @@
     "notify": true
   },
   "knowledge": {
+    "//": "向量知识库。enabled：总开关。auto_retrieve：前置自动检索——知识库主导的应用（FAQ/文档问答/企业资料助手）设 true，每轮对话自动检索并把相关片段注入上下文（每轮 +1 次 embedding 约 200ms）；通用助手场景设 false，由模型按需调 kb_search。auto_top_k/auto_min_score 是自动注入的数量上限与质量门槛（比工具检索更严，确保只有高置信内容进上下文）；top_k/min_score 作用于 kb_search 工具（单次上限 8）。embedding 余弦分参考：正确命中通常 0.4~0.76，门槛勿设 0.8 以上否则全部拒掉。",
     "enabled": true,
     "embedding_provider": "qwen",
     "embedding_model": "",
@@ -42,6 +43,8 @@
     "top_k": 5,
     "min_score": 0.35,
     "auto_retrieve": true,
+    "auto_top_k": 3,
+    "auto_min_score": 0.5,
     "batch_size": 10
   },
   "security": {

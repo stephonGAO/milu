@@ -42,6 +42,9 @@ _MAX_INGEST_CHUNKS = 2000
 _MAX_TEXT_BYTES = 5 * 1024 * 1024
 # system prompt 目录最多列出的来源数（防大库撑爆提示词）
 _MAX_PROMPT_SOURCES = 50
+# kb_search 单次返回片段数硬上限（钳制 LLM 传 10/20 的挥霍——8×800 字符已是
+# 上下文开销的合理边界；要更多线索应换表述多次检索而非一次拉满）
+_MAX_SEARCH_TOP_K = 8
 
 # ── 状态注入（asyncio 任务级隔离）──────────────────────
 #
@@ -79,9 +82,12 @@ class KnowledgeRuntime:
     async def prepare_auto_context(self, query: str) -> None:
         """前置自动检索：用用户消息检索知识库，把达标片段渲染为注入块。
 
-        不依赖模型决策（kb_search 是模型主动调用，可能漏检；本路径每轮必查），
-        过 min_score 阈值才注入——无关问题零打扰，仅留一行"未命中"提示帮模型
-        判断内部资料不覆盖该主题。任何异常只记日志不阻断对话（检索是增强而非门槛）。
+        不依赖模型决策（kb_search 是模型主动调用，可能漏检；本路径每轮必查）。
+        注入门槛用**独立的 auto_top_k / auto_min_score**（默认 3 个 / 0.5，比
+        kb_search 的 top_k/min_score 更紧）——自动注入每轮发生，按"高精度、省
+        上下文"收窄；边缘命中（0.35~0.5 档）由模型经 kb_search 捞回，不损召回。
+        未命中只留一行提示帮模型判断内部资料不覆盖该主题。
+        任何异常只记日志不阻断对话（检索是增强而非门槛）。
         """
         self.auto_context = ""
         query = query.strip()
@@ -93,15 +99,16 @@ class KnowledgeRuntime:
             embedder = self.get_embedder()
             self.store.check_model(embedder.provider, embedder.model)
             query_vec = (await embedder.embed([query]))[0]
-            results = self.store.search(query_vec, self.config.top_k)
-            hits = [(s, c) for s, c in results if s >= self.config.min_score]
+            results = self.store.search(query_vec, self.config.auto_top_k)
+            hits = [(s, c) for s, c in results if s >= self.config.auto_min_score]
             if not hits:
                 top1 = results[0][0] if results else 0.0
                 self.auto_context = (
                     "\n\n### 本轮自动检索\n"
                     f"已用当前用户消息自动检索知识库，未命中（最高相似度 {top1:.3f} "
-                    f"低于阈值 {self.config.min_score}）——该主题大概率不在内部资料中；"
-                    "如确认相关可换表述调用 kb_search，否则改用其他工具。"
+                    f"低于自动注入门槛 {self.config.auto_min_score}）。"
+                    "若该问题确实涉及内部资料，请换表述调用 kb_search（其阈值更宽松）；"
+                    "否则改用其他工具。"
                 )
                 return
             lines = [
@@ -257,12 +264,14 @@ def _extract_pdf(abs_path: str) -> "tuple[str, str] | str":
         "**主动调用时机**：用户的问题可能涉及知识库中的私有资料"
         "（产品文档、笔记、FAQ 等）时优先检索，再基于检索结果回答。"
         "返回带来源与相似度的片段列表。"
+        "top_k 保持默认即可（上限 8）；需要更多线索时换不同表述多次检索，"
+        "而非一次拉大 top_k 浪费上下文。"
     ),
 )
 async def kb_search(query: str, top_k: int = 0) -> str:
     """
     :param query: 检索语句（自然语言，描述要找的内容）
-    :param top_k: 返回片段数；0 表示用配置默认值
+    :param top_k: 返回片段数；0 表示用配置默认值，上限 8（超出自动截断）
     """
     rt = _current_knowledge.get()
     if rt is None:
@@ -276,7 +285,9 @@ async def kb_search(query: str, top_k: int = 0) -> str:
         embedder = rt.get_embedder()
         rt.store.check_model(embedder.provider, embedder.model)
         query_vec = (await embedder.embed([query]))[0]
-        results = rt.store.search(query_vec, top_k or rt.config.top_k)
+        # 钳制 top_k：LLM 偶尔传 10/20，一次拉满浪费上下文
+        effective_top_k = min(top_k or rt.config.top_k, _MAX_SEARCH_TOP_K)
+        results = rt.store.search(query_vec, effective_top_k)
     except (AuthenticationError, ValueError, RuntimeError) as e:
         return f"检索失败：{e}"
     except Exception as e:

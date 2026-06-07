@@ -447,6 +447,21 @@ class TestKnowledgeTools:
         finally:
             _current_knowledge.reset(token)
 
+    async def test_search_top_k_clamped(self):
+        """LLM 传超大 top_k（如 20）被钳制到上限 8。"""
+        rt = KnowledgeRuntime(KnowledgeConfig(user_id="clamp", min_score=0.0))
+        rt._embedder = fake = FakeEmbedder()
+        texts = [f"第{i}条规章内容" for i in range(10)]
+        rt.store.add(texts, [_fake_vec(t, fake.dim) for t in texts],
+                     source="规章.md", provider="fake", model="fake-1")
+        token = _current_knowledge.set(rt)
+        try:
+            result = await kb_search._tool_wrapper.func(query=texts[0], top_k=20)
+            assert "[8]" in result
+            assert "[9]" not in result
+        finally:
+            _current_knowledge.reset(token)
+
     async def test_search_min_score_filter(self):
         """相似度低于阈值时不返回片段，给出明确的"无相关内容"提示。"""
         rt = KnowledgeRuntime(KnowledgeConfig(user_id="thresh", min_score=0.99))
@@ -588,10 +603,30 @@ class TestAutoRetrieve:
         assert "六百元" in rt.auto_context
 
     async def test_miss_renders_hint(self):
-        rt = self._runtime(auto_retrieve=True, min_score=0.99)
+        rt = self._runtime(auto_retrieve=True, auto_min_score=0.99)
         await rt.prepare_auto_context("毫不相干的天文话题")
         assert "未命中" in rt.auto_context
         assert "kb_search" in rt.auto_context
+
+    async def test_auto_uses_independent_threshold(self):
+        """自动注入用 auto_min_score（0.99）而非 kb_search 的 min_score（0）。"""
+        rt = self._runtime(auto_retrieve=True, min_score=0.0, auto_min_score=0.99)
+        await rt.prepare_auto_context("毫不相干的天文话题")
+        assert "未命中" in rt.auto_context  # min_score=0 不影响自动路径
+
+    async def test_auto_top_k_cap(self):
+        """自动注入数量受 auto_top_k 限制（独立于 top_k）。"""
+        rt = KnowledgeRuntime(KnowledgeConfig(
+            user_id="auto-cap", auto_retrieve=True,
+            auto_top_k=2, auto_min_score=0.0, top_k=5,
+        ))
+        rt._embedder = fake = FakeEmbedder()
+        texts = [f"第{i}条内部规定内容" for i in range(5)]
+        rt.store.add(texts, [_fake_vec(t, fake.dim) for t in texts],
+                     source="规定.md", provider="fake", model="fake-1")
+        await rt.prepare_auto_context(texts[0])
+        assert "[1]" in rt.auto_context and "[2]" in rt.auto_context
+        assert "[3]" not in rt.auto_context
 
     async def test_empty_query_or_store(self):
         rt = self._runtime(auto_retrieve=True)
@@ -764,6 +799,8 @@ class TestConfigIntegration:
         assert kn["enabled"] is False
         assert kn["embedding_provider"] == "qwen"
         assert kn["auto_retrieve"] is False
+        assert kn["auto_top_k"] == 3
+        assert kn["auto_min_score"] == 0.5
         assert "user_id" not in kn and "api_key" not in kn
 
     def test_from_mapping_ignores_extra_keys(self):

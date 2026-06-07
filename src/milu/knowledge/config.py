@@ -31,9 +31,14 @@ class KnowledgeConfig:
     top_k: int = 5                    # kb_search 默认返回片段数
     min_score: float = 0.35           # 检索相似度阈值：低于该值的片段不返回（防把无关内容喂给 LLM
                                       # 诱导幻觉；基准评测正负分离度 +0.388，0.35 居正负区间之间。0 = 不过滤）
-    auto_retrieve: bool = False       # 前置自动检索：每轮用户消息自动 embedding+检索，过 min_score 阈值
-                                      # 的片段注入 system prompt（不依赖模型决策调 kb_search，永不漏检；
-                                      # 代价是每轮 +1 次 embedding 调用 ~200ms。适合知识库为核心场景的部署）
+    auto_retrieve: bool = False       # 前置自动检索：每轮用户消息自动 embedding+检索，达标片段注入
+                                      # system prompt（不依赖模型决策调 kb_search，永不漏检；代价每轮
+                                      # +1 次 embedding ~200ms。适合知识库为核心场景的部署）
+    auto_top_k: int = 3               # 自动注入的片段数上限（独立于 kb_search 的 top_k，更紧——
+                                      # 自动注入每轮都发生，按"高质量、省上下文"原则收窄）
+    auto_min_score: float = 0.5       # 自动注入的相似度门槛（高于 kb_search 的 min_score——自动路径
+                                      # 走高精度，边缘命中由模型经 kb_search 以 0.35 阈值捞回，不损召回。
+                                      # 评测基准：正确命中分布 0.41~0.76，0.5 保留其中高置信段）
     batch_size: int = 10              # embedding 单批条数（DashScope 等厂商单批上限 10，取最保守值）
 
     @classmethod
