@@ -1,7 +1,28 @@
 [project]
 name = "milu"
 version = "0.1.0"
-description = "统一AI模型抽象层，兼容多家厂商API"
+description = "Unified AI agent framework: one interface for 9 LLM providers (Qwen, Kimi, GLM, DeepSeek, MiniMax, Doubao, ChatGPT, Gemini, Claude) with tools, MCP, sub-agents, skills, RAG knowledge base, scheduler and multi-user serving"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "stephon" }]
+keywords = [
+    "ai", "agent", "llm", "agent-framework", "openai", "mcp", "rag",
+    "multi-provider", "qwen", "deepseek", "kimi", "glm", "claude", "gemini",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Framework :: AsyncIO",
+]
 requires-python = ">=3.10"
 dependencies = [
     "openai>=1.66.0",
@@ -42,6 +63,13 @@ kb = [
     "numpy>=1.24",
 ]
 
+# ⚠️ GitHub 仓库建好后取消注释并替换 <USERNAME>，再发布 PyPI（页面左侧链接来自这里）
+# [project.urls]
+# Homepage = "https://github.com/<USERNAME>/milu"
+# Repository = "https://github.com/<USERNAME>/milu"
+# Issues = "https://github.com/<USERNAME>/milu/issues"
+# Changelog = "https://github.com/<USERNAME>/milu/blob/main/CHANGELOG.md"
+
 [project.scripts]
 # 入口点（pip install 后可直接在终端调用）
 milu = "milu.cli:main"
@@ -52,6 +80,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/milu"]
+
+# sdist 只打包构建/使用必需的文件——docs 内部报告、CLAUDE.md、config 本地配置不进发布包
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/milu",
+    "tests",
+    "examples",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".env.example",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
