@@ -628,6 +628,12 @@ class AgentPool:
         # 显式传字符串则尊重调用方（如多 Agent 共享一份团队记忆的场景）。
         if kwargs.get("memory") is True:
             kwargs["memory"] = user_id
+        # 向量知识库多用户隔离：与 memory 同款 opt-in 派生——agent_kwargs=
+        # {"knowledge": True} 在池上下文派生为按 user_id 隔离
+        # （~/.milu/knowledge/{user_id}/）。显式传字符串 / KnowledgeConfig
+        # 则尊重调用方（如多用户共享一份团队知识库的场景）。
+        if kwargs.get("knowledge") is True:
+            kwargs["knowledge"] = user_id
         # 定时任务多用户隔离：池上下文**默认**按 user_id 派生（与 memory 的
         # opt-in 不同——schedule 工具在 BUILTIN_TOOLS 默认列表中，不派生则全部
         # 用户共用 "default" 任务空间，跨用户可见/可删）。显式传字符串则尊重
@@ -755,6 +761,11 @@ class AgentPool:
         except Exception as e:
             logger.warning("AgentPool: 关闭 Agent 时断开 MCP 失败 (user=%s): %s",
                            entry.user_id, e)
+        try:
+            await entry.agent.close_knowledge()
+        except Exception as e:
+            logger.warning("AgentPool: 关闭 Agent 时释放知识库客户端失败 (user=%s): %s",
+                           entry.user_id, e)
 
         # pop 返回 None 说明已被其他路径关闭（无副作用）
         if self._entries.pop(key, None) is not None:
@@ -776,6 +787,10 @@ class AgentPool:
             for key, entry in entries:
                 try:
                     await entry.agent.disconnect_mcp()
+                except Exception:
+                    pass
+                try:
+                    await entry.agent.close_knowledge()
                 except Exception:
                     pass
             logger.info("AgentPool: 关闭全部 %d 个 Agent", len(entries))

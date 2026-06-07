@@ -34,6 +34,7 @@ from milu.tools.builtin.structured_output import (
 from milu.tools.builtin.todo_write import todo_read, todo_write
 from milu.tools.builtin.memory_tool import memory_read, memory_write
 from milu.tools.builtin.schedule_tool import schedule_create, schedule_manage
+from milu.tools.builtin.knowledge_tool import kb_ingest, kb_manage, kb_search
 
 # 所有内置工具列表，可直接传给 Agent(tools=BUILTIN_TOOLS)
 # 注意：structured_output 需要通过 create_structured_output_tool(llm) 创建后单独添加
@@ -41,6 +42,8 @@ from milu.tools.builtin.schedule_tool import schedule_create, schedule_manage
 #       在非 Agent 上下文中手动调用会抛 RuntimeError；正常通过 Agent 使用时无影响
 # 注意：memory 工具（memory_write / memory_read）不在此列表——长期记忆默认关闭，
 #       由 Agent(memory=True/"user_id") 开关启用时自动注册（见 agent.py）
+# 注意：知识库工具（kb_search / kb_ingest / kb_manage）不在此列表——向量知识库默认
+#       关闭，由 Agent(knowledge=True/"user_id"/KnowledgeConfig) 开关启用时自动注册
 BUILTIN_TOOLS = [
     datetime_tool,
     http_request,
@@ -78,5 +81,8 @@ __all__ = [
     "memory_write",
     "schedule_create",
     "schedule_manage",
+    "kb_search",
+    "kb_ingest",
+    "kb_manage",
     "BUILTIN_TOOLS",
 ]

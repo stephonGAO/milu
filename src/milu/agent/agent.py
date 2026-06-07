@@ -53,6 +53,14 @@ from milu.tools.builtin.image_tool import (
     _current_vision_support,
 )
 from milu.tools.builtin.schedule_tool import _current_schedule_user
+from milu.tools.builtin.knowledge_tool import (
+    _current_knowledge,
+    KnowledgeRuntime,
+    kb_ingest,
+    kb_manage,
+    kb_search,
+)
+from milu.knowledge import KnowledgeConfig
 from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
     _current_subagent_events,
@@ -188,6 +196,7 @@ class Agent:
         mcp_tools_active_by_default: bool = False,          # MCP 工具是否默认进活跃池（否则休眠）
         subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
         memory: "bool | str" = False,                       # 长期记忆开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→启用并按该用户标识隔离存储
+        knowledge: "bool | str | KnowledgeConfig" = False,  # 向量知识库开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→按该用户标识隔离；KnowledgeConfig→程序化定制
         schedule_user: "str | None" = None,                 # 定时任务用户标识：None→工具层退化为 "default"（CLI 单人）；多用户场景传 user_id（任务文件按用户隔离）
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
@@ -268,6 +277,23 @@ class Agent:
                 memory if isinstance(memory, str) else "default"
             )
             self._registry.register_many([memory_write, memory_read])
+
+        # ── 向量知识库（默认关闭，与 memory 同款开关约定）──
+        # knowledge=False → 关闭；True → 启用（身份 "default"）；字符串 → 按用户
+        # 标识隔离（~/.milu/knowledge/{user_id}/）；KnowledgeConfig → 程序化定制
+        # （embedding 厂商/模型/分块参数）。库纯净性：Agent 不读 config.json，
+        # 应用/CLI 入口读分层配置后构造 KnowledgeConfig 传入。启用时注册 kb_*
+        # 工具；KnowledgeRuntime 在 run() 入口经 ContextVar 注入工具层。
+        self._knowledge: KnowledgeRuntime | None = None
+        if knowledge:
+            if isinstance(knowledge, KnowledgeConfig):
+                kn_cfg = knowledge
+            elif isinstance(knowledge, str):
+                kn_cfg = KnowledgeConfig(user_id=knowledge)
+            else:
+                kn_cfg = KnowledgeConfig()
+            self._knowledge = KnowledgeRuntime(kn_cfg)
+            self._registry.register_many([kb_search, kb_ingest, kb_manage])
 
         # ── 定时任务用户标识（与 memory 平级的能力参数）──
         # None → 工具层 _resolve_user() 退化为 "default"（CLI 单人行为不变）；
@@ -635,6 +661,15 @@ class Agent:
             await self._mcp_manager.disconnect_all()
             self._mcp_manager = None
 
+    async def close_knowledge(self) -> None:
+        """关闭知识库的 embedding 客户端，释放连接池。
+
+        未启用 knowledge 时为 no-op；重复调用安全。与 disconnect_mcp 并列在
+        __aexit__ / AgentPool 淘汰路径调用（Embedder 为 per-Agent 资源）。
+        """
+        if self._knowledge is not None:
+            await self._knowledge.aclose()
+
     async def __aenter__(self):
         await self.connect_mcp()
         return self
@@ -642,6 +677,7 @@ class Agent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.save_session()
         await self.disconnect_mcp()
+        await self.close_knowledge()
         return False
 
     async def run(
@@ -674,6 +710,8 @@ class Agent:
         else:
             plan_items_token = _current_todo_plan_items.set(self._in_memory_plan)
         memory_token = _current_memory_path.set(self._memory_path)
+        # 知识库运行时（未启用时注入 None → 工具返回启用指引；子代理不继承）
+        knowledge_token = _current_knowledge.set(self._knowledge)
         # 定时任务用户标识（未设置时注入 None → 工具层退化 "default"）
         schedule_user_token = _current_schedule_user.set(self._schedule_user)
         mode_token = _current_parent_mode.set(self._mode)
@@ -1243,6 +1281,7 @@ class Agent:
             if plan_items_token is not None:
                 _safe_reset(_current_todo_plan_items, plan_items_token)
             _safe_reset(_current_memory_path, memory_token)
+            _safe_reset(_current_knowledge, knowledge_token)
             _safe_reset(_current_schedule_user, schedule_user_token)
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)

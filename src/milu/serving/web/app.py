@@ -189,6 +189,13 @@ def _make_agent_factory(state, shared_mcp):
         llm = _get_llm(state, eff["provider"], eff["model"],
                        eff["web_search"], eff["enable_thinking"])
         d = state.options
+        # 向量知识库：config.json 的 knowledge.enabled 为真时启用，按 user_id 隔离
+        # （knowledge 分节在 lifespan 中经 load_config() 存入 state.knowledge_cfg）
+        kn = getattr(state, "knowledge_cfg", None) or {}
+        knowledge = False
+        if kn.get("enabled"):
+            from milu.knowledge import KnowledgeConfig
+            knowledge = KnowledgeConfig.from_mapping(kn, user_id=user_id)
         return Agent(
             llm=llm,
             tools=[*BUILTIN_TOOLS, create_structured_output_tool()],
@@ -196,6 +203,7 @@ def _make_agent_factory(state, shared_mcp):
             session_enabled=d.session_enabled,
             session_id=AgentPool._derive_session_id(user_id, session_id),
             memory=user_id,                 # 多用户长期记忆，按 user_id 隔离
+            knowledge=knowledge,            # 向量知识库（默认关闭），按 user_id 隔离
             schedule_user=user_id,          # 定时任务按 user_id 隔离
             subagents=None if d.use_subagents else [],
             mcp_manager=shared_mcp,
@@ -271,6 +279,8 @@ def create_app(
         st.shared_mcp = shared_mcp
 
         mc = load_config()
+        # knowledge 分节供 agent_factory 按 user_id 派生知识库（enabled 默认 False）
+        st.knowledge_cfg = dict(mc.knowledge)
         pool = AgentPool(
             llm_factory=lambda uid, sid: default_llm,
             agent_factory=_make_agent_factory(st, shared_mcp),

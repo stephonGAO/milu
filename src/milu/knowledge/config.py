@@ -1,0 +1,43 @@
+"""知识库配置 dataclass —— 默认值的唯一来源。
+
+config.json 的 `knowledge` 分节从本 dataclass 派生基线（见 milu/config.py
+`_builtin_defaults()`），默认值在代码里只有一份。
+
+字段取舍：
+- `user_id` 是运行时身份（多用户隔离维度），不入 config.json；
+- `api_key` 走 `.env` / 环境变量 `{PROVIDER}_API_KEY`（密钥不落 config.json），
+  仅供程序化显式传入。
+"""
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass
+
+
+@dataclass
+class KnowledgeConfig:
+    """向量知识库配置。
+
+    `Agent(knowledge=True)` 等价于 `Agent(knowledge=KnowledgeConfig())`；
+    应用/CLI 入口可读分层配置后构造本对象传入（库纯净性：Agent 不读 config.json）。
+    """
+
+    user_id: str = "default"          # 知识库归属标识（多用户隔离维度）
+    embedding_provider: str = "qwen"  # embedding 厂商（独立于对话模型；claude/deepseek/kimi 无 embedding API）
+    embedding_model: str = ""         # 空 → 用厂商默认 embedding 模型（见 embedder._EMBEDDING_PROVIDERS）
+    api_key: str | None = None        # None → 环境变量 {PROVIDER}_API_KEY
+    chunk_size: int = 800             # 分块目标长度（字符）
+    chunk_overlap: int = 200          # 超长段落滑动窗口的重叠长度（字符）
+    top_k: int = 5                    # kb_search 默认返回片段数
+    batch_size: int = 10              # embedding 单批条数（DashScope 等厂商单批上限 10，取最保守值）
+
+    @classmethod
+    def from_mapping(cls, data: dict, user_id: str = "default") -> "KnowledgeConfig":
+        """从配置分节字典构造（忽略未知键与 enabled 开关；user_id 由调用方指定）。
+
+        供 CLI/服务入口把 config.json 的 `knowledge` 分节转为本对象，
+        分节里的 `enabled` 等非字段键自动忽略。
+        """
+        allowed = {f.name for f in dataclasses.fields(cls)} - {"user_id"}
+        kwargs = {k: v for k, v in data.items() if k in allowed}
+        return cls(user_id=user_id, **kwargs)

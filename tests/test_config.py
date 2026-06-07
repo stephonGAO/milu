@@ -162,7 +162,8 @@ def test_write_project_template(paths):
     assert data["agent"]["max_turns"] == 100
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
-        "agent", "compact", "pool", "scheduler", "default_models", "security",
-        "display",
+        "agent", "compact", "pool", "scheduler", "knowledge", "default_models",
+        "security", "display",
     }
     assert data["display"]["show_subagent_events"] is False
+    assert data["knowledge"]["enabled"] is False

@@ -58,6 +58,12 @@ def build_agent(s: Settings) -> Agent:
         llm=llm,
         compact_config=CompactConfig(**s.compact) if s.compact else None,
     )
+    # 向量知识库：config.json 的 knowledge.enabled 为真时启用（CLI 单人，身份 "default"）。
+    # 库纯净性：分层配置在此（应用入口）转为 KnowledgeConfig 下传，Agent 不读 config.json。
+    knowledge = False
+    if s.knowledge.get("enabled"):
+        from milu.knowledge import KnowledgeConfig
+        knowledge = KnowledgeConfig.from_mapping(s.knowledge)
     return Agent(
         llm=llm,
         mode=s.mode,
@@ -65,6 +71,7 @@ def build_agent(s: Settings) -> Agent:
         config=agent_config,
         history=history,
         subagents=None if s.use_subagents else [],
+        knowledge=knowledge,
         on_confirm=confirm_unsafe,
     )
 

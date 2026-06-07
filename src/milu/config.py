@@ -16,6 +16,8 @@
     compact —— CompactConfig 上下文压缩
     pool    —— AgentPoolConfig 多用户资源池（可序列化子集）
     scheduler —— SchedulerConfig 定时任务调度引擎（并发上限/任务超时/通知开关）
+    knowledge —— 向量知识库（enabled 开关 + KnowledgeConfig 派生的 embedding/分块参数；
+               user_id 为运行时身份、api_key 走 .env，均不入 config.json）
     default_models —— 各厂商默认模型表（仅供查看/参考；agent.llm.model 留 null 时按它取默认）
 """
 from __future__ import annotations
@@ -57,6 +59,12 @@ _POOL_KEYS = (
 )
 # scheduler 分节暴露的可调字段（SchedulerConfig 全量）
 _SCHEDULER_KEYS = ("max_concurrent_tasks", "task_timeout", "notify")
+# knowledge 分节暴露的可调字段（KnowledgeConfig 子集：user_id 是运行时身份、
+# api_key 走 .env / {PROVIDER}_API_KEY，均不入 config.json）
+_KNOWLEDGE_KEYS = (
+    "embedding_provider", "embedding_model",
+    "chunk_size", "chunk_overlap", "top_k", "batch_size",
+)
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 _FALSY = {"0", "false", "no", "off", "n"}
@@ -68,11 +76,13 @@ _warned_legacy_keys = False
 def _builtin_defaults() -> dict:
     """基线默认配置：全部从现有 dataclass 派生，默认值不在此重复定义。"""
     from milu.agent.config import AgentConfig, CompactConfig
+    from milu.knowledge.config import KnowledgeConfig
     from milu.scheduler.engine import SchedulerConfig
     from milu.serving.pool import AgentPoolConfig
 
     pool_defaults = AgentPoolConfig()
     scheduler_defaults = SchedulerConfig()
+    knowledge_defaults = KnowledgeConfig()
     return {
         "agent": {
             "mode": "auto",
@@ -89,6 +99,12 @@ def _builtin_defaults() -> dict:
         "compact": asdict(CompactConfig()),
         "pool": {k: getattr(pool_defaults, k) for k in _POOL_KEYS},
         "scheduler": {k: getattr(scheduler_defaults, k) for k in _SCHEDULER_KEYS},
+        "knowledge": {
+            # enabled 是应用层开关（CLI/服务入口据此决定是否给 Agent 传 knowledge），
+            # 类比 agent.session_enabled，不属于 KnowledgeConfig dataclass
+            "enabled": False,
+            **{k: getattr(knowledge_defaults, k) for k in _KNOWLEDGE_KEYS},
+        },
         "security": {
             "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
         },
@@ -180,6 +196,10 @@ class MiluConfig:
         return self.data.get("scheduler", {})
 
     @property
+    def knowledge(self) -> dict:
+        return self.data.get("knowledge", {})
+
+    @property
     def security(self) -> dict:
         return self.data.get("security", {})
 
@@ -214,6 +234,11 @@ class MiluConfig:
         from milu.scheduler.engine import SchedulerConfig
         s = self.scheduler
         return SchedulerConfig(**{k: s[k] for k in _SCHEDULER_KEYS if k in s})
+
+    def to_knowledge_config(self, user_id: str = "default"):
+        """构造 KnowledgeConfig（knowledge.enabled 开关由调用方自行判断）。"""
+        from milu.knowledge.config import KnowledgeConfig
+        return KnowledgeConfig.from_mapping(self.knowledge, user_id=user_id)
 
     # ── dotted 读取 ──────────────────────────────────────
     def get(self, dotted: str):

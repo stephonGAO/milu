@@ -46,9 +46,10 @@ class Settings:
     session_id: str | None = None
     selfguard_enabled: bool = True
     show_subagent_events: bool = False   # 是否在 CLI 渲染子代理内部事件（默认隐藏）
-    # 运行限额 / 压缩分节（供 builder 构造 AgentConfig / CompactConfig）
+    # 运行限额 / 压缩 / 知识库分节（供 builder 构造 AgentConfig / CompactConfig / KnowledgeConfig）
     agent: dict = field(default_factory=dict)
     compact: dict = field(default_factory=dict)
+    knowledge: dict = field(default_factory=dict)
 
 
 def resolve_settings(config: MiluConfig, args) -> Settings:
@@ -106,4 +107,5 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         show_subagent_events=bool(display.get("show_subagent_events", False)),
         agent=dict(agent),
         compact=dict(config.compact),
+        knowledge=dict(config.knowledge),
     )
