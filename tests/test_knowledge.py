@@ -665,9 +665,9 @@ class TestAutoRetrieve:
         assert "报销制度.md" in system.content
 
     async def test_agent_run_no_auto_when_disabled(self):
-        """默认 auto_retrieve=False：run() 不做前置检索，prompt 仅含目录。"""
+        """auto_retrieve=False 时：run() 不做前置检索，prompt 仅含目录。"""
         agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False,
-                      knowledge="no-auto")
+                      knowledge=KnowledgeConfig(user_id="no-auto", auto_retrieve=False))
         agent._knowledge._embedder = fake = FakeEmbedder()
         agent._knowledge.store.add(
             [self.DOC], [_fake_vec(self.DOC, fake.dim)],
@@ -796,9 +796,9 @@ class TestConfigIntegration:
     def test_builtin_defaults_has_knowledge_section(self):
         from milu.config import _builtin_defaults
         kn = _builtin_defaults()["knowledge"]
-        assert kn["enabled"] is False
+        assert kn["enabled"] is True          # 默认开启（空库时 auto 检索早退、零开销）
         assert kn["embedding_provider"] == "qwen"
-        assert kn["auto_retrieve"] is False
+        assert kn["auto_retrieve"] is True    # 前置自动检索默认开
         assert kn["auto_top_k"] == 3
         assert kn["auto_min_score"] == 0.5
         assert "user_id" not in kn and "api_key" not in kn

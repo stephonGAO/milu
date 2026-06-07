@@ -166,4 +166,4 @@ def test_write_project_template(paths):
         "security", "display",
     }
     assert data["display"]["show_subagent_events"] is False
-    assert data["knowledge"]["enabled"] is False
+    assert data["knowledge"]["enabled"] is True   # 知识库默认开启（空库零开销）

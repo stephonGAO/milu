@@ -102,8 +102,10 @@ def _builtin_defaults() -> dict:
         "scheduler": {k: getattr(scheduler_defaults, k) for k in _SCHEDULER_KEYS},
         "knowledge": {
             # enabled 是应用层开关（CLI/服务入口据此决定是否给 Agent 传 knowledge），
-            # 类比 agent.session_enabled，不属于 KnowledgeConfig dataclass
-            "enabled": False,
+            # 类比 agent.session_enabled，不属于 KnowledgeConfig dataclass。
+            # 默认开：空库时 auto_retrieve 在 is_empty() 处早退、零开销零 numpy 依赖，
+            # 未入库用户无成本；真正入库者已配好 embedding key 方能 kb_ingest。
+            "enabled": True,
             **{k: getattr(knowledge_defaults, k) for k in _KNOWLEDGE_KEYS},
         },
         "security": {

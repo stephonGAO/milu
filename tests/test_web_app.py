@@ -360,36 +360,36 @@ class _FakeKbEmbedder:
         pass
 
 
-def test_knowledge_overview_default_off(client):
+def test_knowledge_overview_default_on(client):
     d = client.get("/api/knowledge", headers=_h(uid="kb1")).json()
-    assert d["enabled"] is False           # config.json 基线默认关闭
-    assert d["auto_retrieve"] is False
-    assert d["sources"] == []
+    assert d["enabled"] is True            # config.json 基线默认开启
+    assert d["auto_retrieve"] is True
+    assert d["sources"] == []              # 启用但未入库 → 无来源
 
 
 def test_knowledge_settings_toggle_and_rebuild(client):
     h = _h(uid="kb2")
-    # 先建实例（默认无 kb 工具）
+    # 先建实例（默认开启 → 自带 kb 工具）
     tools = client.get("/api/tools", headers=h).json()
-    assert not any(t["name"] == "kb_search" for t in tools["active"])
+    assert any(t["name"] == "kb_search" for t in tools["active"])
     pool = client.app.state.pool
     assert ("kb2", "s1") in pool._entries
 
-    # 开启知识库 + 自动检索 → 实例被驱逐
+    # 关闭知识库 + 自动检索 → 实例被驱逐
     r = client.post("/api/knowledge/settings", headers=h,
-                    json={"enabled": True, "auto_retrieve": True})
+                    json={"enabled": False, "auto_retrieve": False})
     assert r.status_code == 200
-    assert r.json()["enabled"] is True and r.json()["auto_retrieve"] is True
+    assert r.json()["enabled"] is False and r.json()["auto_retrieve"] is False
     assert ("kb2", "s1") not in pool._entries
 
-    # 重建后的实例注册了 kb_* 工具
+    # 重建后的实例不再注册 kb_* 工具
     tools = client.get("/api/tools", headers=h).json()
     names = {t["name"] for t in tools["active"]}
-    assert {"kb_search", "kb_ingest", "kb_manage"} <= names
+    assert not ({"kb_search", "kb_ingest", "kb_manage"} & names)
 
     # GET 总览反映偏好覆盖
     d = client.get("/api/knowledge", headers=h).json()
-    assert d["enabled"] is True and d["auto_retrieve"] is True
+    assert d["enabled"] is False and d["auto_retrieve"] is False
 
 
 def test_knowledge_ingest_view_delete_clear(client, monkeypatch):
