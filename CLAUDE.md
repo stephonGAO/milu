@@ -117,7 +117,8 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **确认流队列桥接**：危险工具确认时 `on_confirm` 会**阻塞** `agent.run()` 生成器，故后台任务跑 `agent.run()` 喂 `asyncio.Queue`，`on_confirm` 在 `await future` 前把「ConfirmationRequest」推进队列，SSE 协程独立排空队列——保证弹窗在阻塞期间即时显示；`POST /api/confirm`（按 user+session 定位 Future）解析放行，120s 超时自动拒绝
 - **端点**：`/`（前端）、`/api/chat`（SSE，`/` 命令复用 `_exec_command`）、`/api/confirm`、`/api/providers`、`/api/settings`、`/api/mode`、`/api/sessions` + `/api/session/action`（new/load/save/reset）、`/api/schedule/{tasks,create,action,results}`、`/api/tools|skills|memory|stats`
 - **定时任务结果提醒**：服务端 `notify=False`（无桌面弹窗），前端全局轮询 `/api/schedule/results`（15s），新结果插入聊天区系统行 + toast、任务面板自动刷新（首轮只记游标不回放历史）；run_at 输入用 `datetime-local` 控件防格式错
-- 前端四面板：设置（厂商下拉含 Key 状态/模型/模式/开关）、会话、定时任务（创建表单 + 启停/删除/立即运行 + 结果轮询）、信息（工具/技能/记忆/统计）；主区流式渲染（文本/思考/工具/子代理 + 轻量 Markdown）+ 危险工具确认弹窗
+- **知识库管理端点**（`/api/knowledge*`，按 X-User-Id 隔离库）：`GET /api/knowledge`（生效设置 + 统计 + 来源清单）、`POST /api/knowledge/settings`（切换 enabled/auto_retrieve → 写 per-(user,session) 偏好 `kb_enabled`/`kb_auto_retrieve` + `pool.remove` 驱逐重建，knowledge 为 Agent 构造期参数必须重建）、`POST /api/knowledge/ingest`（文本 text+source 或文件 filename+content_base64，复用 kb_ingest 工具完整链路——经 ContextVar 注入临时 KnowledgeRuntime，文件落临时目录入库后清理，避免引入 python-multipart 依赖）、`POST /api/knowledge/action`（delete 按来源 / clear 清空）。生效配置 `_kb_effective` = config.json `knowledge` 分节 + 偏好覆盖
+- 前端五面板：设置（厂商下拉含 Key 状态/模型/模式/开关）、会话、定时任务（创建表单 + 启停/删除/立即运行 + 结果轮询）、**知识库（启用/自动检索开关 + 文件多选上传/文本入库 + 来源列表/删除/清空 + 统计）**、信息（工具/技能/记忆/统计）；主区流式渲染（文本/思考/工具/子代理 + 轻量 Markdown）+ 危险工具确认弹窗
 - 示例 `examples/multi_user_chat.py` / `examples/scheduler_server.py` 保留作教学（本服务正是其能力的内置化整合）
 
 ### 7. CLI 层 (`src/milu/cli/`)

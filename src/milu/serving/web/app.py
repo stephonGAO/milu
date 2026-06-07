@@ -144,6 +144,17 @@ def _effective_settings(state, user_id: str, session_id: str) -> dict:
     }
 
 
+def _kb_effective(state, user_id: str, session_id: str) -> dict:
+    """(user,session) 生效的知识库配置：config.json 基线 + 偏好覆盖（kb_* 键）。"""
+    kn = dict(getattr(state, "knowledge_cfg", None) or {})
+    pref = state.prefs.get((user_id, session_id), {})
+    if "kb_enabled" in pref:
+        kn["enabled"] = pref["kb_enabled"]
+    if "kb_auto_retrieve" in pref:
+        kn["auto_retrieve"] = pref["kb_auto_retrieve"]
+    return kn
+
+
 # ── 危险工具确认（队列桥接）──────────────────────────────
 
 async def _confirm_unsafe(state, user_id: str, session_id: str,
@@ -189,9 +200,9 @@ def _make_agent_factory(state, shared_mcp):
         llm = _get_llm(state, eff["provider"], eff["model"],
                        eff["web_search"], eff["enable_thinking"])
         d = state.options
-        # 向量知识库：config.json 的 knowledge.enabled 为真时启用，按 user_id 隔离
-        # （knowledge 分节在 lifespan 中经 load_config() 存入 state.knowledge_cfg）
-        kn = getattr(state, "knowledge_cfg", None) or {}
+        # 向量知识库：config.json 基线 + per-(user,session) 偏好覆盖（前端
+        # 知识库面板可切换 enabled/auto_retrieve，变更经 pool.remove 驱逐重建）
+        kn = _kb_effective(state, user_id, session_id)
         knowledge = False
         if kn.get("enabled"):
             from milu.knowledge import KnowledgeConfig
@@ -580,6 +591,144 @@ def create_app(
     @app.get("/api/stats")
     async def stats():
         return app.state.pool.get_stats()
+
+    # ── 知识库管理 ────────────────────────────────────────
+
+    @app.get("/api/knowledge")
+    async def get_knowledge(
+        x_user_id: str = Header("default", alias="X-User-Id"),
+        x_session_id: str = Header("default", alias="X-Session-Id"),
+    ):
+        """知识库总览：生效设置 + 统计 + 来源清单（按 user_id 隔离的库）。"""
+        from milu.knowledge import KnowledgeStore, knowledge_dir
+        kn = _kb_effective(app.state, x_user_id, x_session_id)
+        store = KnowledgeStore(knowledge_dir(x_user_id))
+        try:
+            sources = [{"name": s, "chunks": n} for s, n in store.list_sources()]
+            st_info = store.stats()
+        except Exception as e:  # 索引损坏等：返回空清单 + 错误说明，不 500
+            return {"enabled": bool(kn.get("enabled")),
+                    "auto_retrieve": bool(kn.get("auto_retrieve")),
+                    "sources": [], "stats": {}, "error": str(e)}
+        return {
+            "enabled": bool(kn.get("enabled")),
+            "auto_retrieve": bool(kn.get("auto_retrieve")),
+            "sources": sources,
+            "stats": st_info,
+        }
+
+    @app.post("/api/knowledge/settings")
+    async def post_knowledge_settings(
+        request: Request,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+        x_session_id: str = Header("default", alias="X-Session-Id"),
+    ):
+        """切换知识库启用 / 前置自动检索（写偏好 + 驱逐实例，下条消息按新配置重建）。"""
+        body = await request.json()
+        st = request.app.state
+        key = (x_user_id, x_session_id)
+        pref = dict(st.prefs.get(key, {}))
+        changed = False
+        if "enabled" in body and body["enabled"] is not None:
+            pref["kb_enabled"] = bool(body["enabled"])
+            changed = True
+        if "auto_retrieve" in body and body["auto_retrieve"] is not None:
+            pref["kb_auto_retrieve"] = bool(body["auto_retrieve"])
+            changed = True
+        st.prefs[key] = pref
+        # knowledge 是 Agent 构造期参数（工具注册/Runtime 创建），变更须重建实例
+        if changed:
+            await st.pool.remove(x_user_id, x_session_id)
+        kn = _kb_effective(st, x_user_id, x_session_id)
+        return {"status": "ok", "enabled": bool(kn.get("enabled")),
+                "auto_retrieve": bool(kn.get("auto_retrieve"))}
+
+    @app.post("/api/knowledge/ingest")
+    async def knowledge_ingest(
+        request: Request,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+        x_session_id: str = Header("default", alias="X-Session-Id"),
+    ):
+        """入库：文本（text+source）或上传文件（filename+content_base64）。
+
+        复用 kb_ingest 工具的完整链路（格式分流提取/分块/embedding/同名替换/
+        selfguard/写锁）——经 ContextVar 注入临时 KnowledgeRuntime 调用，
+        与 Agent 内行为完全一致。文件经 base64 JSON 上传（避免引入
+        python-multipart 依赖），落临时目录后入库，完成即清理。
+        """
+        import base64
+        import shutil
+        import tempfile
+
+        from milu.knowledge import KnowledgeConfig
+        from milu.tools.builtin.knowledge_tool import (
+            KnowledgeRuntime, _current_knowledge, kb_ingest,
+        )
+
+        body = await request.json()
+        text = (body.get("text") or "").strip()
+        filename = os.path.basename(str(body.get("filename") or "").strip())
+        content_b64 = body.get("content_base64") or ""
+        if not text and not (filename and content_b64):
+            raise HTTPException(400, "需提供 text，或 filename + content_base64")
+
+        kn = _kb_effective(app.state, x_user_id, x_session_id)
+        rt = KnowledgeRuntime(KnowledgeConfig.from_mapping(kn, user_id=x_user_id))
+        tmp_dir: str | None = None
+        token = _current_knowledge.set(rt)
+        try:
+            if text:
+                message = await kb_ingest._tool_wrapper.func(
+                    text=text, source=str(body.get("source") or "").strip())
+            else:
+                try:
+                    raw = base64.b64decode(content_b64, validate=True)
+                except Exception:
+                    raise HTTPException(400, "content_base64 解码失败")
+                if len(raw) > 30 * 1024 * 1024:
+                    raise HTTPException(413, "文件超过 30MB 上限")
+                tmp_dir = tempfile.mkdtemp(prefix="milu_kb_upload_")
+                tmp_path = os.path.join(tmp_dir, filename)
+                with open(tmp_path, "wb") as f:
+                    f.write(raw)
+                message = await kb_ingest._tool_wrapper.func(path=tmp_path)
+        finally:
+            _current_knowledge.reset(token)
+            await rt.aclose()
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+        # 工具按惯例以字符串返回成败（不抛异常），按前缀判定
+        return {"status": "ok" if message.startswith("已入库") else "error",
+                "message": message}
+
+    @app.post("/api/knowledge/action")
+    async def knowledge_action(
+        request: Request,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+    ):
+        """管理操作：delete（按来源删除，须传 source）/ clear（清空整库）。"""
+        from milu.knowledge import KnowledgeStore, knowledge_dir, store_lock
+
+        body = await request.json()
+        action = str(body.get("action") or "")
+        store = KnowledgeStore(knowledge_dir(x_user_id))
+        try:
+            if action == "delete":
+                source = str(body.get("source") or "").strip()
+                if not source:
+                    raise HTTPException(400, "delete 须指定 source")
+                async with store_lock(store.dir_path):
+                    removed = store.delete_source(source)
+                if removed == 0:
+                    raise HTTPException(404, f"来源「{source}」不存在")
+                return {"status": "ok", "removed": removed}
+            if action == "clear":
+                async with store_lock(store.dir_path):
+                    store.clear()
+                return {"status": "ok"}
+        except RuntimeError as e:  # numpy 未装 / 索引损坏等
+            raise HTTPException(400, str(e))
+        raise HTTPException(400, f"未知操作: {action}")
 
     # ── 会话 ──────────────────────────────────────────────
 

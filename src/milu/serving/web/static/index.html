@@ -137,6 +137,7 @@
       <button class="active" data-tab="set">设置</button>
       <button data-tab="sess">会话</button>
       <button data-tab="sched">定时任务</button>
+      <button data-tab="kb">知识库</button>
       <button data-tab="info">信息</button>
     </div>
     <div class="tabwrap">
@@ -199,6 +200,36 @@
         <div id="tkList"></div>
         <h3 style="margin-top:14px">最近执行结果</h3>
         <div id="tkResults"></div>
+      </div>
+
+      <!-- 知识库 -->
+      <div class="tabpane" id="tab-kb">
+        <h3>启用设置</h3>
+        <label class="chk"><input type="checkbox" id="kb_enabled">启用知识库（注册 kb_* 检索工具）</label>
+        <label class="chk"><input type="checkbox" id="kb_auto">前置自动检索 auto_retrieve</label>
+        <button class="btn" id="kbSaveSet">保存设置</button>
+        <p class="hint">前置自动检索：每轮对话先用你的消息检索知识库，达标片段自动注入上下文——
+          知识库主导的应用（FAQ/文档问答）建议开启；通用助手场景可关闭，由模型按需检索。
+          切换设置会驱逐当前实例，下一条消息生效。</p>
+
+        <h3 style="margin-top:16px">入库</h3>
+        <label class="fld"><span>上传文件（docx / xlsx / pdf / pptx / md / txt 等，可多选）</span>
+          <input class="t" type="file" id="kbFile" multiple></label>
+        <button class="btn" id="kbUpload">上传入库</button>
+        <label class="fld" style="margin-top:12px"><span>或粘贴文本</span>
+          <textarea class="t" id="kbText" placeholder="要入库的文本内容"></textarea></label>
+        <label class="fld"><span>来源名（可选，留空自动生成；同名来源整体替换）</span>
+          <input class="t" id="kbTextSrc" placeholder="如：产品FAQ"></label>
+        <button class="btn sec" id="kbTextAdd">文本入库</button>
+        <p class="hint">入库会调用 embedding API（大文档耗时较长，请耐心等待）。</p>
+
+        <h3 style="margin-top:18px">已入库内容</h3>
+        <div class="actions" style="margin-bottom:8px">
+          <button class="btn sm sec" id="kbReload">刷新</button>
+          <button class="btn sm danger" id="kbClear">清空知识库</button>
+        </div>
+        <p class="hint" id="kbStats"></p>
+        <div id="kbList"></div>
       </div>
 
       <!-- 信息 -->
@@ -270,6 +301,7 @@ document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{
   b.classList.add("active"); $("tab-"+b.dataset.tab).classList.add("active");
   if(b.dataset.tab==="sess") loadSessions();
   if(b.dataset.tab==="sched"){loadTasks();loadResults()}
+  if(b.dataset.tab==="kb") loadKb();
 });
 
 // ── 轻量 Markdown 渲染 ──
@@ -502,6 +534,74 @@ async function loadResults(){
   box.innerHTML="";
   results.forEach(x=>{const c=el2("card");c.innerHTML=`<div class="title">${esc(x.task)} <span class="badge ${x.ok?'on':'off'}">${x.ok?'成功':'失败'}</span></div><div class="meta">${esc((x.time||"").slice(0,16).replace("T"," "))}<br>${esc((x.result||"").slice(0,120))}</div>`;box.appendChild(c)});
 }
+
+// ── 知识库 ──
+async function loadKb(){
+  const box=$("kbList");
+  try{
+    const r=await api("/api/knowledge");const d=await r.json();
+    $("kb_enabled").checked=!!d.enabled;$("kb_auto").checked=!!d.auto_retrieve;
+    const s=d.stats||{},srcs=d.sources||[];
+    $("kbStats").textContent=(s.count||0)+" 块 · "+srcs.length+" 个来源"
+      +(s.model?(" · embedding: "+s.provider+"/"+s.model):"")
+      +(s.disk_bytes?(" · "+(s.disk_bytes/1024).toFixed(1)+" KB"):"");
+    if(!srcs.length){box.innerHTML='<p class="empty">'+(d.error?("索引读取失败："+esc(d.error)):"知识库为空，上传文档或粘贴文本入库")+'</p>';return}
+    box.innerHTML="";
+    srcs.forEach(src=>{
+      const c=el2("card");
+      c.innerHTML=`<div class="title">${esc(src.name)}</div><div class="meta">${src.chunks} 块</div>
+        <div class="actions"><button class="btn sm danger">删除</button></div>`;
+      c.querySelector("button").onclick=async()=>{
+        if(!confirm("删除来源「"+src.name+"」的全部内容？"))return;
+        const r=await api("/api/knowledge/action",{method:"POST",body:JSON.stringify({action:"delete",source:src.name})});
+        toast(r.ok?"已删除":"删除失败");loadKb();
+      };
+      box.appendChild(c);
+    });
+  }catch(e){box.innerHTML='<p class="empty">加载失败：'+esc(e.message)+'</p>'}
+}
+$("kbSaveSet").onclick=async()=>{
+  const r=await api("/api/knowledge/settings",{method:"POST",
+    body:JSON.stringify({enabled:$("kb_enabled").checked,auto_retrieve:$("kb_auto").checked})});
+  toast(r.ok?"已保存，下一条消息生效":"保存失败");
+};
+function fileB64(f){return new Promise((res,rej)=>{const r=new FileReader();
+  r.onload=()=>res(String(r.result).split(",")[1]||"");r.onerror=rej;r.readAsDataURL(f)})}
+$("kbUpload").onclick=async()=>{
+  const files=$("kbFile").files;
+  if(!files.length){toast("请先选择文件");return}
+  const btn=$("kbUpload");btn.disabled=true;
+  for(const f of files){
+    btn.textContent="上传中："+f.name.slice(0,18);
+    try{
+      const b64=await fileB64(f);
+      const r=await api("/api/knowledge/ingest",{method:"POST",
+        body:JSON.stringify({filename:f.name,content_base64:b64})});
+      const d=await r.json().catch(()=>({}));
+      toast((d.message||d.detail||("HTTP "+r.status)).slice(0,80));
+    }catch(e){toast("上传失败："+e.message)}
+  }
+  btn.disabled=false;btn.textContent="上传入库";$("kbFile").value="";loadKb();
+};
+$("kbTextAdd").onclick=async()=>{
+  const text=$("kbText").value.trim();
+  if(!text){toast("文本不能为空");return}
+  const btn=$("kbTextAdd");btn.disabled=true;
+  try{
+    const r=await api("/api/knowledge/ingest",{method:"POST",
+      body:JSON.stringify({text,source:$("kbTextSrc").value.trim()})});
+    const d=await r.json().catch(()=>({}));
+    toast((d.message||d.detail||("HTTP "+r.status)).slice(0,80));
+    if(d.status==="ok"){$("kbText").value="";$("kbTextSrc").value=""}
+  }catch(e){toast("入库失败："+e.message)}
+  btn.disabled=false;loadKb();
+};
+$("kbClear").onclick=async()=>{
+  if(!confirm("清空整个知识库？此操作不可恢复"))return;
+  const r=await api("/api/knowledge/action",{method:"POST",body:JSON.stringify({action:"clear"})});
+  toast(r.ok?"已清空":"操作失败");loadKb();
+};
+$("kbReload").onclick=loadKb;
 
 // ── 定时任务结果提醒（全局轮询：新结果插入聊天区 + toast + 面板自动刷新）──
 let lastResultTime=null,lastResultUid=null;

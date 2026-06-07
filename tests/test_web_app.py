@@ -241,3 +241,115 @@ def test_confirm_no_pending(client):
     r = client.post("/api/confirm", headers=_h(uid="henry"),
                     json={"approved": True})
     assert r.status_code == 404
+
+
+# ── 知识库管理 ────────────────────────────────────────────
+
+class _FakeKbEmbedder:
+    """替身 Embedder（不触网）：KnowledgeRuntime.get_embedder 经 monkeypatch 构造。"""
+
+    provider = "fake"
+    model = "fake-1"
+
+    def __init__(self, **_kw):
+        pass
+
+    async def embed(self, texts):
+        # 简单字符频率向量（确定性，维度 4）
+        out = []
+        for t in texts:
+            v = [0.0] * 4
+            for i, ch in enumerate(t):
+                v[i % 4] += ord(ch) / 1000.0
+            out.append(v)
+        return out
+
+    async def aclose(self):
+        pass
+
+
+def test_knowledge_overview_default_off(client):
+    d = client.get("/api/knowledge", headers=_h(uid="kb1")).json()
+    assert d["enabled"] is False           # config.json 基线默认关闭
+    assert d["auto_retrieve"] is False
+    assert d["sources"] == []
+
+
+def test_knowledge_settings_toggle_and_rebuild(client):
+    h = _h(uid="kb2")
+    # 先建实例（默认无 kb 工具）
+    tools = client.get("/api/tools", headers=h).json()
+    assert not any(t["name"] == "kb_search" for t in tools["active"])
+    pool = client.app.state.pool
+    assert ("kb2", "s1") in pool._entries
+
+    # 开启知识库 + 自动检索 → 实例被驱逐
+    r = client.post("/api/knowledge/settings", headers=h,
+                    json={"enabled": True, "auto_retrieve": True})
+    assert r.status_code == 200
+    assert r.json()["enabled"] is True and r.json()["auto_retrieve"] is True
+    assert ("kb2", "s1") not in pool._entries
+
+    # 重建后的实例注册了 kb_* 工具
+    tools = client.get("/api/tools", headers=h).json()
+    names = {t["name"] for t in tools["active"]}
+    assert {"kb_search", "kb_ingest", "kb_manage"} <= names
+
+    # GET 总览反映偏好覆盖
+    d = client.get("/api/knowledge", headers=h).json()
+    assert d["enabled"] is True and d["auto_retrieve"] is True
+
+
+def test_knowledge_ingest_view_delete_clear(client, monkeypatch):
+    monkeypatch.setattr(
+        "milu.tools.builtin.knowledge_tool.Embedder", _FakeKbEmbedder)
+    h = _h(uid="kb3")
+
+    # 文本入库
+    r = client.post("/api/knowledge/ingest", headers=h,
+                    json={"text": "公司年假制度：满一年十天。", "source": "手册"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+    # 文件上传入库（base64 JSON，md 文本格式）
+    import base64
+    content = base64.b64encode("第一段。\n\n第二段。".encode("utf-8")).decode()
+    r = client.post("/api/knowledge/ingest", headers=h,
+                    json={"filename": "notes.md", "content_base64": content})
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+    # 总览可见两个来源（按 user 隔离：其他用户看不到）
+    d = client.get("/api/knowledge", headers=h).json()
+    names = {s["name"] for s in d["sources"]}
+    assert names == {"手册", "notes.md"}
+    assert d["stats"]["count"] >= 2
+    other = client.get("/api/knowledge", headers=_h(uid="kb-other")).json()
+    assert other["sources"] == []
+
+    # 按来源删除
+    r = client.post("/api/knowledge/action", headers=h,
+                    json={"action": "delete", "source": "手册"})
+    assert r.status_code == 200 and r.json()["removed"] >= 1
+    d = client.get("/api/knowledge", headers=h).json()
+    assert {s["name"] for s in d["sources"]} == {"notes.md"}
+
+    # 删除不存在来源 → 404；清空 → 空库
+    assert client.post("/api/knowledge/action", headers=h,
+                       json={"action": "delete", "source": "无此来源"}).status_code == 404
+    assert client.post("/api/knowledge/action", headers=h,
+                       json={"action": "clear"}).status_code == 200
+    assert client.get("/api/knowledge", headers=h).json()["sources"] == []
+
+
+def test_knowledge_ingest_param_validation(client):
+    h = _h(uid="kb4")
+    # 缺参数 → 400
+    assert client.post("/api/knowledge/ingest", headers=h, json={}).status_code == 400
+    # 非法 base64 → 400
+    assert client.post("/api/knowledge/ingest", headers=h,
+                       json={"filename": "a.md", "content_base64": "!!!"}
+                       ).status_code == 400
+    # 未知管理操作 → 400
+    assert client.post("/api/knowledge/action", headers=h,
+                       json={"action": "bogus"}).status_code == 400
