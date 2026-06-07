@@ -71,6 +71,53 @@ class KnowledgeRuntime:
         self.config = config
         self.store = KnowledgeStore(knowledge_dir(config.user_id))
         self._embedder: Embedder | None = None
+        # 本轮前置自动检索结果（auto_retrieve 启用时由 run() 入口刷新，
+        # 经 render_knowledge_prompt 注入 system prompt；每次 run 整体覆写。
+        # Agent 实例不跨用户共享、run 串行，故实例字段即可，无需 ContextVar）
+        self.auto_context: str = ""
+
+    async def prepare_auto_context(self, query: str) -> None:
+        """前置自动检索：用用户消息检索知识库，把达标片段渲染为注入块。
+
+        不依赖模型决策（kb_search 是模型主动调用，可能漏检；本路径每轮必查），
+        过 min_score 阈值才注入——无关问题零打扰，仅留一行"未命中"提示帮模型
+        判断内部资料不覆盖该主题。任何异常只记日志不阻断对话（检索是增强而非门槛）。
+        """
+        self.auto_context = ""
+        query = query.strip()
+        if not query:
+            return
+        try:
+            if self.store.is_empty():
+                return
+            embedder = self.get_embedder()
+            self.store.check_model(embedder.provider, embedder.model)
+            query_vec = (await embedder.embed([query]))[0]
+            results = self.store.search(query_vec, self.config.top_k)
+            hits = [(s, c) for s, c in results if s >= self.config.min_score]
+            if not hits:
+                top1 = results[0][0] if results else 0.0
+                self.auto_context = (
+                    "\n\n### 本轮自动检索\n"
+                    f"已用当前用户消息自动检索知识库，未命中（最高相似度 {top1:.3f} "
+                    f"低于阈值 {self.config.min_score}）——该主题大概率不在内部资料中；"
+                    "如确认相关可换表述调用 kb_search，否则改用其他工具。"
+                )
+                return
+            lines = [
+                "\n\n### 本轮自动检索",
+                "已用当前用户消息自动检索知识库，以下为相关片段"
+                "（可直接引用作答并注明来源；需要补充时再调用 kb_search）：",
+            ]
+            for i, (score, chunk) in enumerate(hits, 1):
+                lines.append(
+                    f"\n[{i}] 来源: {chunk.get('source', '')} | 相似度: {score:.3f}\n"
+                    f"{chunk.get('text', '')}"
+                )
+            self.auto_context = "\n".join(lines)
+        except Exception as e:
+            logger.warning("知识库前置自动检索失败（忽略，不影响对话）: %s", e)
+            self.auto_context = ""
 
     def get_embedder(self) -> Embedder:
         if self._embedder is None:
@@ -92,14 +139,17 @@ class KnowledgeRuntime:
 # ── system prompt 渲染 ─────────────────────────────────
 
 
-def render_knowledge_prompt(store: KnowledgeStore) -> str:
-    """渲染注入 system prompt 的「内部知识库」目录段落（启用 knowledge 时由 Agent 每轮调用）。
+def render_knowledge_prompt(store: KnowledgeStore, auto_context: str = "") -> str:
+    """渲染注入 system prompt 的「内部知识库」段落（启用 knowledge 时由 Agent 每轮调用）。
 
     解决**检索路由**问题：模型必须知道库里有什么，才会在合适时机主动
     kb_search 而非放任联网搜索抢答（与技能"元数据常驻、正文按需加载"
     同一思路）。来源清单经 store.list_sources() 的 mtime 缓存每轮重读——
     文件未变不读盘，其他 Agent/进程新入库的内容即时可见。
     渲染失败（索引损坏等）返回空串，不阻断对话。
+
+    :param auto_context: 前置自动检索结果块（auto_retrieve 启用时由
+        KnowledgeRuntime.prepare_auto_context 生成，附加在目录之后）。
     """
     try:
         sources = store.list_sources()
@@ -130,6 +180,8 @@ def render_knowledge_prompt(store: KnowledgeStore) -> str:
         "- 回答时明确区分信息出处是「内部知识库」还是「网络搜索」，禁止把网络结果表述为知识库内容；",
         "- kb_search 返回「无相关内容」时再改用其他工具，并向用户说明内部资料未覆盖该主题。",
     ]
+    if auto_context:
+        lines.append(auto_context)
     return "\n".join(lines)
 
 

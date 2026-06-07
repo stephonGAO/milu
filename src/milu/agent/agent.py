@@ -592,9 +592,12 @@ class Agent:
             parts.append(f"\n\n## 可用技能\n{skill_catalog}")
 
         # 4. 知识库来源目录 + 检索路由规则（启用时每轮渲染；模型知道库里
-        #    有什么才会主动 kb_search——经 mtime 缓存，文件未变不读盘）
+        #    有什么才会主动 kb_search——经 mtime 缓存，文件未变不读盘）；
+        #    auto_retrieve 启用时附带本轮前置自动检索结果块
         if self._knowledge is not None:
-            parts.append(render_knowledge_prompt(self._knowledge.store))
+            parts.append(render_knowledge_prompt(
+                self._knowledge.store, self._knowledge.auto_context,
+            ))
 
         # 5. 长期记忆（启用时注入在最后；每轮重读文件，同一用户其他
         #    Agent/进程的新写入即时可见，与提示词热重载同理）
@@ -750,6 +753,12 @@ class Agent:
                         len(images),
                     )
                 self._history.add(Message(role=MessageRole.USER, content=user_input))
+
+            # 前置自动检索（knowledge.auto_retrieve，默认关）：每轮用户消息先检索
+            # 知识库，达标片段经 _build_system_prompt 注入——不依赖模型决策调
+            # kb_search，永不漏检；失败只记日志不阻断对话。每次 run 整体覆写。
+            if self._knowledge is not None and self._knowledge.config.auto_retrieve:
+                await self._knowledge.prepare_auto_context(user_input)
 
             total_usage = TokenUsage()
             turn_count = 0

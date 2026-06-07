@@ -558,6 +558,93 @@ class TestRenderKnowledgePrompt:
         store.add(["二"], [[0.0, 1.0]], source="b", provider="fake", model="m1")
         assert len(store.list_sources()) == 2  # 写入后失效重载
 
+    def test_auto_context_appended(self, tmp_path):
+        store = KnowledgeStore(tmp_path / "kb")
+        store.add(["一"], [[1.0, 0.0]], source="a", provider="fake", model="m1")
+        text = render_knowledge_prompt(store, auto_context="\n\n### 本轮自动检索\nXYZ")
+        assert text.endswith("XYZ")
+        # 不传则无该节
+        assert "本轮自动检索" not in render_knowledge_prompt(store)
+
+
+# ── 前置自动检索 ────────────────────────────────────────
+
+
+class TestAutoRetrieve:
+    DOC = "公司报销制度：住宿每晚不超过六百元。"
+
+    def _runtime(self, **cfg_kwargs) -> KnowledgeRuntime:
+        rt = KnowledgeRuntime(KnowledgeConfig(user_id="auto", **cfg_kwargs))
+        rt._embedder = fake = FakeEmbedder()
+        rt.store.add([self.DOC], [_fake_vec(self.DOC, fake.dim)],
+                     source="报销制度.md", provider="fake", model="fake-1")
+        return rt
+
+    async def test_hit_renders_snippets(self):
+        rt = self._runtime(auto_retrieve=True)
+        await rt.prepare_auto_context(self.DOC)  # 同文本 → 相似度 1.0
+        assert "### 本轮自动检索" in rt.auto_context
+        assert "报销制度.md" in rt.auto_context
+        assert "六百元" in rt.auto_context
+
+    async def test_miss_renders_hint(self):
+        rt = self._runtime(auto_retrieve=True, min_score=0.99)
+        await rt.prepare_auto_context("毫不相干的天文话题")
+        assert "未命中" in rt.auto_context
+        assert "kb_search" in rt.auto_context
+
+    async def test_empty_query_or_store(self):
+        rt = self._runtime(auto_retrieve=True)
+        await rt.prepare_auto_context("   ")
+        assert rt.auto_context == ""
+        empty_rt = KnowledgeRuntime(KnowledgeConfig(user_id="auto-empty"))
+        empty_rt._embedder = FakeEmbedder()
+        await empty_rt.prepare_auto_context("任意问题")
+        assert empty_rt.auto_context == ""
+
+    async def test_failure_tolerant(self):
+        rt = self._runtime(auto_retrieve=True)
+
+        class _BrokenEmbedder(FakeEmbedder):
+            async def embed(self, texts):
+                raise RuntimeError("API 挂了")
+
+        rt._embedder = _BrokenEmbedder()
+        await rt.prepare_auto_context("任意问题")
+        assert rt.auto_context == ""  # 失败不阻断，不留脏块
+
+    async def test_agent_run_injects_auto_context(self):
+        """端到端：auto_retrieve=True 时 run() 自动检索并注入 system prompt。"""
+        cfg = KnowledgeConfig(user_id="auto-run", auto_retrieve=True)
+        agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False,
+                      knowledge=cfg)
+        agent._knowledge._embedder = fake = FakeEmbedder()
+        agent._knowledge.store.add(
+            [self.DOC], [_fake_vec(self.DOC, fake.dim)],
+            source="报销制度.md", provider="fake", model="fake-1",
+        )
+        async for _ in agent.run(self.DOC):
+            pass
+        system = agent._history.get_messages()[0]
+        assert "### 本轮自动检索" in system.content
+        assert "报销制度.md" in system.content
+
+    async def test_agent_run_no_auto_when_disabled(self):
+        """默认 auto_retrieve=False：run() 不做前置检索，prompt 仅含目录。"""
+        agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False,
+                      knowledge="no-auto")
+        agent._knowledge._embedder = fake = FakeEmbedder()
+        agent._knowledge.store.add(
+            [self.DOC], [_fake_vec(self.DOC, fake.dim)],
+            source="报销制度.md", provider="fake", model="fake-1",
+        )
+        async for _ in agent.run(self.DOC):
+            pass
+        system = agent._history.get_messages()[0]
+        assert "## 内部知识库" in system.content
+        assert "### 本轮自动检索" not in system.content
+        assert fake.calls == []  # 未发起任何 embedding 调用
+
 
 # ── Agent 集成 ──────────────────────────────────────────
 
@@ -676,6 +763,7 @@ class TestConfigIntegration:
         kn = _builtin_defaults()["knowledge"]
         assert kn["enabled"] is False
         assert kn["embedding_provider"] == "qwen"
+        assert kn["auto_retrieve"] is False
         assert "user_id" not in kn and "api_key" not in kn
 
     def test_from_mapping_ignores_extra_keys(self):
