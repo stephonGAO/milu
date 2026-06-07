@@ -66,7 +66,10 @@ class Embedder:
         self._model = model or default_model
         self._api_key = api_key
         self._batch_size = max(1, batch_size)
-        self._concurrency = max(1, concurrency)
+        # 实例级信号量：并发上限对整个 Embedder 生效——多个 kb_ingest 同批并发时
+        # 共享同一限幅，不会叠加为 N×concurrency 路 API 并发撞限流。
+        # （asyncio.Semaphore 在 Python 3.10+ 延迟绑定事件循环，构造期无 loop 也安全）
+        self._sem = asyncio.Semaphore(max(1, concurrency))
         self._client = None
 
     @property
@@ -109,10 +112,9 @@ class Embedder:
         client = self._get_client()
         batches = [texts[i:i + self._batch_size]
                    for i in range(0, len(texts), self._batch_size)]
-        sem = asyncio.Semaphore(self._concurrency)
 
         async def _embed_batch(batch: list[str]) -> list[list[float]]:
-            async with sem:
+            async with self._sem:
                 resp = await client.embeddings.create(model=self._model, input=batch)
             # 按 index 还原批内顺序（OpenAI 兼容端点通常有序，防御性排序一次）
             data = sorted(resp.data, key=lambda d: d.index)

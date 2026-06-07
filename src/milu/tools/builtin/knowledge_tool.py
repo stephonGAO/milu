@@ -40,8 +40,6 @@ logger = logging.getLogger(__name__)
 _MAX_INGEST_CHUNKS = 2000
 # 纯文本文件读取上限（防误把超大文件整个 embedding）
 _MAX_TEXT_BYTES = 5 * 1024 * 1024
-# pdf 分页提取的窗口页数（小于 doc_tool 默认 20 页：降低单窗口命中 50k 字符截断的概率）
-_PDF_WINDOW_PAGES = 10
 
 # ── 状态注入（asyncio 任务级隔离）──────────────────────
 #
@@ -124,27 +122,31 @@ def _extract_file(abs_path: str) -> "tuple[str, str] | str":
 
 
 def _extract_pdf(abs_path: str) -> "tuple[str, str] | str":
-    """pdf 全文提取：按页窗口循环调 doc_tool._read_pdf，绕过单次 20 页/50k 字符上限。"""
-    from milu.tools.builtin.doc_tool import _read_pdf
+    """pdf 全文提取：PdfReader 单遍读全部页（入库无截断需求，不走 doc_read 的
+    分页/50k 截断路径——窗口循环会把整个 PDF 重复解析 N 遍并刷屏 pypdf 告警）。
 
-    parts: list[str] = []
-    notes: list[str] = []
-    start = 1
-    while True:
-        result = _read_pdf(abs_path, page_start=start, page_end=start + _PDF_WINDOW_PAGES - 1)
-        if not result.get("success"):
-            return f"文档解析失败：{result.get('error', '未知错误')}"
-        parts.append(result.get("content", ""))
-        total = int(result.get("total_pages", 0))
-        end = int(result.get("page_end", 0))
-        # 单窗口内容命中 50k 字符截断（极密集文本）：窗口内损失少量文本，提示之
-        if result.get("truncated") and end < total:
-            notes.append(f"第 {start}-{end} 页内容过密，窗口内有少量截断")
-        if end >= total:
-            break
-        start = end + 1
-    note = f"注意：{'；'.join(notes)}" if notes else ""
-    return "\n\n".join(parts), note
+    提取期间把 pypdf 日志压到 ERROR：损坏交叉引用表等容错告警
+    （"Ignoring wrong pointing object"）对入库无意义，只会刷屏。
+    """
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return "缺少 pypdf，请安装：pip install pypdf"
+
+    pdf_logger = logging.getLogger("pypdf")
+    old_level = pdf_logger.level
+    pdf_logger.setLevel(logging.ERROR)
+    try:
+        reader = PdfReader(abs_path)
+        parts = [
+            f"--- 第 {i} 页 ---\n{(page.extract_text() or '').strip()}"
+            for i, page in enumerate(reader.pages, start=1)
+        ]
+    except Exception as e:
+        return f"文档解析失败：{e}（文件可能损坏、加密或格式与扩展名不符）"
+    finally:
+        pdf_logger.setLevel(old_level)
+    return "\n\n".join(parts), ""
 
 
 # ── 工具函数 ──────────────────────────────────────────

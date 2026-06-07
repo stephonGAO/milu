@@ -33,6 +33,16 @@
     "task_timeout": 300.0,
     "notify": true
   },
+  "knowledge": {
+    "enabled": true,
+    "embedding_provider": "qwen",
+    "embedding_model": "",
+    "chunk_size": 800,
+    "chunk_overlap": 200,
+    "top_k": 5,
+    "min_score": 0.35,
+    "batch_size": 10
+  },
   "security": {
     "selfguard_enabled": true
   },
