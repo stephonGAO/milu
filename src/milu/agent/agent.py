@@ -59,6 +59,7 @@ from milu.tools.builtin.knowledge_tool import (
     kb_ingest,
     kb_manage,
     kb_search,
+    render_knowledge_prompt,
 )
 from milu.knowledge import KnowledgeConfig
 from milu.llm.base.vision import build_user_content
@@ -566,7 +567,8 @@ class Agent:
         1. PromptBuilder 输出（prompt_dir 指定的文件目录）
         2. system_prompt 字符串（向后兼容的内联提示词）
         3. 技能目录元数据
-        4. 长期记忆条目（启用 memory 时，固定在最后）
+        4. 知识库来源目录 + 检索路由规则（启用 knowledge 时）
+        5. 长期记忆条目（启用 memory 时，固定在最后）
         """
         parts: list[str] = []
 
@@ -589,7 +591,12 @@ class Agent:
         if skill_catalog:
             parts.append(f"\n\n## 可用技能\n{skill_catalog}")
 
-        # 4. 长期记忆（启用时注入在最后；每轮重读文件，同一用户其他
+        # 4. 知识库来源目录 + 检索路由规则（启用时每轮渲染；模型知道库里
+        #    有什么才会主动 kb_search——经 mtime 缓存，文件未变不读盘）
+        if self._knowledge is not None:
+            parts.append(render_knowledge_prompt(self._knowledge.store))
+
+        # 5. 长期记忆（启用时注入在最后；每轮重读文件，同一用户其他
         #    Agent/进程的新写入即时可见，与提示词热重载同理）
         if self._memory_path is not None:
             parts.append(render_memory_prompt(self._memory_path))

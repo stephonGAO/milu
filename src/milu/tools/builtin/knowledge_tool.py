@@ -40,6 +40,8 @@ logger = logging.getLogger(__name__)
 _MAX_INGEST_CHUNKS = 2000
 # 纯文本文件读取上限（防误把超大文件整个 embedding）
 _MAX_TEXT_BYTES = 5 * 1024 * 1024
+# system prompt 目录最多列出的来源数（防大库撑爆提示词）
+_MAX_PROMPT_SOURCES = 50
 
 # ── 状态注入（asyncio 任务级隔离）──────────────────────
 #
@@ -85,6 +87,50 @@ class KnowledgeRuntime:
         if self._embedder is not None:
             await self._embedder.aclose()
             self._embedder = None
+
+
+# ── system prompt 渲染 ─────────────────────────────────
+
+
+def render_knowledge_prompt(store: KnowledgeStore) -> str:
+    """渲染注入 system prompt 的「内部知识库」目录段落（启用 knowledge 时由 Agent 每轮调用）。
+
+    解决**检索路由**问题：模型必须知道库里有什么，才会在合适时机主动
+    kb_search 而非放任联网搜索抢答（与技能"元数据常驻、正文按需加载"
+    同一思路）。来源清单经 store.list_sources() 的 mtime 缓存每轮重读——
+    文件未变不读盘，其他 Agent/进程新入库的内容即时可见。
+    渲染失败（索引损坏等）返回空串，不阻断对话。
+    """
+    try:
+        sources = store.list_sources()
+    except Exception as e:
+        logger.warning("渲染知识库目录失败: %s", e)
+        return ""
+
+    lines = ["\n\n## 内部知识库"]
+    if not sources:
+        lines.append(
+            "知识库已启用但当前为空。用户提供文档/资料并希望后续可检索时，"
+            "建议用 kb_ingest 入库。"
+        )
+        return "\n".join(lines)
+
+    total = sum(n for _, n in sources)
+    lines.append(f"已入库 {len(sources)} 个来源（共 {total} 块）：")
+    for src, n in sources[:_MAX_PROMPT_SOURCES]:
+        lines.append(f"- {src}（{n} 块）")
+    if len(sources) > _MAX_PROMPT_SOURCES:
+        lines.append(f"- …（其余 {len(sources) - _MAX_PROMPT_SOURCES} 个来源略，"
+                     "可用 kb_manage(action='list') 查看）")
+    lines += [
+        "",
+        "**检索路由规则**：",
+        "- 问题涉及以上来源覆盖的主题（内部制度/流程/产品/项目资料等）时，"
+        "**必须先调用 kb_search 检索内部知识库**，再考虑联网搜索；",
+        "- 回答时明确区分信息出处是「内部知识库」还是「网络搜索」，禁止把网络结果表述为知识库内容；",
+        "- kb_search 返回「无相关内容」时再改用其他工具，并向用户说明内部资料未覆盖该主题。",
+    ]
+    return "\n".join(lines)
 
 
 # ── 文件文本提取（复用 doc_tool 解析栈）────────────────────

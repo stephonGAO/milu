@@ -99,6 +99,8 @@ class KnowledgeStore:
         self._dir = Path(dir_path)
         # (文件签名, chunks, vectors)；签名不匹配即失效
         self._cache: tuple[tuple, list[dict[str, Any]], Any] | None = None
+        # 来源清单缓存（同签名机制；供每轮 system prompt 渲染，不依赖 numpy）
+        self._sources_cache: tuple[tuple, list[tuple[str, int]]] | None = None
 
     def _files_signature(self) -> tuple:
         """三个数据文件的 (mtime_ns, size) 签名（文件缺失记 None）。"""
@@ -293,12 +295,22 @@ class KnowledgeStore:
         return [(float(scores[i]), chunks[i]) for i in idx]
 
     def list_sources(self) -> list[tuple[str, int]]:
-        """按来源汇总：[(source, 块数)]，按来源名排序。"""
+        """按来源汇总：[(source, 块数)]，按来源名排序。
+
+        带 mtime 签名缓存（与 load() 同机制，但不依赖 numpy）——本方法被
+        Agent 每轮 system prompt 渲染调用，文件未变时不得重读盘。
+        返回共享缓存对象，调用方勿原地修改。
+        """
+        sig = self._files_signature()
+        if self._sources_cache is not None and self._sources_cache[0] == sig:
+            return self._sources_cache[1]
         counts: dict[str, int] = {}
         for c in self._load_chunks():
             src = c.get("source", "")
             counts[src] = counts.get(src, 0) + 1
-        return sorted(counts.items())
+        result = sorted(counts.items())
+        self._sources_cache = (sig, result)
+        return result
 
     def stats(self) -> dict[str, Any]:
         """知识库统计（meta + 来源数 + 磁盘占用）。"""

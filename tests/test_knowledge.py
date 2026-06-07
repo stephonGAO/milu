@@ -30,6 +30,7 @@ from milu.tools.builtin.knowledge_tool import (
     kb_ingest,
     kb_manage,
     kb_search,
+    render_knowledge_prompt,
 )
 
 
@@ -508,6 +509,56 @@ class TestKnowledgeTools:
         assert w.safe_check({"action": "clear"}) is False
 
 
+# ── system prompt 渲染 ──────────────────────────────────
+
+
+class TestRenderKnowledgePrompt:
+    def test_empty_store(self, tmp_path):
+        text = render_knowledge_prompt(KnowledgeStore(tmp_path / "kb"))
+        assert "## 内部知识库" in text
+        assert "为空" in text and "kb_ingest" in text
+
+    def test_with_sources_and_routing_rules(self, tmp_path):
+        store = KnowledgeStore(tmp_path / "kb")
+        store.add(["一", "二"], [[1.0, 0.0], [0.0, 1.0]], source="员工手册.md",
+                  provider="fake", model="m1")
+        store.add(["三"], [[1.0, 1.0]], source="产品文档.pdf",
+                  provider="fake", model="m1")
+        text = render_knowledge_prompt(store)
+        assert "员工手册.md（2 块）" in text
+        assert "产品文档.pdf（1 块）" in text
+        assert "3 块" in text  # 总块数
+        # 检索路由规则三要素：先查库、来源归因、无果回退
+        assert "必须先调用 kb_search" in text
+        assert "网络搜索" in text
+        assert "无相关内容" in text
+
+    def test_sources_capped(self, tmp_path, monkeypatch):
+        import milu.tools.builtin.knowledge_tool as kt
+        monkeypatch.setattr(kt, "_MAX_PROMPT_SOURCES", 2)
+        store = KnowledgeStore(tmp_path / "kb")
+        for name in ("a", "b", "c"):
+            store.add(["内容"], [[1.0, 0.0]], source=name, provider="fake", model="m1")
+        text = render_knowledge_prompt(store)
+        assert "其余 1 个来源略" in text
+        assert "kb_manage" in text
+
+    def test_corrupt_index_returns_empty(self, tmp_path):
+        store = KnowledgeStore(tmp_path / "kb")
+        store.dir_path.mkdir(parents=True)
+        (store.dir_path / "chunks.jsonl").write_text("非法json行\n", encoding="utf-8")
+        assert render_knowledge_prompt(store) == ""
+
+    def test_list_sources_cached(self, tmp_path):
+        store = KnowledgeStore(tmp_path / "kb")
+        store.add(["一"], [[1.0, 0.0]], source="a", provider="fake", model="m1")
+        s1 = store.list_sources()
+        s2 = store.list_sources()
+        assert s1 is s2  # 缓存命中：同一对象
+        store.add(["二"], [[0.0, 1.0]], source="b", provider="fake", model="m1")
+        assert len(store.list_sources()) == 2  # 写入后失效重载
+
+
 # ── Agent 集成 ──────────────────────────────────────────
 
 
@@ -557,6 +608,26 @@ class TestAgentIntegration:
         assert "intro" in tool_results[0].output
         # run 结束后 ContextVar 已清理
         assert _current_knowledge.get() is None
+
+    def test_system_prompt_contains_kb_catalog(self):
+        """启用 knowledge 时，system prompt 含知识库目录与路由规则。"""
+        agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False,
+                      knowledge="cat-user")
+        agent._knowledge.store.add(
+            ["规章内容"], [_fake_vec("规章内容")],
+            source="内部规章.md", provider="fake", model="fake-1",
+        )
+        agent._build_system_prompt()
+        system = agent._history.get_messages()[0]
+        assert "## 内部知识库" in system.content
+        assert "内部规章.md" in system.content
+        assert "必须先调用 kb_search" in system.content
+
+    def test_system_prompt_no_kb_section_when_disabled(self):
+        agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False)
+        agent._build_system_prompt()
+        system = agent._history.get_messages()[0]
+        assert "## 内部知识库" not in system.content
 
     async def test_close_knowledge_noop_and_idempotent(self):
         agent = Agent(_MockLLM(), tools=[], subagents=[], session_enabled=False)
