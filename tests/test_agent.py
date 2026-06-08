@@ -92,6 +92,53 @@ async def test_tool_call_flow(simple_tool):
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_retry(monkeypatch):
+    """429 / 服务过载属瞬时错误，应退避重试本轮而非直接判失败。
+
+    回归：子代理（如 coder）撞到 Kimi 429 engine_overloaded 时曾直接执行失败；
+    现在主/子代理共用的 run() 循环会指数退避重试。
+    """
+    from milu.llm.base.exceptions import StreamError
+
+    call_count = 0
+
+    async def mock_chat(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise StreamError(
+                "Kimi 流式调用异常: Error code: 429 - {'error': {'message': "
+                "'The engine is currently overloaded, please try again later', "
+                "'type': 'engine_overloaded_error'}}"
+            )
+        yield StreamChunk(content="恢复成功", finish_reason="stop")
+        yield StreamChunk(usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    # 跳过真实退避等待，加速测试并验证确实退避了
+    slept = []
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+
+    monkeypatch.setattr("milu.agent.agent.asyncio.sleep", fake_sleep)
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+
+    agent = Agent(llm=llm, system_prompt="你是助手")
+
+    events = []
+    async for event in agent.run("你好"):
+        events.append(event)
+
+    assert call_count == 2          # 第一次 429 失败、退避后第二次成功
+    assert slept                    # 确实做了退避等待
+    assert not any(isinstance(e, AgentError) for e in events)
+    done = next(e for e in events if isinstance(e, AgentDone))
+    assert done.final_text == "恢复成功"
+
+
+@pytest.mark.asyncio
 async def test_tool_call_preparing_event(simple_tool):
     """参数流式生成期发出 ToolCallPreparing：每个调用仅一次、先于 ToolCallStart。
 

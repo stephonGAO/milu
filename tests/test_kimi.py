@@ -202,7 +202,7 @@ class TestKimiChat:
         llm = KimiLLM(api_key="test-key", model="kimi-k2-thinking")
         messages = [
             Message(role=MessageRole.USER, content="帮我建个计划"),
-            # 带 tool_calls + reasoning_content 的 assistant 消息（需回传 reasoning）
+            # 带 tool_calls + reasoning_content 的 assistant 消息（需回传真实 reasoning）
             Message(
                 role=MessageRole.ASSISTANT,
                 content=None,
@@ -216,6 +216,20 @@ class TestKimiChat:
                 role=MessageRole.TOOL, content="ok",
                 tool_call_id="call_1", name="todo_write",
             ),
+            # 带 tool_calls 但【无】reasoning_content（模型直接发工具调用）→ 占位兜底
+            Message(
+                role=MessageRole.ASSISTANT,
+                content=None,
+                tool_calls=[{
+                    "id": "call_2", "type": "function",
+                    "function": {"name": "web_search", "arguments": "{}"},
+                }],
+                reasoning_content=None,
+            ),
+            Message(
+                role=MessageRole.TOOL, content="结果",
+                tool_call_id="call_2", name="web_search",
+            ),
             # 普通终结回答：有 reasoning 但无 tool_calls，不应注入 reasoning_content
             Message(
                 role=MessageRole.ASSISTANT,
@@ -226,10 +240,15 @@ class TestKimiChat:
 
         dicts = llm._messages_to_dicts(messages)
 
-        # 带 tool_calls 的 assistant 消息被注入 reasoning_content
+        # 带 tool_calls 的 assistant 消息被注入【真实】reasoning_content
         assert dicts[1]["role"] == "assistant" and dicts[1]["tool_calls"]
         assert dicts[1]["reasoning_content"] == "我先列个待办计划……"
         # tool 消息不含 reasoning_content
         assert "reasoning_content" not in dicts[2]
+        # 带 tool_calls 但无 reasoning 的消息：注入【非空】占位，避免 400 missing
+        assert dicts[3]["tool_calls"]
+        assert dicts[3].get("reasoning_content")  # 存在且非空
+        # tool 消息不含 reasoning_content
+        assert "reasoning_content" not in dicts[4]
         # 普通 assistant 终结回答不注入 reasoning_content（避免无谓膨胀）
-        assert "reasoning_content" not in dicts[3]
+        assert "reasoning_content" not in dicts[5]

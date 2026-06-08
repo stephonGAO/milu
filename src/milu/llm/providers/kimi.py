@@ -67,21 +67,21 @@ class KimiLLM(BaseLLM):
         """在基类序列化之上，为带 tool_calls 的 assistant 消息回填 reasoning_content。
 
         Kimi 的 thinking 模型有硬性约束：thinking 开启时，历史里每条带 tool_calls 的
-        assistant 消息回传时【必须】携带当时的 reasoning_content，否则报
+        assistant 消息回传时【必须】携带【非空】reasoning_content，否则报
         400 "thinking is enabled but reasoning_content is missing in assistant tool
         call message at index N"。基类 Message.to_dict() 默认不带该字段（对 DeepSeek 等
         不能带 reasoning_content 的 provider 保持安全），故在此 Kimi 专属注入。
-        仅注入到「有 reasoning_content 且有 tool_calls」的 assistant 消息：
-        非工具调用的终结回答无需回传推理，避免无谓的上下文膨胀。
+
+        注入范围：仅「带 tool_calls」的 assistant 消息（非工具调用的终结回答无需回传
+        推理，避免上下文膨胀）。取值：有真实 reasoning_content 用真实值；模型偶有
+        【不产出推理就直接发工具调用】的轮次（此时捕获到的是空），用占位兜底——
+        否则该消息回传仍会触发上面的 400（子代理 researcher 用直接型角色提示词时易现）。
         """
         dicts = super()._messages_to_dicts(messages)
         for msg, d in zip(messages, dicts):
-            if (
-                d.get("role") == "assistant"
-                and d.get("tool_calls")
-                and getattr(msg, "reasoning_content", None)
-            ):
-                d["reasoning_content"] = msg.reasoning_content
+            if d.get("role") == "assistant" and d.get("tool_calls"):
+                rc = getattr(msg, "reasoning_content", None)
+                d["reasoning_content"] = rc if rc else "(本轮无显式推理)"
         return dicts
 
     async def chat(self, messages: list[Message], **kwargs) -> AsyncIterator[StreamChunk]:

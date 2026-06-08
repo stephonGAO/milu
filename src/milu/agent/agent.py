@@ -880,6 +880,31 @@ class Agent:
                         logger.error("流式连接中断超过重试上限: %s", e)
                         del self._conn_retry_count
 
+                    # ── 限流 / 服务过载重试（429、engine overloaded 等瞬时错误）──
+                    # 这类错误语义即「稍后重试」，指数退避后重试本轮即可恢复。
+                    # 主代理与子代理共用本 run() 循环，故子代理（如 coder）撞到 429
+                    # 也会自动退避重试，而非直接判失败。
+                    _RATE_LIMIT_KEYWORDS = [
+                        "429", "rate limit", "rate_limit", "too many requests",
+                        "overload", "try again later", "engine_overloaded",
+                        "server is busy", "service unavailable", "503",
+                    ]
+                    is_rate_error = any(kw in error_str for kw in _RATE_LIMIT_KEYWORDS)
+                    if is_rate_error:
+                        _retry_count = getattr(self, '_rate_retry_count', 0) + 1
+                        self._rate_retry_count = _retry_count
+                        if _retry_count <= 4:
+                            delay = min(2 ** _retry_count, 30)
+                            logger.warning(
+                                "服务限流/过载（第 %d 次），%ds 后重试: %s",
+                                _retry_count, delay, e,
+                            )
+                            await asyncio.sleep(delay)
+                            continue  # 重试本轮 LLM 调用
+                        # 超过重试上限，放弃
+                        logger.error("服务限流/过载超过重试上限: %s", e)
+                        del self._rate_retry_count
+
                     # ── 上下文过长 → 应急压缩后重试 ──
                     context_too_long_keywords = [
                         "context_length", "too_long", "token", "maximum",
@@ -904,9 +929,11 @@ class Agent:
                         raise
                     raise
 
-                # 流式调用成功，重置连接重试计数器
+                # 流式调用成功，重置瞬时错误重试计数器
                 if hasattr(self, '_conn_retry_count'):
                     del self._conn_retry_count
+                if hasattr(self, '_rate_retry_count'):
+                    del self._rate_retry_count
 
                 # 7. 记录 assistant 消息到历史
                 assistant_content = "".join(turn_text_parts) if turn_text_parts else None
