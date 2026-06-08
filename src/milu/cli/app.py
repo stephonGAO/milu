@@ -12,9 +12,10 @@
     scheduler            调度守护进程（start）
     serve                启动内置 Web 服务（多用户对话 + 全功能演示前端）
 
-全局选项（厂商/模型/模式等）写在子命令之后，例如：
+全局选项（厂商/模型/模式/语言等）写在子命令之后，例如：
     milu chat -p deepseek -m deepseek-chat --mode superwork
     milu run "你好" -q
+    milu --lang en providers        # 英文输出（亦可 MILU_LANG=en 或 config set lang en）
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ import sys
 from milu._env import ensure_dotenv_loaded
 from milu.agent.events import AgentDone
 from milu.exceptions import MiluError
+from milu.i18n import set_lang, t
 from milu.llm.base.exceptions import AuthenticationError
 from milu.llm.providers import ModelRegistry
 
@@ -43,105 +45,108 @@ from milu.cli.render import DIVIDER, c, render_turn
 
 def _add_common_options(p: argparse.ArgumentParser) -> None:
     """给 chat / run 子命令添加共享的厂商/模型/模式选项。"""
-    p.add_argument("-p", "--provider", help=f"厂商名（默认 {DEFAULT_PROVIDER}，或配置文件）")
-    p.add_argument("-m", "--model", help="模型名（默认按厂商内置，或配置文件）")
-    p.add_argument("--api-key", help="临时指定 API Key（优先级最高）")
-    p.add_argument("--mode", choices=["talk", "manual", "auto", "superwork"], help="操作模式")
-    p.add_argument("--no-session", action="store_true", help="禁用会话持久化")
-    p.add_argument("--no-mcp", action="store_true", help="启动时不连接 MCP 服务器")
-    p.add_argument("--no-subagents", action="store_true", help="不挂载内置子代理")
+    p.add_argument("-p", "--provider", help=t("厂商名（默认 {p}，或配置文件）", p=DEFAULT_PROVIDER))
+    p.add_argument("-m", "--model", help=t("模型名（默认按厂商内置，或配置文件）"))
+    p.add_argument("--api-key", help=t("临时指定 API Key（优先级最高）"))
+    p.add_argument("--mode", choices=["talk", "manual", "auto", "superwork"], help=t("操作模式"))
+    p.add_argument("--lang", choices=["zh", "en"], help=t("选择语言（zh/en，默认 zh）"))
+    p.add_argument("--no-session", action="store_true", help=t("禁用会话持久化"))
+    p.add_argument("--no-mcp", action="store_true", help=t("启动时不连接 MCP 服务器"))
+    p.add_argument("--no-subagents", action="store_true", help=t("不挂载内置子代理"))
     p.add_argument("--no-scheduler", action="store_true",
-                   help="对话期间不嵌入定时任务调度引擎（仅 chat 生效）")
+                   help=t("对话期间不嵌入定时任务调度引擎（仅 chat 生效）"))
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="milu",
-        description="milu 命令行：启动 Agent、一次性执行或多轮对话。",
+        description=t("milu 命令行：启动 Agent、一次性执行或多轮对话。"),
     )
     # 无子命令时（裸 milu → chat）的默认值兜底
     parser.set_defaults(
-        provider=None, model=None, api_key=None, mode=None,
+        provider=None, model=None, api_key=None, mode=None, lang=None,
         no_session=False, no_mcp=False, no_subagents=False, no_scheduler=False,
     )
+    parser.add_argument("--lang", choices=["zh", "en"], help=t("选择语言（zh/en，默认 zh）"))
     sub = parser.add_subparsers(dest="command")
 
     # chat
-    p_chat = sub.add_parser("chat", help="交互式多轮对话")
+    p_chat = sub.add_parser("chat", help=t("交互式多轮对话"))
     _add_common_options(p_chat)
-    p_chat.add_argument("--session", help="续接指定会话 ID")
+    p_chat.add_argument("--session", help=t("续接指定会话 ID"))
 
     # run
-    p_run = sub.add_parser("run", help="一次性执行单条指令")
+    p_run = sub.add_parser("run", help=t("一次性执行单条指令"))
     _add_common_options(p_run)
-    p_run.add_argument("prompt", nargs="?", help="指令文本（省略则从 stdin 读取）")
-    p_run.add_argument("-q", "--quiet", action="store_true", help="只输出最终回答（适合管道）")
-    p_run.add_argument("--session", help="续接指定会话 ID")
+    p_run.add_argument("prompt", nargs="?", help=t("指令文本（省略则从 stdin 读取）"))
+    p_run.add_argument("-q", "--quiet", action="store_true", help=t("只输出最终回答（适合管道）"))
+    p_run.add_argument("--session", help=t("续接指定会话 ID"))
 
     # setup — 初始化引导
-    sub.add_parser("setup", help="初始化引导：选厂商/模型、配置 API Key 与搜索工具")
+    sub.add_parser("setup", help=t("初始化引导：选厂商/模型、配置 API Key 与搜索工具"))
 
     # config
-    p_cfg = sub.add_parser("config", help="查看/修改配置")
+    p_cfg = sub.add_parser("config", help=t("查看/修改配置"))
     cfg_sub = p_cfg.add_subparsers(dest="config_action")
-    cfg_sub.add_parser("show", help="打印合并后的生效配置及各文件路径")
-    cfg_sub.add_parser("path", help="打印项目级 / 用户级配置文件路径")
-    cfg_sub.add_parser("init", help="在项目 config/milu.json 生成全量默认配置模板")
-    g = cfg_sub.add_parser("get", help="读取配置项（点号路径，如 agent.max_turns）")
+    cfg_sub.add_parser("show", help=t("打印合并后的生效配置及各文件路径"))
+    cfg_sub.add_parser("path", help=t("打印项目级 / 用户级配置文件路径"))
+    cfg_sub.add_parser("init", help=t("在项目 config/milu.json 生成全量默认配置模板"))
+    g = cfg_sub.add_parser("get", help=t("读取配置项（点号路径，如 agent.max_turns）"))
     g.add_argument("key")
-    st = cfg_sub.add_parser("set", help="设置配置项到用户级配置（点号路径）")
+    st = cfg_sub.add_parser("set", help=t("设置配置项到用户级配置（点号路径）"))
     st.add_argument("key")
     st.add_argument("value")
 
     # sessions
-    p_sess = sub.add_parser("sessions", help="查看历史会话")
+    p_sess = sub.add_parser("sessions", help=t("查看历史会话"))
     sess_sub = p_sess.add_subparsers(dest="sessions_action")
-    sess_sub.add_parser("list", help="列出全部会话（默认）")
-    ss = sess_sub.add_parser("show", help="打印某会话的消息")
+    sess_sub.add_parser("list", help=t("列出全部会话（默认）"))
+    ss = sess_sub.add_parser("show", help=t("打印某会话的消息"))
     ss.add_argument("session_id")
 
     # providers / version
-    sub.add_parser("providers", help="列出支持的厂商及 Key 配置状态")
-    sub.add_parser("version", help="显示版本")
+    sub.add_parser("providers", help=t("列出支持的厂商及 Key 配置状态"))
+    sub.add_parser("version", help=t("显示版本"))
 
     # schedule — 定时任务管理（多用户：--user 指定用户，默认 default）
-    p_sch = sub.add_parser("schedule", help="定时任务管理（list/run/delete/enable/disable）")
+    p_sch = sub.add_parser("schedule", help=t("定时任务管理（list/run/delete/enable/disable）"))
     sch_sub = p_sch.add_subparsers(dest="schedule_action")
-    sl = sch_sub.add_parser("list", help="列出定时任务（默认）")
-    sl.add_argument("--user", default="default", help="用户标识（默认 default）")
-    sl.add_argument("--all", action="store_true", help="列出全部用户的任务")
-    sr = sch_sub.add_parser("run", help="立即同步执行指定任务")
-    sr.add_argument("name", help="任务名称")
-    sr.add_argument("--user", default="default", help="用户标识（默认 default）")
-    sd = sch_sub.add_parser("delete", help="删除指定任务")
-    sd.add_argument("name", help="任务名称")
-    sd.add_argument("--user", default="default", help="用户标识（默认 default）")
-    se = sch_sub.add_parser("enable", help="启用指定任务")
-    se.add_argument("name", help="任务名称")
-    se.add_argument("--user", default="default", help="用户标识（默认 default）")
-    sdi = sch_sub.add_parser("disable", help="禁用指定任务")
-    sdi.add_argument("name", help="任务名称")
-    sdi.add_argument("--user", default="default", help="用户标识（默认 default）")
+    sl = sch_sub.add_parser("list", help=t("列出定时任务（默认）"))
+    sl.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
+    sl.add_argument("--all", action="store_true", help=t("列出全部用户的任务"))
+    sr = sch_sub.add_parser("run", help=t("立即同步执行指定任务"))
+    sr.add_argument("name", help=t("任务名称"))
+    sr.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
+    sd = sch_sub.add_parser("delete", help=t("删除指定任务"))
+    sd.add_argument("name", help=t("任务名称"))
+    sd.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
+    se = sch_sub.add_parser("enable", help=t("启用指定任务"))
+    se.add_argument("name", help=t("任务名称"))
+    se.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
+    sdi = sch_sub.add_parser("disable", help=t("禁用指定任务"))
+    sdi.add_argument("name", help=t("任务名称"))
+    sdi.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
 
     # scheduler — 调度守护进程
-    p_sched = sub.add_parser("scheduler", help="调度守护进程管理（start）")
+    p_sched = sub.add_parser("scheduler", help=t("调度守护进程管理（start）"))
     sched_sub = p_sched.add_subparsers(dest="scheduler_action")
-    sched_sub.add_parser("start", help="启动调度守护进程（前台运行，Ctrl+C 停止）")
+    sched_sub.add_parser("start", help=t("启动调度守护进程（前台运行，Ctrl+C 停止）"))
 
     # serve — 内置 Web 服务（FastAPI + 全功能演示前端）
-    p_serve = sub.add_parser("serve", help="启动内置 Web 服务（多用户对话 + 演示前端）")
-    p_serve.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
-    p_serve.add_argument("--port", type=int, default=8000, help="监听端口（默认 8000）")
-    p_serve.add_argument("-p", "--provider", help="默认厂商（默认按配置）")
-    p_serve.add_argument("-m", "--model", help="默认模型（默认按厂商内置）")
-    p_serve.add_argument("--api-key", help="临时 API Key（一般用 .env 配置）")
+    p_serve = sub.add_parser("serve", help=t("启动内置 Web 服务（多用户对话 + 演示前端）"))
+    p_serve.add_argument("--host", default="127.0.0.1", help=t("监听地址（默认 127.0.0.1）"))
+    p_serve.add_argument("--port", type=int, default=8000, help=t("监听端口（默认 8000）"))
+    p_serve.add_argument("-p", "--provider", help=t("默认厂商（默认按配置）"))
+    p_serve.add_argument("-m", "--model", help=t("默认模型（默认按厂商内置）"))
+    p_serve.add_argument("--api-key", help=t("临时 API Key（一般用 .env 配置）"))
     p_serve.add_argument("--mode", choices=["talk", "manual", "auto", "superwork"],
-                         help="默认操作模式")
-    p_serve.add_argument("--no-mcp", action="store_true", help="不连接 MCP 服务器")
-    p_serve.add_argument("--no-subagents", action="store_true", help="不挂载内置子代理")
-    p_serve.add_argument("--no-session", action="store_true", help="禁用会话持久化")
-    p_serve.add_argument("--no-scheduler", action="store_true", help="不嵌入定时任务调度引擎")
-    p_serve.add_argument("--reload", action="store_true", help="开发模式：代码变更自动重载")
+                         help=t("默认操作模式"))
+    p_serve.add_argument("--lang", choices=["zh", "en"], help=t("选择语言（zh/en，默认 zh）"))
+    p_serve.add_argument("--no-mcp", action="store_true", help=t("不连接 MCP 服务器"))
+    p_serve.add_argument("--no-subagents", action="store_true", help=t("不挂载内置子代理"))
+    p_serve.add_argument("--no-session", action="store_true", help=t("禁用会话持久化"))
+    p_serve.add_argument("--no-scheduler", action="store_true", help=t("不嵌入定时任务调度引擎"))
+    p_serve.add_argument("--reload", action="store_true", help=t("开发模式：代码变更自动重载"))
 
     return parser
 
@@ -216,7 +221,7 @@ def _cmd_run(args) -> int:
         if not sys.stdin.isatty():
             prompt = sys.stdin.buffer.read().decode("utf-8", errors="replace").strip()
         if not prompt:
-            print(c("red", "错误：未提供指令。用法：milu run \"你的问题\""), file=sys.stderr)
+            print(c("red", t("错误：未提供指令。用法：milu run \"你的问题\"")), file=sys.stderr)
             return 2
     return asyncio.run(_run_once(settings, prompt, args.quiet))
 
@@ -227,35 +232,35 @@ def _cmd_config(args) -> int:
     action = getattr(args, "config_action", None)
 
     if action == "path":
-        print(f"项目级: {project_config_path()}")
-        print(f"用户级: {user_config_path()}")
+        print(t("项目级: {p}", p=project_config_path()))
+        print(t("用户级: {p}", p=user_config_path()))
         return 0
     if action == "init":
         p = write_project_template()
-        print(c("green", f"已生成项目配置模板 → {p}"))
+        print(c("green", t("已生成项目配置模板 → {p}", p=p)))
         return 0
     if action == "get":
         try:
             print(load_config().get(args.key))
         except KeyError:
-            print(c("red", f"未知配置项：{args.key}"), file=sys.stderr)
+            print(c("red", t("未知配置项：{k}", k=args.key)), file=sys.stderr)
             return 2
         return 0
     if action == "set":
         try:
             p, value = set_user_value(args.key, args.value)
         except ValueError as e:
-            print(c("red", f"错误：{e}"), file=sys.stderr)
+            print(c("red", t("错误：{e}", e=e)), file=sys.stderr)
             return 2
-        print(c("green", f"已设置 {args.key} = {value!r}") + c("dim", f"  → {p}"))
+        print(c("green", t("已设置 {k} = {v}", k=args.key, v=repr(value))) + c("dim", f"  → {p}"))
         return 0
 
     # 默认 / show：打印合并后的生效配置
     import json as _json
     cfg = load_config()
-    print(f"项目级: {project_config_path()}")
-    print(f"用户级: {user_config_path()}")
-    print(c("dim", "（生效 = 内置默认 ← 项目级 ← 用户级；CLI 参数运行时再叠加）"))
+    print(t("项目级: {p}", p=project_config_path()))
+    print(t("用户级: {p}", p=user_config_path()))
+    print(c("dim", t("（生效 = 内置默认 ← 项目级 ← 用户级；CLI 参数运行时再叠加）")))
     print(_json.dumps(cfg.data, ensure_ascii=False, indent=2))
     return 0
 
@@ -273,10 +278,12 @@ def _cmd_sessions(args) -> int:
         try:
             sess = Session.load_session(args.session_id, base)
         except FileNotFoundError:
-            print(c("red", f"会话不存在: {args.session_id}"), file=sys.stderr)
+            print(c("red", t("会话不存在: {id}", id=args.session_id)), file=sys.stderr)
             return 1
         msgs = sess.load_messages()
-        print(f"{DIVIDER}\n  会话 {c('cyan', args.session_id)}（{len(msgs)} 条消息）\n{DIVIDER}")
+        print(f"{DIVIDER}\n  "
+              + t("会话 {id}（{n} 条消息）", id=c('cyan', args.session_id), n=len(msgs))
+              + f"\n{DIVIDER}")
         for m in msgs:
             role = m.role.value.upper()
             content = (m.content or "").replace("\n", " ")
@@ -286,15 +293,15 @@ def _cmd_sessions(args) -> int:
 
     sessions = Session.list_sessions(base)
     if not sessions:
-        print(c("dim", f"暂无历史会话（{base}）"))
+        print(c("dim", t("暂无历史会话（{base}）", base=base)))
         return 0
-    print(f"{DIVIDER}\n  历史会话 ({len(sessions)} 个)  {c('dim', str(base))}\n{DIVIDER}")
+    print(f"{DIVIDER}\n  " + t("历史会话 ({n} 个)", n=len(sessions)) + f"  {c('dim', str(base))}\n{DIVIDER}")
     for s in sessions:
         updated = s.get("updated_at", 0)
         time_str = datetime.fromtimestamp(updated).strftime("%Y-%m-%d %H:%M") if updated else "?"
         model_str = c("dim", f" ({s.get('model')})") if s.get("model") else ""
         print(f"  {c('cyan', s.get('session_id', '?'))}  {c('dim', time_str)}  "
-              f"{s.get('message_count', 0)} 条消息{model_str}")
+              + t("{n} 条消息", n=s.get('message_count', 0)) + model_str)
     return 0
 
 
@@ -304,18 +311,18 @@ def _cmd_providers(_args) -> int:
     default_models = cfg.default_models
     default_provider = cfg.llm.get("provider") or DEFAULT_PROVIDER
     providers = ModelRegistry.list_providers()
-    print(f"{DIVIDER}\n  支持的厂商 ({len(providers)} 个)\n{DIVIDER}")
+    print(f"{DIVIDER}\n  " + t("支持的厂商 ({n} 个)", n=len(providers)) + f"\n{DIVIDER}")
     for name in providers:
         env_name = env_key_name(name)
         has_env = bool(os.environ.get(env_name))
         if has_env:
-            status = c("green", f"已配置 (env {env_name})")
+            status = c("green", t("已配置 (env {env})", env=env_name))
         else:
-            status = c("dim", f"未配置（在 .env 设置 {env_name}）")
+            status = c("dim", t("未配置（在 .env 设置 {env}）", env=env_name))
         default_model = default_models.get(name, "—")
-        mark = c("bold", " *默认") if name == default_provider else ""
-        print(f"  {c('cyan', name):<22} 默认模型 {c('dim', default_model):<32} {status}{mark}")
-    print(c("dim", "\n  提示：运行 `milu setup` 可交互式配置厂商、模型与 API Key。"))
+        mark = c("bold", t(" *默认")) if name == default_provider else ""
+        print(f"  {c('cyan', name):<22} {t('默认模型')} {c('dim', default_model):<32} {status}{mark}")
+    print(c("dim", t("\n  提示：运行 `milu setup` 可交互式配置厂商、模型与 API Key。")))
     return 0
 
 
@@ -324,7 +331,7 @@ def _cmd_version(_args) -> int:
         from importlib.metadata import version
         print(f"milu {version('milu')}")
     except Exception:
-        print("milu (版本未知)")
+        print(t("milu (版本未知)"))
     return 0
 
 
@@ -341,21 +348,21 @@ def _cmd_schedule(args) -> int:
         show_all = getattr(args, "all", False)
         tasks = store.list_all() if show_all else store.list_user(user)
         if not tasks:
-            print(c("dim", "暂无定时任务。可在对话中让 Agent 调用 schedule_create 工具创建。"))
+            print(c("dim", t("暂无定时任务。可在对话中让 Agent 调用 schedule_create 工具创建。")))
             return 0
-        print(f"{DIVIDER}\n  定时任务 ({len(tasks)} 个)\n{DIVIDER}")
-        for t in tasks:
-            status_color = "green" if t.enabled else "dim"
-            status_str = "启用" if t.enabled else "禁用"
-            last = t.last_run[:16].replace("T", " ") if t.last_run else "从未"
-            nxt = t.next_run[:16].replace("T", " ") if t.next_run else "待计算"
-            user_tag = f"  {c('dim', f'@{t.user_id}')}" if show_all else ""
+        print(f"{DIVIDER}\n  " + t("定时任务 ({n} 个)", n=len(tasks)) + f"\n{DIVIDER}")
+        for tk in tasks:
+            status_color = "green" if tk.enabled else "dim"
+            status_str = t("启用") if tk.enabled else t("禁用")
+            last = tk.last_run[:16].replace("T", " ") if tk.last_run else t("从未")
+            nxt = tk.next_run[:16].replace("T", " ") if tk.next_run else t("待计算")
+            user_tag = f"  {c('dim', f'@{tk.user_id}')}" if show_all else ""
             print(
-                f"  {c('cyan', t.name)}{user_tag}  {c(status_color, f'[{status_str}]')}  "
-                f"运行 {t.run_count} 次\n"
-                f"    触发: {c('yellow', t.trigger_desc())}\n"
-                f"    说明: {t.description or t.prompt[:60]}\n"
-                f"    上次: {c('dim', last)}  下次: {c('dim', nxt)}"
+                f"  {c('cyan', tk.name)}{user_tag}  {c(status_color, f'[{status_str}]')}  "
+                + t("运行 {n} 次", n=tk.run_count) + "\n"
+                f"    {t('触发: ')}{c('yellow', tk.trigger_desc())}\n"
+                f"    {t('说明: ')}{tk.description or tk.prompt[:60]}\n"
+                f"    {t('上次: ')}{c('dim', last)}  {t('下次: ')}{c('dim', nxt)}"
             )
         print(DIVIDER)
         return 0
@@ -367,41 +374,41 @@ def _cmd_schedule(args) -> int:
         ensure_dotenv_loaded()
         task = store.get(args.name, user)
         if not task:
-            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            print(c("red", t("错误：任务 '{name}' 不存在", name=args.name)), file=sys.stderr)
             return 1
-        print(c("cyan", f"  正在执行任务 '{args.name}'..."))
+        print(c("cyan", t("  正在执行任务 '{name}'...", name=args.name)))
         engine = ScheduleEngine(store)
         try:
             result = asyncio.run(engine.run_task_now(args.name, user))
             print(f"\n{DIVIDER}")
-            print(c("green", f"  任务 '{args.name}' 执行完成"))
+            print(c("green", t("  任务 '{name}' 执行完成", name=args.name)))
             print(DIVIDER)
             print(result)
             print(DIVIDER)
         except Exception as e:
-            print(c("red", f"  执行失败: {e}"), file=sys.stderr)
+            print(c("red", t("  执行失败: {e}", e=e)), file=sys.stderr)
             return 1
         return 0
 
     if action == "delete":
         if not store.remove(args.name, user):
-            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            print(c("red", t("错误：任务 '{name}' 不存在", name=args.name)), file=sys.stderr)
             return 1
-        print(c("green", f"  任务 '{args.name}' 已删除"))
+        print(c("green", t("  任务 '{name}' 已删除", name=args.name)))
         return 0
 
     if action in ("enable", "disable"):
         task = store.get(args.name, user)
         if not task:
-            print(c("red", f"错误：任务 '{args.name}' 不存在"), file=sys.stderr)
+            print(c("red", t("错误：任务 '{name}' 不存在", name=args.name)), file=sys.stderr)
             return 1
         task.enabled = action == "enable"
         store.update(task)
-        verb = "已启用" if task.enabled else "已禁用"
-        print(c("green", f"  任务 '{args.name}' {verb}"))
+        verb = t("已启用") if task.enabled else t("已禁用")
+        print(c("green", t("  任务 '{name}' {verb}", name=args.name, verb=verb)))
         return 0
 
-    print(c("red", f"未知操作: {action}"), file=sys.stderr)
+    print(c("red", t("未知操作: {action}", action=action)), file=sys.stderr)
     return 2
 
 
@@ -421,34 +428,35 @@ def _cmd_scheduler(args) -> int:
         # 单实例锁：防止多个调度引擎并存导致任务被重复执行
         lock = SchedulerLock(data_dir)
         if not lock.try_acquire():
-            print(c("red", f"调度器已在运行（PID {lock.holder_pid()}），同一时间只能有一个引擎。"), file=sys.stderr)
-            print(c("dim", f"如确认它已不存在，请删除锁文件后重试: {lock.path}"), file=sys.stderr)
+            print(c("red", t("调度器已在运行（PID {pid}），同一时间只能有一个引擎。",
+                             pid=lock.holder_pid())), file=sys.stderr)
+            print(c("dim", t("如确认它已不存在，请删除锁文件后重试: {path}", path=lock.path)), file=sys.stderr)
             return 1
 
         tasks = store.list_all()
-        enabled = [t for t in tasks if t.enabled]
-        users = sorted({t.user_id for t in tasks})
+        enabled = [tk for tk in tasks if tk.enabled]
+        users = sorted({tk.user_id for tk in tasks})
         print(f"{DIVIDER}")
-        print(c("bold", c("cyan", "  milu 调度守护进程")))
+        print(c("bold", c("cyan", t("  milu 调度守护进程"))))
         print(DIVIDER)
-        print(f"  任务目录: {c('dim', str(data_dir / 'schedules'))}")
-        print(f"  日志目录: {c('dim', str(log_dir))}")
-        print(f"  已启用任务: {c('yellow', str(len(enabled)))} / {len(tasks)} 个"
-              f"（{len(users)} 个用户）")
+        print(t("  任务目录: {p}", p=c('dim', str(data_dir / 'schedules'))))
+        print(t("  日志目录: {p}", p=c('dim', str(log_dir))))
+        print(t("  已启用任务: {n} / {tot} 个（{u} 个用户）",
+                n=c('yellow', str(len(enabled))), tot=len(tasks), u=len(users)))
         if enabled:
-            for t in enabled:
-                print(f"    {c('cyan', t.name):<20} @{t.user_id}  {t.trigger_desc()}")
+            for tk in enabled:
+                print(f"    {c('cyan', tk.name):<20} @{tk.user_id}  {tk.trigger_desc()}")
         print(DIVIDER + "\n")
 
         try:
             asyncio.run(engine.start())
         except KeyboardInterrupt:
-            print(c("dim", "\n  调度器已停止。"))
+            print(c("dim", t("\n  调度器已停止。")))
         finally:
             lock.release()
         return 0
 
-    print(c("red", f"未知操作: {action}（可用: start）"), file=sys.stderr)
+    print(c("red", t("未知操作: {action}（可用: start）", action=action)), file=sys.stderr)
     return 2
 
 
@@ -457,7 +465,7 @@ def _cmd_serve(args) -> int:
     try:
         from milu.serving.web import run_server
     except ImportError as e:  # 理论上不会（懒导入），保险起见
-        print(c("red", f"加载 Web 服务失败：{e}"), file=sys.stderr)
+        print(c("red", t("加载 Web 服务失败：{e}", e=e)), file=sys.stderr)
         return 1
 
     config = load_config()
@@ -483,14 +491,15 @@ def _cmd_serve(args) -> int:
 
     host, port = args.host, args.port
     print(f"{DIVIDER}")
-    print(c("bold", c("cyan", "  milu Web 服务")))
+    print(c("bold", c("cyan", t("  milu Web 服务"))))
     print(DIVIDER)
-    print(f"  访问地址: {c('cyan', f'http://{host}:{port}')}")
-    print(f"  默认厂商: {c('yellow', settings.provider)}  模型: {c('dim', settings.model)}")
-    print(f"  操作模式: {c('yellow', settings.mode)}  "
-          f"调度: {'开' if opts['use_scheduler'] else '关'}  "
-          f"MCP: {'开' if opts['use_mcp'] else '关'}")
-    print(c("dim", "  不同浏览器标签用不同「用户ID」即可演示多用户隔离。Ctrl+C 停止。"))
+    print(t("  访问地址: {url}", url=c('cyan', f'http://{host}:{port}')))
+    print(t("  默认厂商: {p}  模型: {m}", p=c('yellow', settings.provider), m=c('dim', settings.model)))
+    print(t("  操作模式: {mode}  调度: {sch}  MCP: {mcp}",
+            mode=c('yellow', settings.mode),
+            sch=t('开') if opts['use_scheduler'] else t('关'),
+            mcp=t('开') if opts['use_mcp'] else t('关')))
+    print(c("dim", t("  不同浏览器标签用不同「用户ID」即可演示多用户隔离。Ctrl+C 停止。")))
     print(DIVIDER + "\n")
 
     try:
@@ -498,16 +507,32 @@ def _cmd_serve(args) -> int:
     except ImportError:
         # Web 服务依赖（fastapi/uvicorn/sse-starlette）已是核心依赖，通常随 milu 一并安装；
         # 仅当被手动卸载时才会到这里。
-        print(c("red", "缺少 Web 服务依赖（通常已随 milu 安装）。请修复："), file=sys.stderr)
+        print(c("red", t("缺少 Web 服务依赖（通常已随 milu 安装）。请修复：")), file=sys.stderr)
         print(c("yellow", "  pip install --force-reinstall milu"), file=sys.stderr)
         print(c("dim", "  或: pip install fastapi uvicorn sse-starlette"), file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print(c("dim", "\n  Web 服务已停止。"))
+        print(c("dim", t("\n  Web 服务已停止。")))
     return 0
 
 
 # ── main ─────────────────────────────────────────────────
+
+def _resolve_lang(argv_list: list[str]) -> str:
+    """解析界面语言：--lang > MILU_LANG 环境变量 > config.json 的 lang > 默认 zh。"""
+    for i, a in enumerate(argv_list):
+        if a == "--lang" and i + 1 < len(argv_list):
+            return argv_list[i + 1]
+        if a.startswith("--lang="):
+            return a.split("=", 1)[1]
+    env = os.environ.get("MILU_LANG")
+    if env:
+        return env
+    try:
+        return str(load_config().data.get("lang") or "zh")
+    except Exception:
+        return "zh"
+
 
 def main(argv: list[str] | None = None) -> int:
     # Windows 下启用 ANSI 颜色
@@ -516,8 +541,12 @@ def main(argv: list[str] | None = None) -> int:
     # 进程内加载一次 .env（可被 MILU_NO_DOTENV 关闭）
     ensure_dotenv_loaded()
 
+    argv_list = sys.argv[1:] if argv is None else list(argv)
+    # 在构建解析器前先定语言，使 argparse 帮助文本也随之中/英切换
+    set_lang(_resolve_lang(argv_list))
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv_list)
     command = args.command or "chat"  # 无子命令 → 进入交互对话
 
     handlers = {
@@ -534,27 +563,27 @@ def main(argv: list[str] | None = None) -> int:
     }
     handler = handlers.get(command)
     if handler is None:
-        print(c("red", f"未知子命令: {command}"), file=sys.stderr)
+        print(c("red", t("未知子命令: {c}", c=command)), file=sys.stderr)
         return 2
 
     try:
         return handler(args) or 0  # type: ignore[misc]
     except KeyboardInterrupt:
-        print(c("dim", "\n已中断。"))
+        print(c("dim", t("\n已中断。")))
         return 130
     except AuthenticationError as e:
         provider = (getattr(args, "provider", None)
                     or load_config().llm.get("provider") or DEFAULT_PROVIDER)
-        print(c("red", f"\n鉴权失败：{e}"), file=sys.stderr)
-        print(c("dim", f"可运行 `milu setup` 进行初始化引导，"
-                       f"或在 .env / 环境变量中设置 {env_key_name(provider)}。"),
+        print(c("red", t("\n鉴权失败：{e}", e=e)), file=sys.stderr)
+        print(c("dim", t("可运行 `milu setup` 进行初始化引导，或在 .env / 环境变量中设置 {env}。",
+                         env=env_key_name(provider))),
               file=sys.stderr)
         return 1
     except ValueError as e:
-        print(c("red", f"\n错误：{e}"), file=sys.stderr)
+        print(c("red", t("\n错误：{e}", e=e)), file=sys.stderr)
         return 2
     except MiluError as e:
-        print(c("red", f"\n运行失败：{e}"), file=sys.stderr)
+        print(c("red", t("\n运行失败：{e}", e=e)), file=sys.stderr)
         return 1
 
 

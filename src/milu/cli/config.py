@@ -13,6 +13,7 @@ import os
 from dataclasses import dataclass, field
 
 from milu.config import DEFAULT_MODELS, DEFAULT_PROVIDER, MiluConfig, load_config
+from milu.i18n import t
 
 __all__ = [
     "DEFAULT_MODELS",
@@ -76,10 +77,9 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
     else:
         model = default_models.get(provider)
     if not model:
-        raise ValueError(
-            f"厂商 '{provider}' 没有内置默认模型，请用 --model 指定，"
-            f"或在 config.json 的 default_models 中补充。"
-        )
+        raise ValueError(t(
+            "厂商 '{p}' 没有内置默认模型，请用 --model 指定，"
+            "或在 config.json 的 default_models 中补充。", p=provider))
 
     api_key = getattr(args, "api_key", None) or os.environ.get(env_key_name(provider))
 

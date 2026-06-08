@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+from milu.i18n import t
 from milu.agent.events import (
     AgentDone,
     AgentError,
@@ -50,7 +51,7 @@ async def confirm_unsafe(tool_name: str, args_str: str) -> ConfirmResponse:
     """
     short_args = args_str[:100] + "..." if len(args_str) > 100 else args_str
     print(f"\n  {c('red', '[UNSAFE]')} {c('bold', tool_name)}({c('dim', short_args)})")
-    print(f"  {c('dim', '输入 y 同意 / n 拒绝 / 或直接输入指示发给 Agent')}")
+    print(f"  {c('dim', t('输入 y 同意 / n 拒绝 / 或直接输入指示发给 Agent'))}")
     try:
         resp = input(f"  {c('yellow', '> ')}").strip()
     except (EOFError, KeyboardInterrupt):
@@ -62,7 +63,7 @@ async def confirm_unsafe(tool_name: str, args_str: str) -> ConfirmResponse:
     if resp.lower() in ("y", "yes"):
         return ConfirmResponse(approved=True)
     if resp.lower() in ("n", "no"):
-        return ConfirmResponse(approved=False, message="用户选择拒绝执行")
+        return ConfirmResponse(approved=False, message=t("用户选择拒绝执行"))
     return ConfirmResponse(approved=False, message=resp)
 
 
@@ -115,11 +116,11 @@ async def render_turn(
         # ── 不安全工具确认结果 ──
         elif isinstance(event, ToolConfirmRequired):
             if event.approved:
-                print(f"  {c('green', '[APPROVED]')} 用户同意执行", flush=True)
+                print(f"  {c('green', '[APPROVED]')} {t('用户同意执行')}", flush=True)
             elif event.message:
-                print(f"  {c('red', '[REJECTED]')} 用户指示: {c('cyan', event.message)}", flush=True)
+                print(f"  {c('red', '[REJECTED]')} {t('用户指示: ')}{c('cyan', event.message)}", flush=True)
             else:
-                print(f"  {c('red', '[REJECTED]')} 用户拒绝执行", flush=True)
+                print(f"  {c('red', '[REJECTED]')} {t('用户拒绝执行')}", flush=True)
 
         # ── 子代理内部事件 ──
         elif isinstance(event, SubAgentEvent):
@@ -132,7 +133,7 @@ async def render_turn(
                 announced_subagents.add(name)
                 sa_needs_tag[name] = True
                 print(
-                    f"\n  {c('magenta', '╭─')} {tag} {c('magenta', '开始执行')} {c('magenta', '─' * 30)}",
+                    f"\n  {c('magenta', '╭─')} {tag} {c('magenta', t('开始执行'))} {c('magenta', '─' * 30)}",
                     flush=True,
                 )
 
@@ -173,7 +174,7 @@ async def render_turn(
             if not sa_needs_tag.get(name, True):
                 print()
             print(
-                f"  {c('magenta', '╰─')} {tag} {c('magenta', '完成')} "
+                f"  {c('magenta', '╰─')} {tag} {c('magenta', t('完成'))} "
                 f"{c('dim', f'turns={event.turn_count}, tokens={event.total_usage.total_tokens}')}"
                 f"{status} {c('magenta', '─' * 28)}",
                 flush=True,
@@ -206,8 +207,8 @@ async def render_turn(
         elif isinstance(event, HistoryCompacted):
             print(
                 f"\n  {c('cyan', '[COMPACT]')} "
-                f"对话历史已压缩: {event.original_count} → {event.compacted_count} 条消息 "
-                f"({c('dim', event.strategy)})",
+                + t("对话历史已压缩: {a} → {b} 条消息", a=event.original_count, b=event.compacted_count)
+                + f" ({c('dim', event.strategy)})",
                 flush=True,
             )
 

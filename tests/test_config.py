@@ -163,7 +163,8 @@ def test_write_project_template(paths):
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "default_models",
-        "security", "display",
+        "security", "display", "lang",
     }
+    assert data["lang"] == "zh"   # CLI 界面语言默认中文
     assert data["display"]["show_subagent_events"] is False
     assert data["knowledge"]["enabled"] is True   # 知识库默认开启（空库零开销）

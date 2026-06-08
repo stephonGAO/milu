@@ -83,6 +83,7 @@ class TestWizardFlow:
         monkeypatch.setenv("WEB_SEARCH_PROVIDER", "ddg")
         monkeypatch.setenv("BOCHA_API_KEY", "old-bocha")
         _feed_inputs(monkeypatch, [
+            "",                # 语言（回车保持中文）
             "deepseek",        # [1/4] 厂商（按名称选择）
             "",                # [2/4] 模型 → 内置默认
             "sk-new-key-123",  # [3/4] 替换 API Key
@@ -109,6 +110,7 @@ class TestWizardFlow:
     def test_keep_existing_key_and_skip_search(self, isolated_home, monkeypatch):
         monkeypatch.setenv("QWEN_API_KEY", "sk-existing")
         _feed_inputs(monkeypatch, [
+            "",      # 语言（回车保持中文）
             "qwen",  # 厂商
             "",      # 模型 → 默认
             "",      # 回车保留现有 Key
@@ -136,6 +138,7 @@ class TestWizardFlow:
     def test_invalid_then_valid_provider_choice(self, isolated_home, monkeypatch):
         monkeypatch.setenv("GLM_API_KEY", "sk-x")
         _feed_inputs(monkeypatch, [
+            "",             # 语言（回车保持中文）
             "nonexistent",  # 无效厂商名 → 重新询问
             "glm",          # 有效
             "", "", "", "",

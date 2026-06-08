@@ -16,6 +16,7 @@ import os
 import sys
 from pathlib import Path
 
+from milu.i18n import get_lang, set_lang, t
 from milu.cli.render import BANNER, DIVIDER, c
 
 # ── 厂商展示信息（中文名 + API Key 申请地址，仅引导展示用）──────────────
@@ -124,37 +125,37 @@ def _step_provider(providers: list[str], default_models: dict, current: str) -> 
     """步骤 1：选择默认厂商（编号或名称，回车取当前配置）。"""
     from milu.cli.config import env_key_name
 
-    print(c("bold", "\n[1/4] 选择默认厂商"))
+    print(c("bold", t("\n[1/4] 选择默认厂商")))
     for i, name in enumerate(providers, 1):
-        label = PROVIDER_LABELS.get(name, "")
+        label = t(PROVIDER_LABELS.get(name, ""))
         has_key = bool(os.environ.get(env_key_name(name)))
-        status = c("green", "已配置 Key") if has_key else c("dim", "未配置 Key")
+        status = c("green", t("已配置 Key")) if has_key else c("dim", t("未配置 Key"))
         model = default_models.get(name, "—")
-        mark = c("yellow", "  ← 当前默认") if name == current else ""
+        mark = c("yellow", t("  ← 当前默认")) if name == current else ""
         print(f"  {i:>2}. {c('cyan', f'{name:<10}')} {label:<18} "
-              f"默认模型 {c('dim', f'{model:<22}')} {status}{mark}")
+              f"{t('默认模型')} {c('dim', f'{model:<22}')} {status}{mark}")
 
     while True:
-        raw = _ask(f"请输入编号或厂商名（回车 = {current}）: ", current).lower()
+        raw = _ask(t("请输入编号或厂商名（回车 = {cur}）: ", cur=current), current).lower()
         if raw.isdigit() and 1 <= int(raw) <= len(providers):
             return providers[int(raw) - 1]
         if raw in providers:
             return raw
-        print(c("red", f"  无效输入：{raw}，请输入 1-{len(providers)} 或厂商名。"))
+        print(c("red", t("  无效输入：{raw}，请输入 1-{n} 或厂商名。", raw=raw, n=len(providers))))
 
 
 def _step_model(provider: str, default_models: dict) -> str:
     """步骤 2：选择模型（回车用厂商内置默认）。"""
     default = default_models.get(provider) or ""
-    print(c("bold", f"\n[2/4] 选择模型（厂商: {provider}）"))
+    print(c("bold", t("\n[2/4] 选择模型（厂商: {p}）", p=provider)))
     while True:
         if default:
-            model = _ask(f"回车使用默认 {c('cyan', default)}，或输入其他模型名: ", default)
+            model = _ask(t("回车使用默认 {d}，或输入其他模型名: ", d=c('cyan', default)), default)
         else:
-            model = _ask("该厂商无内置默认模型，请输入模型名: ")
+            model = _ask(t("该厂商无内置默认模型，请输入模型名: "))
         if model:
             return model
-        print(c("red", "  模型名不能为空。"))
+        print(c("red", t("  模型名不能为空。")))
 
 
 def _step_api_key(provider: str) -> str | None:
@@ -165,16 +166,16 @@ def _step_api_key(provider: str) -> str | None:
     existing = os.environ.get(env_name)
     url = PROVIDER_KEY_URLS.get(provider)
 
-    print(c("bold", f"\n[3/4] 配置 API Key（环境变量 {env_name}）"))
+    print(c("bold", t("\n[3/4] 配置 API Key（环境变量 {env}）", env=env_name)))
     if url:
-        print(f"  申请地址: {c('cyan', url)}")
+        print(t("  申请地址: {url}", url=c('cyan', t(url))))
     if existing:
-        print(f"  当前已配置: {c('green', mask_key(existing))}")
-        key = _ask("  回车保留现有，或粘贴新 Key: ")
+        print(t("  当前已配置: {masked}", masked=c('green', mask_key(existing))))
+        key = _ask(t("  回车保留现有，或粘贴新 Key: "))
     else:
-        key = _ask("  请粘贴 API Key（回车跳过，稍后可再运行 milu setup）: ")
+        key = _ask(t("  请粘贴 API Key（回车跳过，稍后可再运行 milu setup）: "))
         if not key:
-            print(c("yellow", f"  未配置 Key，调用 {provider} 时会鉴权失败。"))
+            print(c("yellow", t("  未配置 Key，调用 {p} 时会鉴权失败。", p=provider)))
     return key or None
 
 
@@ -184,17 +185,17 @@ def _step_search() -> tuple[str | None, str | None, str | None]:
     :return: (后端标识或 None=跳过, Key 环境变量名或 None, 新 Key 或 None)。
     """
     current = os.environ.get("WEB_SEARCH_PROVIDER", "ddg").strip().lower()
-    print(c("bold", "\n[4/4] 配置联网搜索工具（web_search 后端）"))
+    print(c("bold", t("\n[4/4] 配置联网搜索工具（web_search 后端）")))
     for i, (name, desc, _env, url) in enumerate(SEARCH_BACKENDS, 1):
         url_str = f"  {c('cyan', url)}" if url else ""
-        mark = c("yellow", "  ← 当前") if name == current else ""
-        print(f"  {i}. {c('cyan', f'{name:<7}')} {desc}{url_str}{mark}")
+        mark = c("yellow", t("  ← 当前")) if name == current else ""
+        print(f"  {i}. {c('cyan', f'{name:<7}')} {t(desc)}{url_str}{mark}")
     skip_no = len(SEARCH_BACKENDS) + 1
-    print(f"  {skip_no}. 跳过（保持现状: {current}）")
+    print(t("  {n}. 跳过（保持现状: {cur}）", n=skip_no, cur=current))
 
     backend: str | None = None
     while True:
-        raw = _ask("请输入编号（回车 = 跳过）: ", str(skip_no)).lower()
+        raw = _ask(t("请输入编号（回车 = 跳过）: "), str(skip_no)).lower()
         if raw.isdigit() and 1 <= int(raw) <= skip_no:
             idx = int(raw)
             backend = None if idx == skip_no else SEARCH_BACKENDS[idx - 1][0]
@@ -203,7 +204,7 @@ def _step_search() -> tuple[str | None, str | None, str | None]:
         if raw in names:
             backend = raw
             break
-        print(c("red", f"  无效输入：{raw}。"))
+        print(c("red", t("  无效输入：{raw}。", raw=raw)))
 
     if backend is None:
         return None, None, None
@@ -214,12 +215,12 @@ def _step_search() -> tuple[str | None, str | None, str | None]:
 
     existing = os.environ.get(env_name)
     if existing:
-        print(f"  {env_name} 已配置: {c('green', mask_key(existing))}")
-        key = _ask("  回车保留现有，或粘贴新 Key: ")
+        print(t("  {env} 已配置: {masked}", env=env_name, masked=c('green', mask_key(existing))))
+        key = _ask(t("  回车保留现有，或粘贴新 Key: "))
     else:
-        key = _ask(f"  请粘贴 {env_name}（回车跳过）: ")
+        key = _ask(t("  请粘贴 {env}（回车跳过）: ", env=env_name))
         if not key:
-            print(c("yellow", f"  未配置 {env_name}，搜索工具运行时会报错提示。"))
+            print(c("yellow", t("  未配置 {env}，搜索工具运行时会报错提示。", env=env_name)))
     return backend, env_name, key or None
 
 
@@ -261,11 +262,21 @@ def run_setup_wizard() -> int:
     current_provider = config.llm.get("provider") or DEFAULT_PROVIDER
     env_path = user_data_dir() / ".env"
 
+    # 语言选择（即时切换并持久化到用户配置；回车保持当前）
+    try:
+        lang_raw = _ask(t("语言 / Language [zh/en]（回车 = {cur}）: ", cur=get_lang()), get_lang()).lower()
+    except KeyboardInterrupt:
+        print(c("dim", t("\n已取消初始化引导，未写入任何配置。")))
+        return 130
+    chosen_lang = "en" if lang_raw.startswith("e") else "zh"
+    set_lang(chosen_lang)
+    set_user_value("lang", chosen_lang)
+
     print(BANNER)
-    print(c("bold", c("cyan", "  milu 初始化引导")))
+    print(c("bold", c("cyan", t("  milu 初始化引导"))))
     print(BANNER)
-    print("  共 4 步：选厂商 → 选模型 → API Key → 搜索工具（Ctrl+C 随时退出）")
-    print(f"  密钥写入 {c('dim', str(env_path))}，厂商/模型写入用户配置。")
+    print(t("  共 4 步：选厂商 → 选模型 → API Key → 搜索工具（Ctrl+C 随时退出）"))
+    print(t("  密钥写入 {p}，厂商/模型写入用户配置。", p=c('dim', str(env_path))))
 
     # 收集阶段（Ctrl+C 退出不写任何文件）
     try:
@@ -274,7 +285,7 @@ def run_setup_wizard() -> int:
         api_key = _step_api_key(provider)
         backend, search_env, search_key = _step_search()
     except KeyboardInterrupt:
-        print(c("dim", "\n已取消初始化引导，未写入任何配置。"))
+        print(c("dim", t("\n已取消初始化引导，未写入任何配置。")))
         return 130
 
     # 写入阶段：密钥 → 用户级 .env；厂商/模型 → 用户级 config.json
@@ -297,31 +308,32 @@ def run_setup_wizard() -> int:
     # 可选验证（已写入完成，Ctrl+C 只中断验证不影响配置）
     try:
         if os.environ.get(env_key_name(provider)) and _ask_yes_no(
-            f"\n是否立即验证 {provider} 的 API Key（发送一次最小请求）？", default=False
+            t("\n是否立即验证 {p} 的 API Key（发送一次最小请求）？", p=provider), default=False
         ):
-            print(c("dim", "  验证中..."))
+            print(c("dim", t("  验证中...")))
             ok, err = asyncio.run(_verify_api_key(provider, model))
             if ok:
-                print(c("green", "  验证通过，Key 可用。"))
+                print(c("green", t("  验证通过，Key 可用。")))
             else:
-                print(c("red", f"  验证失败：{err}"))
-                print(c("dim", "  请检查 Key 是否正确，可重新运行 milu setup 修改。"))
+                print(c("red", t("  验证失败：{err}", err=err)))
+                print(c("dim", t("  请检查 Key 是否正确，可重新运行 milu setup 修改。")))
     except KeyboardInterrupt:
-        print(c("dim", "\n  已跳过验证。"))
+        print(c("dim", t("\n  已跳过验证。")))
 
     # 总结
     print(f"\n{DIVIDER}")
-    print(c("bold", c("green", "  配置完成！")))
-    print(f"  厂商/模型: {c('cyan', provider)} / {c('cyan', model)}  "
-          f"{c('dim', f'→ {config_path}')}")
+    print(c("bold", c("green", t("  配置完成！"))))
+    print(t("  厂商/模型: {p} / {m}  ", p=c('cyan', provider), m=c('cyan', model))
+          + c('dim', f'→ {config_path}'))
     if api_key:
         print(f"  API Key:   {env_key_name(provider)}={mask_key(api_key)}  "
               f"{c('dim', f'→ {env_path}')}")
     if backend:
         key_str = f"（{search_env}={mask_key(search_key)}）" if search_key else ""
-        print(f"  搜索后端:  {c('cyan', backend)}{key_str}  {c('dim', f'→ {env_path}')}")
-    print(f"\n  现在运行 {c('bold', 'milu')} 即可开始对话；重新配置请再运行 "
-          f"{c('bold', 'milu setup')}。")
+        print(t("  搜索后端:  {b}{keystr}  ", b=c('cyan', backend), keystr=key_str)
+              + c('dim', f'→ {env_path}'))
+    print(t("\n  现在运行 {milu} 即可开始对话；重新配置请再运行 {setup}。",
+            milu=c('bold', 'milu'), setup=c('bold', 'milu setup')))
     print(DIVIDER)
     return 0
 
@@ -334,12 +346,13 @@ def offer_first_run_setup(provider: str) -> bool:
     """
     from milu.cli.config import env_key_name
 
-    print(c("yellow", f"\n未检测到 {provider} 的 API Key（环境变量 {env_key_name(provider)}）。"))
+    print(c("yellow", t("\n未检测到 {p} 的 API Key（环境变量 {env}）。",
+                        p=provider, env=env_key_name(provider))))
     try:
-        if _ask_yes_no("是否现在进行初始化引导？", default=True):
+        if _ask_yes_no(t("是否现在进行初始化引导？"), default=True):
             return run_setup_wizard() == 0
     except KeyboardInterrupt:
         print()
-    print(c("dim", f"已跳过。稍后可运行 `milu setup`，或在 .env 中设置 "
-                   f"{env_key_name(provider)}。"))
+    print(c("dim", t("已跳过。稍后可运行 `milu setup`，或在 .env 中设置 {env}。",
+                     env=env_key_name(provider))))
     return False

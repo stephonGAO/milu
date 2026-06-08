@@ -27,6 +27,7 @@ import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from milu.i18n import t
 from milu.resources import project_config_path, user_config_path
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,8 @@ def _builtin_defaults() -> dict:
             "show_subagent_events": False,
         },
         "default_models": dict(DEFAULT_MODELS),
+        # CLI 界面语言（zh/en，默认中文）；运行时可经 --lang / MILU_LANG 覆盖
+        "lang": "zh",
     }
 
 
@@ -276,7 +279,7 @@ def _coerce_value(current, raw: str):
             return True
         if low in _FALSY:
             return False
-        raise ValueError(f"需要布尔值（true/false），收到：{raw!r}")
+        raise ValueError(t("需要布尔值（true/false），收到：{raw}", raw=repr(raw)))
     if isinstance(current, int):
         return int(raw)
     if isinstance(current, float):
@@ -301,9 +304,9 @@ def set_user_value(dotted: str, raw: str) -> tuple[Path, object]:
     try:
         current = eff.get(dotted)
     except KeyError:
-        raise ValueError(f"未知配置项：{dotted}")
+        raise ValueError(t("未知配置项：{dotted}", dotted=dotted))
     if isinstance(current, dict):
-        raise ValueError(f"'{dotted}' 是配置分节，请设置其下具体项（如 {dotted}.xxx）")
+        raise ValueError(t("'{dotted}' 是配置分节，请设置其下具体项（如 {dotted}.xxx）", dotted=dotted))
     try:
         value = _coerce_value(current, raw)
     except ValueError as e:
