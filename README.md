@@ -36,11 +36,42 @@ milu is both a ready-to-run agent and a framework to build on — start instantl
 - 🚀 **Run it**: `milu` for chat, `milu serve` for a multi-user service — full capabilities, zero code.
 - 🧩 **Build on it**: `from milu import Agent` to embed agents in your own backend, then scale to multi-user / multi-tenant with AgentPool — **you own your data and stack**.
 
-## Quick start
+## Install
+
+**Easiest — no existing Python needed.** [uv](https://github.com/astral-sh/uv) installs Python and milu for you:
+
+```bash
+# 1. install uv (one line, needs no Python)
+curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
+
+# 2. install milu (uv fetches a Python automatically if missing)
+uv tool install milu
+```
+
+**With pip** — if you already have Python 3.10+:
 
 ```bash
 pip install milu              # everything included: CLI, web service, RAG, MCP
 ```
+
+**Docker** — no Python on the host at all:
+
+```bash
+cp .env.example .env          # fill in at least one provider API key
+docker compose up -d
+```
+
+<details>
+<summary><b>New to Python? Beginner step-by-step</b></summary>
+
+1. Download Python 3.10+ from [python.org/downloads](https://www.python.org/downloads/). On Windows, tick **"Add Python to PATH"** during setup.
+2. Open a terminal (Windows: PowerShell · macOS: Terminal) and check: `python --version` should print 3.10 or higher.
+3. `pip install milu`
+4. `milu` to start chatting.
+</details>
+
+## Quick start
 
 **CLI** — zero config to first conversation:
 
@@ -64,13 +95,6 @@ async for event in agent.run("What time is it? Use a tool to check."):
 
 ```bash
 milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
-```
-
-**Docker**:
-
-```bash
-cp .env.example .env          # fill in at least one provider API key
-docker compose up -d
 ```
 
 ## How it compares
@@ -280,6 +304,7 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)
 - [ ] Prebuilt images on a container registry
+- [ ] One-click installers / standalone binaries (no Python required)
 
 ## Contributing
 

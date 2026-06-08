@@ -36,11 +36,42 @@ milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即
 - 🚀 **直接用**：`milu` 进入对话、`milu serve` 起多用户服务，零代码即得完整能力。
 - 🧩 **嵌进你的产品**：`from milu import Agent`，把 Agent 能力嵌入自有后端，再用 AgentPool 扩成多用户/多租户服务——**数据与技术栈完全归你**。
 
-## 快速开始
+## 安装
+
+**最简单 —— 无需预装 Python。** 用 [uv](https://github.com/astral-sh/uv)，它会顺带把 Python 装好：
+
+```bash
+# 1. 安装 uv（一行命令，不需要 Python）
+curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
+
+# 2. 安装 milu（缺 Python 时 uv 会自动下载一个）
+uv tool install milu
+```
+
+**用 pip** —— 如果你已经有 Python 3.10+：
 
 ```bash
 pip install milu              # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
 ```
+
+**Docker** —— 宿主机完全不用装 Python：
+
+```bash
+cp .env.example .env          # 填入至少一家厂商的 API Key
+docker compose up -d
+```
+
+<details>
+<summary><b>没装过 Python？小白分步指引</b></summary>
+
+1. 到 [python.org/downloads](https://www.python.org/downloads/) 下载 Python 3.10+。Windows 安装时**务必勾选 “Add Python to PATH”**。
+2. 打开终端（Windows 用 PowerShell · macOS 用 终端）验证：`python --version` 应显示 3.10 或更高。
+3. 执行 `pip install milu`
+4. 输入 `milu` 开始对话。
+</details>
+
+## 快速开始
 
 **命令行** —— 零配置到第一次对话：
 
@@ -64,13 +95,6 @@ async for event in agent.run("现在几点了？用工具查一下"):
 
 ```bash
 milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1:8000
-```
-
-**Docker**：
-
-```bash
-cp .env.example .env          # 填入至少一家厂商的 API Key
-docker compose up -d
 ```
 
 ## 横向对比
@@ -280,6 +304,7 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 - [ ] 知识库可插拔 ANN 后端（sqlite-vec），超越暴力余弦
 - [ ] 英文文档集（架构与指南，当前为中文）
 - [ ] 容器镜像发布到镜像仓库
+- [ ] 一键安装器 / 独立可执行文件（无需预装 Python）
 
 ## 贡献
 
