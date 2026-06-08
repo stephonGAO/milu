@@ -58,12 +58,11 @@ dev = [
     "pytest-asyncio>=0.23.0",
 ]
 
-# ⚠️ GitHub 仓库建好后取消注释并替换 <USERNAME>，再发布 PyPI（页面左侧链接来自这里）
-# [project.urls]
-# Homepage = "https://github.com/<USERNAME>/milu"
-# Repository = "https://github.com/<USERNAME>/milu"
-# Issues = "https://github.com/<USERNAME>/milu/issues"
-# Changelog = "https://github.com/<USERNAME>/milu/blob/main/CHANGELOG.md"
+[project.urls]
+Homepage = "https://github.com/stephonGAO/milu"
+Repository = "https://github.com/stephonGAO/milu"
+Issues = "https://github.com/stephonGAO/milu/issues"
+Changelog = "https://github.com/stephonGAO/milu/blob/main/CHANGELOG.md"
 
 [project.scripts]
 # 入口点（pip install 后可直接在终端调用）

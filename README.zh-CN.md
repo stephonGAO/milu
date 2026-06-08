@@ -10,6 +10,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
+[![GitHub stars](https://img.shields.io/github/stars/stephonGAO/milu?style=flat&logo=github&label=stars)](https://github.com/stephonGAO/milu/stargazers)
 
 [English](README.md) | **简体中文**
 
