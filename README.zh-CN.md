@@ -14,8 +14,7 @@
 
 [English](README.md) | **简体中文**
 
-<!-- demo-hero.gif 占位：录制后（脚本见 assets/RECORDING.md）取消下一行注释，并删除本说明行。 -->
-<!-- <img src="assets/demo-hero.gif" alt="milu 演示" width="820"> -->
+<img src="assets/demo-hero.zh.gif" alt="milu 演示" width="820">
 
 </div>
 

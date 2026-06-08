@@ -14,8 +14,7 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 
 **English** | [简体中文](README.zh-CN.md)
 
-<!-- demo-hero.gif goes here. After recording (see assets/RECORDING.md), uncomment the line below and delete this note. -->
-<!-- <img src="assets/demo-hero.gif" alt="milu demo" width="820"> -->
+<img src="assets/demo-hero.gif" alt="milu demo" width="820">
 
 </div>
 
