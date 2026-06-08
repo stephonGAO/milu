@@ -134,38 +134,60 @@ class TestDeepSeekChat:
         assert results[2].usage.total_tokens == 15
 
     @pytest.mark.asyncio
-    async def test_thinking_level_to_budget_mapping(self):
-        """思考等级到预算的映射：low->1024, medium->4096, high->8192"""
+    async def test_thinking_enabled_uses_thinking_type_and_reasoning_effort(self):
+        """开启思考：extra_body.thinking={"type":"enabled"}（不含 budget_tokens——
+        DeepSeek 官方 thinking 对象无此字段，那是 Claude 的字段），思考力度走顶层
+        reasoning_effort。"""
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.deepseek import DeepSeekLLM
+
+        def _mk_stream():
+            async def gen():
+                yield MockChunk(choices=[MockChoice(delta=MockDelta(content="思考中"))])
+                yield MockChunk(
+                    choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
+                    usage=MockUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+                )
+            return gen()
+
+        llm = DeepSeekLLM(api_key="test-key", model="deepseek-v4-flash")
+        mock_client = AsyncMock()
+
+        for level in ("low", "medium", "high"):
+            mock_client.chat.completions.create = AsyncMock(return_value=_mk_stream())
+            with patch.object(llm, "_get_client", return_value=mock_client):
+                messages = [Message(role=MessageRole.USER, content="请思考一下")]
+                async for _ in llm.chat(messages, enable_thinking=True, thinking_level=level):
+                    pass
+
+            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+            assert call_kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+            # 不得再出现 Claude 风格的 budget_tokens
+            assert "budget_tokens" not in call_kwargs["extra_body"]["thinking"]
+            # 思考力度走顶层 reasoning_effort
+            assert call_kwargs["reasoning_effort"] == level
+
+    @pytest.mark.asyncio
+    async def test_thinking_disabled_uses_thinking_type(self):
+        """关闭思考：extra_body.thinking={"type":"disabled"}。"""
         from milu.llm.base.message import Message, MessageRole
         from milu.llm.providers.deepseek import DeepSeekLLM
 
         async def mock_stream():
             yield MockChunk(
-                choices=[MockChoice(delta=MockDelta(content="思考中"))]
-            )
-            yield MockChunk(
                 choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
                 usage=MockUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
             )
 
-        llm = DeepSeekLLM(api_key="test-key", model="deepseek-reasoner")
+        llm = DeepSeekLLM(api_key="test-key", model="deepseek-v4-flash")
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
 
-        thinking_levels = {"low": 1024, "medium": 4096, "high": 8192}
+        with patch.object(llm, "_get_client", return_value=mock_client):
+            messages = [Message(role=MessageRole.USER, content="快速回答")]
+            async for _ in llm.chat(messages, enable_thinking=False):
+                pass
 
-        for level, expected_budget in thinking_levels.items():
-            mock_client.chat.completions.create.reset_mock()
-
-            with patch.object(llm, "_get_client", return_value=mock_client):
-                messages = [Message(role=MessageRole.USER, content="请思考一下")]
-                results = []
-                async for chunk in llm.chat(
-                    messages, enable_thinking=True, thinking_level=level
-                ):
-                    results.append(chunk)
-
-            call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-            assert "extra_body" in call_kwargs
-            assert call_kwargs["extra_body"]["thinking"]["type"] == "enabled"
-            assert call_kwargs["extra_body"]["thinking"]["budget_tokens"] == expected_budget
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["extra_body"]["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in call_kwargs

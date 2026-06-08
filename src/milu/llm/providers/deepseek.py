@@ -18,13 +18,6 @@ from milu.llm.providers.base import BaseLLM, ModelCapabilities
 
 logger = logging.getLogger(__name__)
 
-# 思考等级到 budget_tokens 的映射
-_THINKING_BUDGET_MAP = {
-    "low": 1024,
-    "medium": 4096,
-    "high": 8192,
-}
-
 
 class DeepSeekLLM(BaseLLM):
     """深度求索模型实现"""
@@ -73,11 +66,10 @@ class DeepSeekLLM(BaseLLM):
         流式聊天接口。
 
         DeepSeek特有参数映射:
-            enable_thinking (bool) → extra_body.thinking
-            thinking_level (str) → extra_body.thinking_budget:
-                low → 1024
-                medium → 4096 (默认)
-                high → 8192
+            enable_thinking (bool) → extra_body.thinking = {"type": "enabled"/"disabled"}
+            thinking_level (str)   → 顶层 reasoning_effort（思考力度；DeepSeek 接受 high/max，
+                low/medium 自动映射为 high）。【不是】thinking 对象里的 budget_tokens——
+                官方 thinking 对象不含该字段。
         """
         client = self._get_client()
 
@@ -108,15 +100,16 @@ class DeepSeekLLM(BaseLLM):
             request_params["tool_choice"] = validated["tool_choice"]
 
         # extra_body: 思考模式
-        # DeepSeek 使用 extra_body.thinking = {"type": "enabled", "budget_tokens": N}
+        # DeepSeek（v4-pro/flash）开关思考用 extra_body.thinking = {"type": "enabled"/"disabled"}。
+        # ⚠️ thinking 对象【不含】budget_tokens（那是 Claude 的字段，DeepSeek 官方文档无此项，
+        # 传了会被当未知字段）。思考力度由独立的顶层 reasoning_effort 控制
+        # （DeepSeek 接受 high/max，low/medium 自动映射为 high）。
         extra_body = {}
         if "enable_thinking" in validated and validated["enable_thinking"]:
-            thinking_level = validated.get("thinking_level", "medium")
-            budget = _THINKING_BUDGET_MAP.get(thinking_level, 4096)
-            extra_body["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": budget,
-            }
+            extra_body["thinking"] = {"type": "enabled"}
+            level = validated.get("thinking_level")
+            if level:
+                request_params["reasoning_effort"] = level
         elif "enable_thinking" in validated and not validated["enable_thinking"]:
             # 显式关闭思考
             extra_body["thinking"] = {"type": "disabled"}
