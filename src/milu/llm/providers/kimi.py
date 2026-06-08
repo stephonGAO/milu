@@ -90,8 +90,10 @@ class KimiLLM(BaseLLM):
 
         Kimi特有参数映射:
             web_search (bool) → tools 列表中添加内置工具 {"type": "builtin_function", "function": {"name": "$web_search"}}
-            enable_thinking (bool) → extra_body.reasoning_effort = thinking_level 值
-            thinking_level (str) → extra_body.reasoning_effort（low/medium/high，默认medium）
+            enable_thinking (bool) → extra_body.thinking = {"type": "enabled"/"disabled"}
+                （Kimi K2.5/K2.6 等思考模型的正式开关；不能用 OpenAI 的 reasoning_effort，
+                 该参数无法表达"关闭"——"none" 会被这些模型拒绝，只接受 minimal/low/medium/high）
+            thinking_level (str) → Kimi 思考开关无深度档位（只有 enabled/disabled），静默忽略
         """
         
         client = self._get_client()
@@ -132,13 +134,15 @@ class KimiLLM(BaseLLM):
                 "function": {"name": "$web_search"},
             })
             request_params["tools"] = tools
-        if "enable_thinking" in validated and validated["enable_thinking"]:
-            # Kimi使用 reasoning_effort 映射 thinking_level
-            thinking_level = validated.get("thinking_level", "medium")
-            extra_body["reasoning_effort"] = thinking_level
-        elif "enable_thinking" in validated and not validated["enable_thinking"]:
-            # 显式关闭思考
-            extra_body["reasoning_effort"] = "none"
+        if "enable_thinking" in validated:
+            # 思考开关走 Kimi 官方的 thinking.type（enabled/disabled）。
+            # ⚠️ 不要用 reasoning_effort="none"——k2.6 等思考模型不支持 "none"
+            # （只接受 minimal/low/medium/high），会直接 400。thinking.type 才是
+            # 正式的开/关机制。开启时历史 assistant 消息仍需带 reasoning_content
+            # （见本类 _messages_to_dicts 的回传处理）。
+            extra_body["thinking"] = {
+                "type": "enabled" if validated["enable_thinking"] else "disabled"
+            }
         if extra_body:
             request_params["extra_body"] = extra_body
 

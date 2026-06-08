@@ -156,37 +156,47 @@ class TestKimiChat:
         assert results[2].usage.total_tokens == 15
 
     @pytest.mark.asyncio
-    async def test_thinking_level_mapping(self):
-        """思考级别映射：extra_body.reasoning_effort 应为 thinking_level 值"""
+    async def test_thinking_toggle_uses_thinking_type(self):
+        """思考开关：走 Kimi 官方 thinking.type（enabled/disabled），
+        不再用 reasoning_effort（"none" 会被 k2.6 等思考模型 400 拒绝）。
+        thinking_level 无深度档位，应被静默忽略。
+        """
         from milu.llm.base.message import Message, MessageRole
         from milu.llm.providers.kimi import KimiLLM
 
-        async def mock_stream():
-            yield MockChunk(
-                choices=[MockChoice(delta=MockDelta(content="思考中"))]
-            )
-            yield MockChunk(
-                choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
-                usage=MockUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
-            )
+        def _mock_stream():
+            async def gen():
+                yield MockChunk(choices=[MockChoice(delta=MockDelta(content="ok"))])
+                yield MockChunk(
+                    choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
+                    usage=MockUsage(prompt_tokens=5, completion_tokens=3, total_tokens=8),
+                )
+            return gen()
 
-        llm = KimiLLM(api_key="test-key", model="moonshot-v1-8k")
+        # ① 开启思考
+        llm = KimiLLM(api_key="test-key", model="kimi-k2.6")
         mock_client = AsyncMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
-
+        mock_client.chat.completions.create = AsyncMock(return_value=_mock_stream())
         with patch.object(llm, "_get_client", return_value=mock_client):
             messages = [Message(role=MessageRole.USER, content="请思考一下")]
-            results = []
-            async for chunk in llm.chat(
-                messages, enable_thinking=True, thinking_level="high"
-            ):
-                results.append(chunk)
-
-        # 验证调用参数
+            async for _ in llm.chat(messages, enable_thinking=True, thinking_level="high"):
+                pass
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-        assert "extra_body" in call_kwargs
-        # Kimi使用 reasoning_effort 映射 thinking_level
-        assert call_kwargs["extra_body"]["reasoning_effort"] == "high"
+        assert call_kwargs["extra_body"]["thinking"] == {"type": "enabled"}
+        # thinking_level 不应映射成 reasoning_effort
+        assert "reasoning_effort" not in call_kwargs["extra_body"]
+
+        # ② 关闭思考 → disabled（绝不能是 reasoning_effort="none"）
+        llm2 = KimiLLM(api_key="test-key", model="kimi-k2.6")
+        mock_client2 = AsyncMock()
+        mock_client2.chat.completions.create = AsyncMock(return_value=_mock_stream())
+        with patch.object(llm2, "_get_client", return_value=mock_client2):
+            messages = [Message(role=MessageRole.USER, content="别想太多直接答")]
+            async for _ in llm2.chat(messages, enable_thinking=False):
+                pass
+        call_kwargs2 = mock_client2.chat.completions.create.call_args.kwargs
+        assert call_kwargs2["extra_body"]["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in call_kwargs2["extra_body"]
 
     @pytest.mark.asyncio
     async def test_reasoning_content_echoed_on_tool_call_message(self):
