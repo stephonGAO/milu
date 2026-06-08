@@ -854,11 +854,15 @@ async function sendMsg(){
   if(!isCmd){attFiles=[];renderAtts();}
   setStatus(tr("status.thinking"));
   // 流式上下文
-  let asstWrap=null, asstText="", asstEl=null, thinkEl=null;
-  const ensureAsst=()=>{if(!asstEl){resetToolLog();asstWrap=el("turn");
+  let asstWrap=null, asstText="", asstEl=null, thinkEl=null, seg=null;
+  const ensureAsst=()=>{if(!asstEl){asstWrap=el("turn");
     asstWrap.innerHTML='<div class="asst"><div class="avatar" role="img" aria-label="milu"></div><div class="abody"><div class="role">milu</div></div></div>';
     asstEl=document.createElement("div");asstEl.className="bubble assistant";
     asstWrap.querySelector(".abody").appendChild(asstEl)}return asstEl};
+  // ── 段落交替：文本/推理 与 工具按时间顺序切换；每次切换收尾上一段、另起新块，DOM 顺序即时间顺序 ──
+  // （修复：原先文本全堆一块、工具全堆一块，多轮交替输出顺序错乱）
+  const segOutput=()=>{if(seg==="tool")resetToolLog();seg="output";};            // 进入文本段：工具段已结束 → 下个工具另起新块
+  const segTool=()=>{if(seg==="output"){if(asstEl)enhanceCodeBlocks(asstEl);asstEl=null;asstText="";thinkEl=null;}seg="tool";}; // 进入工具段：收尾当前文本气泡 → 下段文本另起新气泡
   aborter=new AbortController();
   try{
     // 先上传附件
@@ -889,19 +893,19 @@ async function sendMsg(){
         }
         if(!ev||data===null)continue;
         let d={};try{d=JSON.parse(data)}catch(e){}
-        if(ev==="TextDelta"){asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);setStatus(tr("status.replying"));scrollChat()}
-        else if(ev==="ReasoningDelta"){if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";setStatus(tr("status.reasoning"));scrollChat()}
+        if(ev==="TextDelta"){segOutput();asstText+=d.text||"";ensureAsst().innerHTML=md(asstText);setStatus(tr("status.replying"));scrollChat()}
+        else if(ev==="ReasoningDelta"){segOutput();if(!thinkEl)thinkEl=el("think","");thinkEl.textContent+=d.text||"";setStatus(tr("status.reasoning"));scrollChat()}
         else if(ev==="ToolCallPreparing"){setStatus(tr("status.preparing",esc(d.tool_name)))}
         else if(ev==="SafetyCheckStart"){setStatus(tr("status.safety"))}
-        else if(ev==="ToolCallStart"){toolNames.push(d.tool_name);toolLine("tool",icon("wrench")+"<span>"+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,160))+"</span>");setStatus(tr("status.calling",esc(d.tool_name)))}
-        else if(ev==="ToolResult"){const o=(d.output||"").slice(0,400);toolLine("tool "+(d.is_error?"err":"res"),icon(d.is_error?"close":"check")+"<span>"+esc(d.tool_name)+": "+esc(o)+"</span>",d.is_error);setStatus(tr("status.processing"))}
-        else if(ev==="ToolConfirmRequired"){toolLine("tool",icon(d.approved?"check":"close")+"<span>"+(d.approved?tr("tool.approved"):tr("tool.denied"))+" "+esc(d.tool_name)+"</span>")}
+        else if(ev==="ToolCallStart"){segTool();toolNames.push(d.tool_name);toolLine("tool",icon("wrench")+"<span>"+esc(d.tool_name)+"  "+esc((d.arguments||"").slice(0,160))+"</span>");setStatus(tr("status.calling",esc(d.tool_name)))}
+        else if(ev==="ToolResult"){segTool();const o=(d.output||"").slice(0,400);toolLine("tool "+(d.is_error?"err":"res"),icon(d.is_error?"close":"check")+"<span>"+esc(d.tool_name)+": "+esc(o)+"</span>",d.is_error);setStatus(tr("status.processing"))}
+        else if(ev==="ToolConfirmRequired"){segTool();toolLine("tool",icon(d.approved?"check":"close")+"<span>"+(d.approved?tr("tool.approved"):tr("tool.denied"))+" "+esc(d.tool_name)+"</span>")}
         else if(ev==="ConfirmationRequest"){setStatus(tr("status.confirm"));showConfirm(d)}
-        else if(ev==="SubAgentEvent"){const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name&&inner.tool_call_id)tx="→ "+inner.tool_name;if(tx)toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus(tr("status.subagent",esc(n)))}
-        else if(ev==="SubAgentDone"){toolLine("sub",icon("check")+"["+esc(d.subagent_name)+"] "+tr("sub.done"))}
+        else if(ev==="SubAgentEvent"){segTool();const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name&&inner.tool_call_id)tx="→ "+inner.tool_name;if(tx)toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus(tr("status.subagent",esc(n)))}
+        else if(ev==="SubAgentDone"){segTool();toolLine("sub",icon("check")+"["+esc(d.subagent_name)+"] "+tr("sub.done"))}
         else if(ev==="HistoryCompacted"){sysline(tr("hist.compacted",d.original_count,d.compacted_count))}
         else if(ev==="SessionLoaded"){sysline(tr("sess.loaded.sse",d.session_id))}
-        else if(ev==="AgentDone"){enhanceCodeBlocks(asstEl);clearStatus();resetToolLog();asstEl=thinkEl=null;asstText="";const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(" · tokens="+u.total_tokens):""))}
+        else if(ev==="AgentDone"){enhanceCodeBlocks(asstEl);clearStatus();resetToolLog();asstEl=thinkEl=null;asstText="";seg=null;const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(" · tokens="+u.total_tokens):""))}
         else if(ev==="AgentError"){clearStatus();el("tool err",icon("alert")+"<span>"+esc(d.message||"")+"</span>")}
         else if(ev==="ServerError"){clearStatus();el("tool err",icon("alert")+"<span>"+tr("err.server",esc(d.message||""))+"</span>")}
         else if(ev==="CommandResult"){clearStatus();const t=d.type;const node=el(t==="error"?"tool err":(t==="info"?"sysline":"bubble assistant"),(t==="text")?("<pre>"+esc(d.text)+"</pre>"):esc(d.text));if(t!=="info"&&t!=="error")enhanceCodeBlocks(node)}
