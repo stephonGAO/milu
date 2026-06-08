@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1280px;height:640px;overflow:hidden}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    background:
+      radial-gradient(900px 520px at 18% -10%, rgba(37,99,235,.28), transparent 60%),
+      radial-gradient(760px 520px at 100% 120%, rgba(124,58,237,.26), transparent 55%),
+      radial-gradient(620px 420px at 88% 8%, rgba(99,102,241,.22), transparent 60%),
+      linear-gradient(135deg,#0b1120 0%,#111827 55%,#0c1322 100%);
+    color:#fff;position:relative;
+  }
+  /* subtle dotted grid */
+  .grid{position:absolute;inset:0;
+    background-image:radial-gradient(rgba(255,255,255,.05) 1.2px, transparent 1.2px);
+    background-size:30px 30px;mask-image:linear-gradient(180deg,#000,transparent 85%)}
+  .wrap{position:relative;height:100%;display:flex;flex-direction:column;justify-content:center;padding:0 80px}
+
+  .brandrow{display:flex;align-items:center;gap:22px;margin-bottom:6px}
+  .deer{font-size:78px;line-height:1;filter:drop-shadow(0 6px 22px rgba(96,165,250,.45))}
+  .name{font-size:104px;font-weight:800;letter-spacing:-2px;
+    background:linear-gradient(180deg,#fff 35%,#bcd0ff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .cn{font-size:30px;font-weight:600;color:#93a4c4;margin-left:6px;letter-spacing:2px}
+
+  .tag{font-size:40px;font-weight:700;color:#f1f5f9;margin-top:14px;letter-spacing:-.5px}
+  .tag .hl{color:#60a5fa}
+  .sub{font-size:24px;color:#94a3b8;margin-top:12px;font-weight:500}
+
+  .chips{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px;max-width:1020px}
+  .chip{font-size:19px;font-weight:600;padding:9px 18px;border-radius:999px;
+    border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dbe4f3;
+    display:flex;align-items:center;gap:9px}
+  .chip .d{width:9px;height:9px;border-radius:50%}
+
+  .foot{position:absolute;left:80px;right:80px;bottom:46px;display:flex;align-items:center;justify-content:space-between}
+  .install{font-family:Consolas,"SF Mono",monospace;font-size:23px;color:#cbd5e1;
+    background:rgba(2,6,23,.55);border:1px solid rgba(255,255,255,.12);padding:11px 20px;border-radius:12px}
+  .install .pmt{color:#475569}
+  .install .cmd{color:#7dd3fc}
+  .meta{display:flex;gap:26px;font-size:19px;color:#8aa0c0;font-weight:600}
+  .meta b{color:#cbd5e1}
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="wrap">
+    <div class="brandrow">
+      <div class="deer">🦌</div>
+      <div class="name">milu</div>
+      <div class="cn">米鹿 / 麋鹿</div>
+    </div>
+    <div class="tag">Production-ready <span class="hl">multi-user</span> AI agents</div>
+    <div class="sub">Chinese LLMs as first-class citizens · one library, demo → production</div>
+
+    <div class="chips">
+      <div class="chip"><span class="d" style="background:#6366f1"></span>Multi-user AgentPool</div>
+      <div class="chip"><span class="d" style="background:#2563eb"></span>9 LLM providers</div>
+      <div class="chip"><span class="d" style="background:#7c3aed"></span>Tools &amp; MCP</div>
+      <div class="chip"><span class="d" style="background:#0ea5e9"></span>Sub-agents</div>
+      <div class="chip"><span class="d" style="background:#16a34a"></span>Skills</div>
+      <div class="chip"><span class="d" style="background:#d97706"></span>RAG</div>
+      <div class="chip"><span class="d" style="background:#ec4899"></span>Scheduler</div>
+      <div class="chip"><span class="d" style="background:#ef4444"></span>Safety modes + AI judge</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="install"><span class="pmt">$ </span><span class="cmd">pip install milu</span></div>
+    <div class="meta"><span>Python <b>3.10+</b></span><span><b>MIT</b> license</span><span><b>1100+</b> tests</span></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 700" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif">
+  <!-- backdrop card -->
+  <rect x="8" y="8" width="1024" height="684" rx="20" fill="#ffffff" stroke="#e3e3e6" stroke-width="1.5"/>
+
+  <!-- title -->
+  <text x="40" y="50" font-size="26" font-weight="700" fill="#1d1d1f">🦌 milu<tspan font-size="20" font-weight="500" fill="#86868b"> — 架构总览</tspan></text>
+  <text x="1000" y="50" font-size="13" fill="#86868b" text-anchor="end">Python 3.10+ · 全链路 async</text>
+
+  <!-- AgentPool bar -->
+  <rect x="40" y="72" width="960" height="72" rx="14" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1.5"/>
+  <rect x="56" y="90" width="6" height="36" rx="3" fill="#6366f1"/>
+  <text x="78" y="104" font-size="17" font-weight="700" fill="#4338ca">AgentPool <tspan font-size="13" font-weight="500" fill="#6366f1">· 多用户并发池(可选)</tspan></text>
+  <text x="78" y="127" font-size="13" fill="#6366f1">per-user 实例隔离 · LRU / TTL 淘汰 · 全局并发限流 · 共享 MCP 进程</text>
+
+  <!-- connector arrow -->
+  <line x1="520" y1="146" x2="520" y2="167" stroke="#94a3b8" stroke-width="2"/>
+  <path d="M520 174 L514 164 L526 164 Z" fill="#94a3b8"/>
+
+  <!-- Agent.run() loop container -->
+  <rect x="40" y="176" width="960" height="464" rx="18" fill="#f8fafc" stroke="#e3e3e6" stroke-width="1.5"/>
+
+  <!-- loop header -->
+  <rect x="60" y="196" width="920" height="56" rx="12" fill="#111827"/>
+  <text x="80" y="223" font-size="16" font-weight="700" fill="#ffffff">Agent.run() 主循环</text>
+  <text x="80" y="242" font-size="12" fill="#cbd5e1">重建提示词 → 自动压缩 → LLM 流式 → 解析工具调用 → 安全检查 → 执行 → 回传</text>
+
+  <!-- ===== layer cards (2 cols x 3 rows) ===== -->
+  <!-- C1 LLM 层 -->
+  <rect x="60" y="268" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="76" y="286" width="6" height="70" rx="3" fill="#2563eb"/>
+  <text x="98" y="308" font-size="15" font-weight="700" fill="#1d1d1f">LLM 层</text>
+  <text x="98" y="332" font-size="12.5" fill="#475569">9 家厂商 · 一套 AsyncOpenAI 统一接口</text>
+  <text x="98" y="352" font-size="12" fill="#94a3b8">通义 · DeepSeek · Kimi · GLM · MiniMax · 豆包 · GPT · Gemini · Claude</text>
+
+  <!-- C2 工具层 -->
+  <rect x="532" y="268" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="548" y="286" width="6" height="70" rx="3" fill="#7c3aed"/>
+  <text x="570" y="308" font-size="15" font-weight="700" fill="#1d1d1f">工具层</text>
+  <text x="570" y="332" font-size="12.5" fill="#475569">20+ 内置工具 · 自定义 @tool · MCP</text>
+  <text x="570" y="352" font-size="12" fill="#94a3b8">活跃 / 休眠双池 · stdio · HTTP · SSE</text>
+
+  <!-- C3 安全层 -->
+  <rect x="60" y="392" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="76" y="410" width="6" height="70" rx="3" fill="#d97706"/>
+  <text x="98" y="432" font-size="15" font-weight="700" fill="#1d1d1f">安全层</text>
+  <text x="98" y="456" font-size="12.5" fill="#475569">talk / manual / auto / superwork</text>
+  <text x="98" y="476" font-size="12" fill="#94a3b8">AI 安全判定器 · 人工确认流</text>
+
+  <!-- C4 子代理 -->
+  <rect x="532" y="392" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="548" y="410" width="6" height="70" rx="3" fill="#6366f1"/>
+  <text x="570" y="432" font-size="15" font-weight="700" fill="#1d1d1f">子代理</text>
+  <text x="570" y="456" font-size="12.5" fill="#475569">researcher · reader · coder</text>
+  <text x="570" y="476" font-size="12" fill="#94a3b8">上下文隔离 · 继承父级安全模式</text>
+
+  <!-- C5 提示词与技能 -->
+  <rect x="60" y="516" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="76" y="534" width="6" height="70" rx="3" fill="#16a34a"/>
+  <text x="98" y="556" font-size="15" font-weight="700" fill="#1d1d1f">提示词与技能</text>
+  <text x="98" y="580" font-size="12.5" fill="#475569">分层 Markdown 提示词</text>
+  <text x="98" y="600" font-size="12" fill="#94a3b8">元数据常驻 · 正文按需加载</text>
+
+  <!-- C6 会话 / 记忆 / RAG -->
+  <rect x="532" y="516" width="448" height="106" rx="12" fill="#ffffff" stroke="#e5e7eb" stroke-width="1.5"/>
+  <rect x="548" y="534" width="6" height="70" rx="3" fill="#475569"/>
+  <text x="570" y="556" font-size="15" font-weight="700" fill="#1d1d1f">会话 · 记忆 · RAG</text>
+  <text x="570" y="580" font-size="12.5" fill="#475569">JSONL 持久化 · 压缩快照恢复</text>
+  <text x="570" y="600" font-size="12" fill="#94a3b8">长期记忆 · 向量知识库</text>
+
+  <!-- footer caption -->
+  <text x="520" y="668" font-size="12.5" fill="#86868b" text-anchor="middle">所有厂商统一走一个 <tspan font-family="Consolas, 'SF Mono', monospace" fill="#475569">openai.AsyncOpenAI</tspan> 客户端 —— LLM 实例协程安全、可跨用户共享。</text>
+</svg>

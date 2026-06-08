@@ -14,7 +14,8 @@
 
 [English](README.md) | **简体中文**
 
-<!-- TODO(launch): 演示 GIF —— milu serve 前端或 CLI 对话，≤30 秒 -->
+<!-- demo-hero.gif 占位：录制后（脚本见 assets/RECORDING.md）取消下一行注释，并删除本说明行。 -->
+<!-- <img src="assets/demo-hero.gif" alt="milu 演示" width="820"> -->
 
 </div>
 
@@ -264,6 +265,9 @@ milu chat
 
 ## 命令行
 
+<!-- demo-cli.gif（可选）占位：录制后（脚本见 assets/RECORDING.md）取消下一行注释，并删除本说明行。 -->
+<!-- <img src="assets/demo-cli.gif" alt="milu CLI 演示" width="760"> -->
+
 ```text
 milu                 交互式对话（首次运行自动进入初始化引导）
 milu setup           厂商 / API Key / 搜索后端引导
@@ -278,6 +282,13 @@ milu schedule ...    定时任务管理
 
 ## 架构
 
+<div align="center">
+<img src="assets/architecture.zh.svg" alt="milu 架构" width="860">
+</div>
+
+<details>
+<summary>纯文本版</summary>
+
 ```text
 AgentPool（多用户，可选）
   └─ Agent.run() 循环 ── 重建系统提示词 → 自动压缩
@@ -288,6 +299,7 @@ AgentPool（多用户，可选）
        ├─ 提示词与技能  分层 Markdown 提示词 · 技能按需加载
        └─ 会话          JSONL 持久化 · 压缩快照恢复
 ```
+</details>
 
 Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` 客户端，LLM 实例协程安全、可跨用户共享。
 
