@@ -162,7 +162,9 @@
   .bubble.assistant{padding:1px 0;color:var(--ink)}
   .think{color:#64748b;font-size:13px;background:var(--bg-soft);border:1px solid var(--line);border-left:3px solid #cbd5e1;
     padding:8px 12px;border-radius:var(--r-sm);margin:6px 0;white-space:pre-wrap;line-height:1.6}
-  .sub{margin:5px 0;border-left:2px solid #e0e7ff;padding-left:11px;color:var(--sub);font-size:12.5px}
+  .sub{margin:5px 0;border-left:2px solid #e0e7ff;padding-left:11px;color:var(--sub);font-size:12.5px;
+    line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+  .sub .sname{font-weight:600;color:var(--purple);margin-right:4px}
   .sysline{font-size:12px;color:var(--dim);text-align:center;margin:12px auto;max-width:720px;
     background:var(--bg-soft);border:1px solid var(--line-2);border-radius:var(--r-full);padding:5px 14px;width:fit-content}
   .meta-done{font-size:11px;color:var(--faint);margin:6px 0 2px;display:inline-flex;align-items:center;gap:6px;
@@ -734,6 +736,8 @@ $("toBottom").onclick=()=>chat.scrollTo({top:chat.scrollHeight,behavior:"smooth"
 // ── 工具过程折叠块 ──
 let toolsOpenDefault=localStorage.getItem("milu_tools_open")==="1";
 let toolLog=null, toolNames=[], toolSteps=0;
+// 子代理流式文本累积器：把连续文本分片并入同一行，避免每个分片单独成行
+let subTextEl=null, subTextName=null, subTextRaw="";
 function ensureToolLog(){
   if(!toolLog){
     toolLog=document.createElement("div");
@@ -753,8 +757,9 @@ function toolLine(cls,html,isErr){
   const uniq=[...new Set(toolNames)].filter(Boolean);
   tl.querySelector(".tl-sum").textContent=tr("toollog.title")+(uniq.length?(" · "+uniq.slice(0,4).join(", ")+(uniq.length>4?"…":"")):"")+tr("toollog.steps",toolSteps);
   scrollChat();
+  return d;
 }
-function resetToolLog(){toolLog=null;toolNames=[];toolSteps=0;}
+function resetToolLog(){toolLog=null;toolNames=[];toolSteps=0;subTextEl=null;subTextName=null;subTextRaw="";}
 
 // 清空聊天窗口
 function clearChat(){chat.innerHTML="";resetToolLog();statusEl=null;}
@@ -901,8 +906,20 @@ async function sendMsg(){
         else if(ev==="ToolResult"){segTool();const o=(d.output||"").slice(0,400);toolLine("tool "+(d.is_error?"err":"res"),icon(d.is_error?"close":"check")+"<span>"+esc(d.tool_name)+": "+esc(o)+"</span>",d.is_error);setStatus(tr("status.processing"))}
         else if(ev==="ToolConfirmRequired"){segTool();toolLine("tool",icon(d.approved?"check":"close")+"<span>"+(d.approved?tr("tool.approved"):tr("tool.denied"))+" "+esc(d.tool_name)+"</span>")}
         else if(ev==="ConfirmationRequest"){setStatus(tr("status.confirm"));showConfirm(d)}
-        else if(ev==="SubAgentEvent"){segTool();const n=d.subagent_name,inner=d.event||{};let tx="";if(inner.text)tx=inner.text;else if(inner.tool_name&&inner.tool_call_id)tx="→ "+inner.tool_name;if(tx)toolLine("sub","["+esc(n)+"] "+esc(tx).slice(0,200));setStatus(tr("status.subagent",esc(n)))}
-        else if(ev==="SubAgentDone"){segTool();toolLine("sub",icon("check")+"["+esc(d.subagent_name)+"] "+tr("sub.done"))}
+        else if(ev==="SubAgentEvent"){segTool();const n=d.subagent_name,inner=d.event||{};
+          if(inner.text!=null&&inner.text!==""){
+            // 流式文本/推理分片：累积进同一行（同一子代理）→ 连贯成段，不再几字一行
+            if(!subTextEl||subTextName!==n){subTextEl=toolLine("sub",'<span class="sname">['+esc(n)+']</span>');subTextName=n;subTextRaw="";}
+            subTextRaw+=inner.text;
+            subTextEl.innerHTML='<span class="sname">['+esc(n)+']</span>'+esc(subTextRaw);
+            scrollChat();
+          }else if(inner.tool_name&&inner.tool_call_id){
+            subTextEl=null;  // 工具调用 → 当前文本行收尾，工具另起一行
+            toolLine("sub",'<span class="sname">['+esc(n)+']</span>→ '+esc(inner.tool_name));
+          }
+          setStatus(tr("status.subagent",esc(n)));
+        }
+        else if(ev==="SubAgentDone"){segTool();subTextEl=null;subTextName=null;toolLine("sub",icon("check")+'<span class="sname">['+esc(d.subagent_name)+']</span>'+tr("sub.done"))}
         else if(ev==="HistoryCompacted"){sysline(tr("hist.compacted",d.original_count,d.compacted_count))}
         else if(ev==="SessionLoaded"){sysline(tr("sess.loaded.sse",d.session_id))}
         else if(ev==="AgentDone"){enhanceCodeBlocks(asstEl);clearStatus();resetToolLog();asstEl=thinkEl=null;asstText="";seg=null;const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(" · tokens="+u.total_tokens):""))}
