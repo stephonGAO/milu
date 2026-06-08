@@ -60,6 +60,19 @@ _current_parent_judge: contextvars.ContextVar["tuple | None"] = contextvars.Cont
     "current_parent_judge", default=None
 )
 
+# ── 父 Agent 思考设置注入（asyncio 任务级隔离）──────────
+#
+# Agent.run() 在入口把父的思考相关运行参数（enable_thinking / thinking_level）写入
+# 此 ContextVar，子代理创建时继承——实现「关思考就全局关」：顶层关掉思考后，子代理
+# （researcher/coder 等）也随之关闭，而不再各自按模型默认思考。
+# 仅透传【思考相关】键（白名单），不透传 web_search 等会改变子代理行为的参数；
+# 子代理 cfg.llm_kwargs 显式设置的同名键优先于继承值。
+_INHERITED_LLM_KWARGS: tuple[str, ...] = ("enable_thinking", "thinking_level")
+
+_current_parent_llm_kwargs: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "current_parent_llm_kwargs", default=None
+)
+
 
 # ── 数据模型 ──────────────────────────────────────────────
 
@@ -320,9 +333,14 @@ def _create_single_subagent_tool(
         )
         # 不调用 create_subagent_tools → 子代理不能嵌套子代理（结构性保证）
 
+        # 继承父 Agent 的思考设置（enable_thinking/thinking_level）→「关思考就全局关」。
+        # 子代理自身 cfg.llm_kwargs 显式设置的同名键优先于继承值。
+        inherited_kwargs = _current_parent_llm_kwargs.get() or {}
+        sub_run_kwargs = {**inherited_kwargs, **cfg.llm_kwargs}
+
         final_text: Optional[str] = None
         try:
-            async for event in sub_agent.run(task, **cfg.llm_kwargs):
+            async for event in sub_agent.run(task, **sub_run_kwargs):
                 events.append(event)
                 if isinstance(event, AgentDone):
                     final_text = event.final_text

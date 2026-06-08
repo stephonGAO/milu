@@ -234,3 +234,77 @@ async def test_subagent_concurrent_runs_events_isolated():
     # 每个 SubAgentDone 应有非空 final_text（事件真的拿到了，没被空列表覆盖）
     assert sub_done_a[0].final_text, "parent_a 的 SubAgentDone.final_text 为空"
     assert sub_done_b[0].final_text, "parent_b 的 SubAgentDone.final_text 为空"
+
+
+# ── 思考设置继承（关思考就全局关）──────────────────────────
+
+
+class _RecordingLLM(BaseLLM):
+    """记录每次 chat() 收到的 kwargs，用于断言父→子透传。"""
+
+    def __init__(self):
+        super().__init__(model="mock", provider="mock")
+        self.last_kwargs: dict | None = None
+
+    async def chat(self, messages, **kwargs) -> AsyncIterator[StreamChunk]:
+        self.last_kwargs = kwargs
+        yield StreamChunk(content="sub-done", finish_reason="stop")
+        yield StreamChunk(usage=TokenUsage(1, 1, 2))
+
+    def _get_available_param_names(self) -> frozenset:
+        return frozenset()
+
+    @property
+    def base_url(self) -> str:
+        return "mock://"
+
+    @property
+    def provider_name(self) -> str:
+        return "mock"
+
+    @property
+    def capabilities(self) -> ModelCapabilities:
+        return ModelCapabilities(
+            supports_streaming=True,
+            supports_function_calling=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_subagent_inherits_parent_thinking_off():
+    """父 enable_thinking=False 透传给子代理 → 关思考就全局关。"""
+    sub_llm = _RecordingLLM()
+    sub_tool = create_subagent_tools(sub_llm, [
+        SubAgentConfig(name="helper", description="test", system_prompt="x"),
+    ])[0]
+    parent = Agent(
+        llm=_ParentLLM("p"), system_prompt="x",
+        tools=[sub_tool], config=AgentConfig(max_turns=5), session_enabled=False,
+    )
+
+    async for _ in parent.run("go", enable_thinking=False):
+        pass
+
+    assert sub_llm.last_kwargs is not None, "子代理未被调用"
+    assert sub_llm.last_kwargs.get("enable_thinking") is False
+
+
+@pytest.mark.asyncio
+async def test_subagent_explicit_kwargs_override_inherited():
+    """子代理 cfg.llm_kwargs 显式设置优先于继承值（父关、子自留开）。"""
+    sub_llm = _RecordingLLM()
+    sub_tool = create_subagent_tools(sub_llm, [
+        SubAgentConfig(
+            name="helper", description="test", system_prompt="x",
+            llm_kwargs={"enable_thinking": True},
+        ),
+    ])[0]
+    parent = Agent(
+        llm=_ParentLLM("p"), system_prompt="x",
+        tools=[sub_tool], config=AgentConfig(max_turns=5), session_enabled=False,
+    )
+
+    async for _ in parent.run("go", enable_thinking=False):
+        pass
+
+    assert sub_llm.last_kwargs.get("enable_thinking") is True

@@ -70,6 +70,8 @@ from milu.agent.subagent import (
     _current_parent_mode,
     _current_parent_confirm,
     _current_parent_judge,
+    _current_parent_llm_kwargs,
+    _INHERITED_LLM_KWARGS,
 )
 
 logger = logging.getLogger(__name__)
@@ -734,6 +736,11 @@ class Agent:
         judge_token = _current_parent_judge.set(
             (self._judge_llm, self._judge_rules) if self._judge_llm else None
         )
+        # 思考设置透传：子代理继承父的 enable_thinking/thinking_level（关思考就全局关）。
+        # 必须在下方 llm_kwargs 被注入 tools 之前捕获白名单子集（仅思考相关键）。
+        parent_llm_kwargs_token = _current_parent_llm_kwargs.set({
+            k: llm_kwargs[k] for k in _INHERITED_LLM_KWARGS if k in llm_kwargs
+        })
         # 图片注入通路：image_read 工具把校验通过的路径 append 到此列表，
         # Agent 在工具批次结束后注入多模态 user 消息（见步骤 10e）
         pending_images: list[str] = []
@@ -1353,5 +1360,6 @@ class Agent:
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)
             _safe_reset(_current_parent_judge, judge_token)
+            _safe_reset(_current_parent_llm_kwargs, parent_llm_kwargs_token)
             _safe_reset(_current_pending_images, images_token)
             _safe_reset(_current_vision_support, vision_token)
