@@ -496,8 +496,10 @@ def _cmd_serve(args) -> int:
     try:
         run_server(host=host, port=port, reload=getattr(args, "reload", False), **opts)
     except ImportError:
-        print(c("red", "缺少 Web 服务依赖。请安装："), file=sys.stderr)
-        print(c("yellow", '  pip install "milu[serve]"'), file=sys.stderr)
+        # Web 服务依赖（fastapi/uvicorn/sse-starlette）已是核心依赖，通常随 milu 一并安装；
+        # 仅当被手动卸载时才会到这里。
+        print(c("red", "缺少 Web 服务依赖（通常已随 milu 安装）。请修复："), file=sys.stderr)
+        print(c("yellow", "  pip install --force-reinstall milu"), file=sys.stderr)
         print(c("dim", "  或: pip install fastapi uvicorn sse-starlette"), file=sys.stderr)
         return 1
     except KeyboardInterrupt:

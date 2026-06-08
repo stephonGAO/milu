@@ -9,6 +9,7 @@ authors = [{ name = "stephon" }]
 keywords = [
     "ai", "agent", "llm", "agent-framework", "openai", "mcp", "rag",
     "multi-provider", "qwen", "deepseek", "kimi", "glm", "claude", "gemini",
+    "multi-user", "multi-tenant", "concurrency", "agent-serving",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -40,27 +41,21 @@ dependencies = [
     "xlrd>=2.0.0",
     # scheduler — 定时任务调度（cron 表达式解析）
     "croniter>=1.3.8",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    # 知识库测试需要（与 [kb] 对应）
+    # 向量知识库（Agent(knowledge=...)）：numpy 暴力余弦检索（默认开启，故进核心）
     "numpy>=1.24",
-]
-mcp = [
-    "mcp>=1.0.0",
-]
-# 内置 Web 服务（milu serve）：FastAPI + uvicorn + SSE 流式
-serve = [
+    # 内置 Web 服务（milu serve）：FastAPI + uvicorn + SSE 流式
     "fastapi>=0.110.0",
     "uvicorn>=0.27.0",
     "sse-starlette>=2.0.0",
+    # MCP 协议（连接外部 MCP 服务器）：与 serve 依赖大量重叠，净增很小，故进核心
+    "mcp>=1.0.0",
 ]
-# 向量知识库（Agent(knowledge=...)）：numpy 暴力余弦检索
-kb = [
-    "numpy>=1.24",
+
+[project.optional-dependencies]
+# 全功能已在核心：pip install milu 即得 CLI + Web 服务 + RAG + MCP。dev 仅测试用。
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
 ]
 
 # ⚠️ GitHub 仓库建好后取消注释并替换 <USERNAME>，再发布 PyPI（页面左侧链接来自这里）
@@ -88,6 +83,7 @@ include = [
     "tests",
     "examples",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE",
     ".env.example",

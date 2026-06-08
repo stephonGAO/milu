@@ -6,9 +6,9 @@
 程序化：
     from milu.serving.web import create_app, run_server
 
-fastapi / uvicorn / sse-starlette 为 `[serve]` 可选依赖（`pip install "milu[serve]"`）。
-本子包延迟导入它们——仅在调用 create_app() / run_server() 时才真正 import，
-故未安装这些依赖时 `import milu.serving.web` 不会报错。
+fastapi / uvicorn / sse-starlette 现为核心依赖（随 milu 一并安装）。本子包仍保持
+延迟导入——仅在调用 create_app() / run_server() 时才真正 import，故即便这些依赖被
+手动卸载，`import milu.serving.web` 也不会报错。
 """
 from __future__ import annotations
 

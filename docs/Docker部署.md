@@ -37,7 +37,7 @@ compose 用户取消 `docker-compose.yml` 中 `args: PIP_INDEX_URL` 的注释即
 | 设计 | 说明 |
 |------|------|
 | 多阶段构建 | builder 阶段装依赖进 venv，运行镜像只携带 venv（python:3.12-slim 基底） |
-| 依赖范围 | `milu[serve,mcp,kb]`：Web 服务 + MCP 协议 + 向量知识库全开 |
+| 依赖范围 | 完整 milu：核心已含 Web 服务、向量知识库与 MCP 协议（无需额外 extra） |
 | 非 root 运行 | 进程以 `milu`（uid 1000）用户运行 |
 | 健康检查 | 内置 `HEALTHCHECK` 探测 `GET /health`（30s 间隔） |
 | 数据持久化 | `MILU_HOME=/data/milu` 挂数据卷：会话、记忆、知识库、定时任务、用户级配置都在这里 |

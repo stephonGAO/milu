@@ -56,12 +56,12 @@ def knowledge_dir(user_id: str) -> Path:
 
 
 def _require_numpy():
-    """导入 numpy（可选依赖 [kb]），未安装时给中文安装指引。"""
+    """导入 numpy（核心依赖，通常已随 milu 安装），缺失时给中文安装指引。"""
     try:
         import numpy
     except ImportError as e:
         raise RuntimeError(
-            '向量知识库需要 numpy，请安装：pip install "milu[kb]"（或 pip install numpy）'
+            "向量知识库需要 numpy（核心依赖，通常已安装）。请修复：pip install numpy"
         ) from e
     return numpy
 

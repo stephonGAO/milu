@@ -39,3 +39,6 @@ workspace/
 
 # 本地 MCP 配置（含本机真实路径，公开仓库只保留 mcp_servers.example.json）
 config/mcp_servers.json
+
+# 内部发布策略材料（竞品判断/star 预期/推广打法，不公开）
+docs/竞品调研报告.md

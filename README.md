@@ -1,179 +1,289 @@
-# milu
+<div align="center">
 
-统一的 AI 模型抽象层 + Agent 编排引擎。一套接口接入 9 个 LLM 提供商（通义千问、Kimi、GLM、DeepSeek、MiniMax、豆包、ChatGPT、Gemini、Claude），内置工具系统（含 MCP 协议）、子 Agent、技能、文件化系统提示词、会话持久化、上下文自动压缩，以及**多用户并发资源池**。
+# 🦌 milu
 
-- Python 3.10+ · async-first · 以 `openai` SDK 作为统一 HTTP 客户端
-- 设计为「核心库」：其它项目 `pip install` 后即可快速获得 Agent 能力，并可部署为多用户并发服务
+**Production-ready multi-user AI agents — with Chinese LLMs as first-class citizens.**
 
-## 安装
+One unified interface for 9 LLM providers · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler · Multi-user agent pool
+
+[![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
+
+**English** | [简体中文](README.zh-CN.md)
+
+<!-- TODO(launch): demo GIF here — `milu serve` web UI or CLI session, ≤30s -->
+
+</div>
+
+---
+
+## Why milu?
+
+Most agent frameworks treat Chinese LLM providers as an afterthought, and stop at single-user demos. milu starts where they stop:
+
+- 🇨🇳 **Chinese LLMs as first-class citizens** — Qwen, DeepSeek, Kimi, GLM, MiniMax, Doubao natively supported alongside OpenAI, Gemini and Claude. No `base_url` juggling, provider quirks (thinking mode, built-in web search, parameter differences) pre-adapted, plus a China-reachable search backend out of the box.
+- 🏭 **From demo to production in one library** — `AgentPool` gives you per-user agent isolation, LRU/TTL eviction, global concurrency limits and shared MCP processes. The question every framework leaves as "an exercise for the reader" — *"my demo works, how do I serve 100 concurrent users without sessions bleeding into each other?"* — is answered here, backed by 1100+ tests.
+- 🔋 **Batteries actually included** — 20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
+- 🛡️ **A real safety model** — four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
+- 🪶 **Thin by design** — built directly on the `openai` SDK as the unified HTTP client. Events stream out as plain dataclasses. No chains, no graphs, no DSL to learn.
+
+## Quick start
 
 ```bash
-# 开发模式（含测试与 MCP 依赖）
-pip install -e ".[dev,mcp]"
+pip install milu              # everything included: CLI, web service, RAG, MCP
 ```
 
-配置 API Key：在项目根目录放一个 `.env`，按 `{PROVIDER}_API_KEY` 命名：
-
-```dotenv
-QWEN_API_KEY=sk-xxx
-DEEPSEEK_API_KEY=sk-xxx
-ANTHROPIC_API_KEY=sk-xxx
-```
-
-> 作为库被集成时，可设 `MILU_NO_DOTENV=1` 关闭对 .env 的自动加载，改由宿主应用通过 `milu.load_env(path)` 或自身机制管理环境变量。
-
-## 命令行（CLI）
-
-`pip install` 后注册命令 `milu`，无需写代码即可使用：
+**CLI** — zero config to first conversation:
 
 ```bash
-milu                      # 无子命令 → 进入交互式多轮对话
-milu chat -p deepseek     # 指定厂商进入对话（默认厂商 qwen）
-milu run "用一句话介绍你自己"   # 一次性执行
-milu run "总结" -q          # -q 只输出最终回答（便于管道）
-echo "翻译成英文：你好" | milu run   # 从 stdin 读取指令
-milu providers            # 列出 9 个厂商及 API Key 配置状态
-milu config set provider deepseek   # 持久化默认厂商
-milu config set-key qwen sk-xxx     # 保存某厂商的 Key 到配置文件
-milu sessions list        # 查看历史会话
+milu                # first run guides you through provider + API key setup
 ```
 
-- **配置**：`~/.milu/config.json`（`config` 子命令管理）。解析优先级 **CLI 参数 > 环境变量 `{PROVIDER}_API_KEY` > 配置文件 > 内置默认**。
-- **能力**：交互式 `chat` 支持流式输出、工具调用可视化、内置子代理（researcher/reader/coder）、会话持久化、`/mode` 切换操作模式、MCP 自动接入、**对话期间自动执行定时任务**（无需单独启动调度服务，退出即停），以及 `/help` 列出的全部 `/命令`。
-- 全局选项写在子命令之后：`-p/--provider`、`-m/--model`、`--api-key`、`--mode {talk,manual,auto,superwork}`、`--no-session`、`--no-mcp`、`--no-subagents`、`--no-scheduler`。
+**Code** — a full-featured agent in 3 lines:
 
-## 快速开始
+```python
+from milu import Agent, ModelRegistry
 
-### 1. 直接调用 LLM（流式）
+agent = Agent(ModelRegistry.create("deepseek", model="deepseek-v4-flash"))
+async for event in agent.run("What time is it? Use a tool to check."):
+    ...
+```
+
+`Agent(llm)` is the complete package by default: built-in system prompt, 20+ tools, skills, three sub-agents, session persistence and context compaction — pass explicit arguments only to override.
+
+**Multi-user web service** — one command:
+
+```bash
+milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
+```
+
+**Docker**:
+
+```bash
+cp .env.example .env          # fill in at least one provider API key
+docker compose up -d
+```
+
+## How it compares
+
+| | milu | LangChain | CrewAI | smolagents | Qwen-Agent |
+|---|---|---|---|---|---|
+| Chinese providers native (6) | ✅ | community pkgs | via LiteLLM | via LiteLLM | Qwen family |
+| Multi-user pool, in-library | ✅ AgentPool | platform (paid) | platform | ❌ | ❌ |
+| MCP protocol | ✅ 3 transports | ✅ | ✅ | ✅ | ✅ |
+| Built-in tools (files/docs/vision/search) | ✅ 20+ | install per-integration | partial | minimal | partial |
+| Tool-safety modes + AI judge | ✅ | ❌ | ❌ | sandbox only | ❌ |
+| RAG knowledge base, in-library | ✅ | assemble yourself | partial | ❌ | ✅ |
+| Scheduled tasks (multi-user) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| CLI + web service out of the box | ✅ | ❌ | partial | ❌ | demo UI |
+
+> Each ✅/❌ reflects what ships *inside the library* as of June 2026 — most gaps can be filled with external platforms or custom code.
+
+## What you can build
+
+- **Customer-support bot over your docs** — RAG knowledge base with auto-retrieval, source-aware answers, multi-user isolation per visitor.
+- **An internal multi-user assistant for your team** — `docker compose up -d`, everyone gets isolated sessions, memory and knowledge bases under one roof.
+- **A morning-report agent** — scheduled tasks with cron expressions; results land in the web UI, an outbox file, or desktop notifications.
+- **Multi-tenant SaaS agents** — `KeyedLLMProvider` maps tenants to their own API keys; the pool enforces per-user instance and concurrency invariants.
+
+## Examples
+
+<details>
+<summary><b>1 · Call any LLM directly (streaming)</b></summary>
 
 ```python
 import asyncio
 from milu import ModelRegistry, Message, MessageRole
 
 async def main():
-    llm = ModelRegistry.create("qwen", model="qwen-plus")
-    async for chunk in llm.chat([Message(role=MessageRole.USER, content="你好")]):
+    llm = ModelRegistry.create("qwen", model="qwen3.6-plus")
+    async for chunk in llm.chat([Message(role=MessageRole.USER, content="Hello!")]):
         if chunk.content:
             print(chunk.content, end="", flush=True)
 
 asyncio.run(main())
 ```
 
-### 2. 跑一个带工具的 Agent
+Swap `"qwen"` for `"deepseek"`, `"kimi"`, `"glm"`, `"minimax"`, `"doubao"`, `"openai"`, `"gemini"` or `"anthropic"` — same interface, API keys read from `{PROVIDER}_API_KEY` environment variables.
+</details>
+
+<details>
+<summary><b>2 · Agent with tools and events</b></summary>
 
 ```python
 import asyncio
-from milu import Agent, AgentConfig, ModelRegistry, AgentDone
-from milu.tools.builtin import BUILTIN_TOOLS
+from milu import Agent, ModelRegistry, AgentDone, TextDelta
 
 async def main():
-    llm = ModelRegistry.create("qwen", model="qwen-plus")
-    agent = Agent(llm=llm, tools=list(BUILTIN_TOOLS),
-                  config=AgentConfig(session_enabled=False))
-    async for evt in agent.run("现在几点？用工具查一下"):
-        if hasattr(evt, "text") and evt.text:
+    agent = Agent(ModelRegistry.create("deepseek", model="deepseek-v4-flash"))
+    async for evt in agent.run("Summarize the contents of ./report.pdf"):
+        if isinstance(evt, TextDelta):
             print(evt.text, end="", flush=True)
-        if isinstance(evt, AgentDone):
-            print(f"\n[turns={evt.turn_count}]")
+        elif isinstance(evt, AgentDone):
+            print(f"\n[done in {evt.turn_count} turns]")
 
 asyncio.run(main())
 ```
 
-### 3. 自定义工具
+The agent streams typed events — text deltas, reasoning, tool calls, confirmations, sub-agent progress — consume what you need, ignore the rest.
+</details>
+
+<details>
+<summary><b>3 · Custom tools</b></summary>
 
 ```python
-from milu import tool
+from milu import Agent, tool
 
-@tool(name="add", description="两数相加", is_safe=True)
+@tool(name="add", description="Add two numbers", is_safe=True)
 async def add(a: int, b: int) -> int:
-    """:param a: 加数\n:param b: 被加数"""
+    """:param a: first number\n:param b: second number"""
     return a + b
 
-agent = Agent(llm=llm, tools=[add])
+agent = Agent(llm, tools=[add])        # explicit list replaces built-ins
 ```
 
-### 4. 多用户并发（AgentPool）
+`is_safe=False` routes the call through the active safety mode: auto-judged by AI, confirmed by a human, or blocked — depending on the mode.
+</details>
 
-按 `(user_id, session_id)` 隔离 Agent 实例，自带 LRU/TTL 淘汰、全局并发限流、同会话串行：
+<details>
+<summary><b>4 · Safety modes</b></summary>
 
 ```python
-from milu import AgentPool, AgentPoolConfig, AgentConfig, ModelRegistry
+agent = Agent(llm, mode="manual")   # unsafe tools wait for human approval
+agent.set_mode("talk")              # read-only: unsafe tools blocked
+```
 
-llm = ModelRegistry.create("qwen", model="qwen-plus")  # LLM 可安全共享
-pool = AgentPool(
-    llm_factory=lambda user_id, session_id: llm,
-    agent_config=AgentConfig(session_enabled=True),     # 历史按 (user,session) 自动持久化/恢复
-    config=AgentPoolConfig(max_agents=200, max_concurrent_runs=50, idle_ttl_seconds=300),
-)
+| Mode | Behavior |
+|---|---|
+| `talk` | read-only — every unsafe tool call is blocked |
+| `manual` | safe tools run; unsafe tools emit a confirmation event and wait |
+| `auto` (default) | autonomous; unsafe calls are screened by an **AI safety judge** (allow / confirm / deny) |
+| `superwork` | full permissions, no checks |
+
+Sub-agents inherit the parent's mode and confirmation callback — delegation is never a bypass.
+</details>
+
+<details>
+<summary><b>5 · Long-term memory & RAG knowledge base</b></summary>
+
+```python
+agent = Agent(llm, memory="user-42", knowledge="user-42")
+```
+
+- **Memory**: small set of durable facts, rendered into the system prompt every turn, survives across sessions and processes.
+- **Knowledge**: chunked + embedded documents (pdf/docx/xlsx/pptx/md/txt) with cosine retrieval, source-catalog routing in the prompt, optional per-turn auto-retrieval, and `kb_search` / `kb_ingest` / `kb_manage` tools. Per-user isolated storage.
+</details>
+
+<details>
+<summary><b>6 · Multi-user concurrency (AgentPool)</b></summary>
+
+```python
+from milu import AgentPool, ModelRegistry
+
+llm = ModelRegistry.create("qwen", model="qwen3.6-plus")   # coroutine-safe, shareable
+pool = AgentPool.from_llm(llm)
 await pool.start()
 
 async with pool.acquire("user-1", "session-A") as h:
-    async for evt in h.agent.run("你好"):
+    async for evt in h.agent.run("Hello!"):
         ...
 
 await pool.stop()
 ```
 
-完整的 FastAPI + Web UI 示例见 `examples/multi_user_chat.py`。
+Four hard invariants: ≤1 agent per `(user, session)` · bounded instance count · bounded concurrent runs · idle agents evicted. Sessions, memory and knowledge are derived per-user automatically.
+</details>
 
-### 5. 内置角色提示词与技能
+<details>
+<summary><b>7 · MCP servers</b></summary>
 
-预置提示词（main/coder/researcher/reviewer）与技能随包分发，pip 安装后即可用：
-
-```python
-from milu import Agent, builtin_prompts_dir, builtin_skills_dir
-
-agent = Agent(
-    llm=llm,
-    prompt_dir=builtin_prompts_dir("main"),
-    skills_dir=str(builtin_skills_dir()),
-)
+```jsonc
+// config/mcp_servers.json
+{
+  "mcpServers": {
+    "playwright": { "command": "npx", "args": ["@playwright/mcp@latest"] },
+    "my-http":    { "type": "streamable_http", "url": "http://localhost:3000/mcp" }
+  }
+}
 ```
 
-## 部署建议（多 worker / 高并发）
+stdio / streamable HTTP / SSE transports, parallel connection with error isolation, and a dormant-pool design: MCP tool schemas don't bloat the context — the agent discovers and activates them on demand. For high-concurrency deployments, one shared set of MCP processes can serve the entire pool.
+</details>
 
-- **粘性路由**：按 `user_id` 做一致性哈希（如 nginx `ip_hash`），让同一用户恒定落到同一 worker。同会话由进程内 `AgentPool` 的 entry 锁串行，**无需分布式锁**。
-- **会话持久化**：`AgentConfig(session_enabled=True)` 时历史按 `(user, session)` 落盘，淘汰/重启后自动恢复；多 worker 故障转移可叠加共享存储（NFS/EFS）。
-- **MCP 是内存大头**：默认每个 Agent 自带 MCP 子进程（约 15–50MB）。高并发下建议开启**共享 MCP**——整池只连一组 MCP 进程、由所有 Agent 复用，内存不再随用户数增长：
-  - 默认 factory：`AgentPoolConfig(shared_mcp=True, mcp_config_path=...)`；
-  - 自定义 factory：自建一个已连接的 `MCPManager`，透传 `Agent(mcp_manager=...)`（见 `examples/multi_user_chat.py`）。
-  - ⚠️ 共享 = MCP server 端看不到 user_id、无法按用户隔离，**仅适合无状态 MCP 工具**（抓取/搜索/查询）；有服务端「每用户状态」的 MCP 仍应用默认的 per-agent 模式。
-- **多租户 API Key 隔离**：不同租户/用户需用各自的 API Key 时，用内置的 `KeyedLLMProvider` 作为 `llm_factory`——它按 Key 缓存 LLM 实例：同 Key 复用同一连接池、不同 Key 隔离，总数受 `max_clients` 约束（超出 LRU 淘汰并关闭连接池）：
-
-  ```python
-  from milu import AgentPool, AgentPoolConfig, KeyedLLMProvider
-
-  provider = KeyedLLMProvider(
-      "qwen", model="qwen-plus",
-      resolve_api_key=lambda user_id, session_id: lookup_tenant_key(user_id),  # 你的 租户→Key 映射
-      max_clients=256,
-  )
-  pool = AgentPool(llm_factory=provider, config=AgentPoolConfig(max_agents=200))
-  await pool.start()
-  # ... 服务请求 ...
-  await pool.stop(); await provider.aclose()   # aclose 关闭所有缓存的连接池
-  ```
-
-  适用于「Key 映射到租户/组织」（distinct Key 数远小于用户数）的常见形态；`resolve_api_key` 返回 `None` 则回退到默认 Key/环境变量。**Key 切勿明文硬编码在源码中**——应从环境变量/密钥管理服务（Vault、云 KMS）读取后在 `resolve_api_key` 中返回。完整可运行示例见 `examples/multi_tenant_keys.py`。
-- **服务端确认**：高并发下避免交互式逐工具确认（会拖累吞吐）；如需确认，`AgentPool` 已保证等待确认期间不占用全局并发名额。
-
-## 示例
-
-`examples/` 下按编号递进：`1. basic_llm` → `2. agent_basic` → `3. builtin_tools` → `5_mcp_tools` → `6_subagent` → `7_server_fastapi` → `multi_turn_chat` / `multi_user_chat` / `multi_tenant_keys`。
+<details>
+<summary><b>8 · Scheduled tasks</b></summary>
 
 ```bash
-.venv/Scripts/python "examples/1. basic_llm.py"
-.venv/Scripts/python examples/multi_user_chat.py    # 多用户并发 + Web UI
+milu chat
+> Remind me every weekday at 9am to summarize yesterday's AI news   # agent creates the task
 ```
 
-## 测试
+Cron-style scheduling per user, executed inside `milu chat` / `milu serve` (or a standalone `milu scheduler start` daemon) with a single-instance lock and automatic takeover. Results are delivered to an outbox file, server push, or desktop notification.
+</details>
+
+## CLI
+
+```text
+milu                 interactive chat (first run launches setup wizard)
+milu setup           provider / API key / search backend wizard
+milu chat -p glm     chat with a specific provider
+milu run "..." -q    one-shot execution, pipe-friendly
+milu serve           multi-user web service + demo UI
+milu providers       list 9 providers and key status
+milu config ...      layered config (CLI > user > project > defaults)
+milu sessions list   browse saved sessions
+milu schedule ...    manage scheduled tasks
+```
+
+## Architecture
+
+```text
+AgentPool (multi-user, optional)
+  └─ Agent.run() loop ── system prompt rebuild → auto-compaction
+       ├─ LLM layer        9 providers, one AsyncOpenAI-based interface
+       ├─ Tool layer       built-ins · custom @tool · MCP (active/dormant pools)
+       ├─ Safety layer     modes · AI judge · confirmation flow
+       ├─ Sub-agents       researcher / reader / coder (isolated context)
+       ├─ Prompts & skills layered markdown prompts · on-demand skill loading
+       └─ Session          JSONL persistence · compaction snapshots
+```
+
+Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOpenAI` client, so LLM instances are coroutine-safe and shareable across users.
+
+## Production notes
+
+- **Scaling out**: route by `user_id` (e.g. nginx `ip_hash`); per-session serialization is handled by in-process entry locks — no distributed locks needed. Sessions persist to disk and recover after eviction or restart.
+- **Memory budget**: MCP subprocesses are the dominant cost (15–50 MB per agent). Enable shared MCP (`AgentPoolConfig(shared_mcp=True)`) to keep one set of MCP processes for the whole pool.
+- **Multi-tenant keys**: `KeyedLLMProvider` caches one LLM client per distinct API key with LRU eviction — see `examples/multi_tenant_keys.py`.
+- **Docker**: see [docs/Docker部署.md](docs/Docker部署.md) — health checks, data volumes, SSE reverse-proxy settings, scheduler single-instance behavior.
+
+## Roadmap
+
+- [ ] Observability: OpenTelemetry tracing hooks
+- [ ] Sandboxed code execution backends for `python_repl` / `shell_command`
+- [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
+- [ ] English documentation set (architecture & guides — currently Chinese)
+- [ ] Prebuilt images on a container registry
+
+## Contributing
+
+Issues and PRs welcome. Run the test suite with:
 
 ```bash
-# 单元测试（跳过真实 API 调用）
-.venv/Scripts/python -m pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real_new_providers.py -q
+pip install -e ".[dev]"
+python -m pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real_new_providers.py -q
 ```
 
-## 进一步阅读
+## License
 
-- 架构与开发约定：[`CLAUDE.md`](CLAUDE.md)
-- 多用户高并发能力评估与加固记录：[`docs/并发能力评估报告.md`](docs/并发能力评估报告.md)
+[MIT](LICENSE). Five built-in skills are ported from [anthropics/skills](https://github.com/anthropics/skills) (Apache-2.0) and [obra/superpowers](https://github.com/obra/superpowers) (MIT) — see [THIRD_PARTY_NOTICES](src/milu/templates/skills/THIRD_PARTY_NOTICES.txt).
+
+---
+
+<div align="center">
+
+**milu (米鹿 / 麋鹿)** — named after Père David's deer, the legendary Chinese animal that "resembles four creatures yet is none of them" — one body, the strengths of many.
+
+</div>

@@ -94,8 +94,8 @@ class MCPServerConnection:
         except ImportError:
             await self._cleanup()
             raise ImportError(
-                "未安装 mcp 包。请运行: pip install 'mcp>=1.0.0' "
-                "或 pip install milu[mcp]"
+                "未安装 mcp 包（核心依赖，通常已随 milu 安装）。"
+                "请修复: pip install 'mcp>=1.0.0'"
             )
         except Exception:
             await self._cleanup()

@@ -4,7 +4,7 @@
 让 Agent 自动发现并调用 MCP 提供的工具。
 
 运行前提：
-1. pip install milu[mcp]
+1. pip install milu（mcp 已是核心依赖，无需额外安装）
 2. 在 config/mcp_servers.json 中配置 MCP 服务器
    或在 .env 中设置 MCP_CONFIG_PATH=路径
 """

@@ -20,7 +20,7 @@ COPY src/ src/
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -i "$PIP_INDEX_URL" --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -i "$PIP_INDEX_URL" ".[serve,mcp,kb]"
+    && /opt/venv/bin/pip install --no-cache-dir -i "$PIP_INDEX_URL" "."
 
 # ── 运行阶段：仅携带 venv 的精简镜像 ──
 FROM python:3.12-slim

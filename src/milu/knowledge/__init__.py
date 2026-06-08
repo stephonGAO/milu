@@ -5,7 +5,7 @@ knowledge 是大语料分块向量化、按需语义召回（适合 FAQ / 产品
 论文等非结构化文档；代码与结构化文档建议直接用 file_read+grep 式检索）。
 
 启用方式（默认关闭）：`Agent(knowledge=True)` / `Agent(knowledge="user-1")` /
-`Agent(knowledge=KnowledgeConfig(...))`。检索依赖可选安装：pip install "milu[kb]"。
+`Agent(knowledge=KnowledgeConfig(...))`。检索依赖 numpy 为核心依赖，随 milu 一并安装。
 """
 from milu.knowledge.chunker import chunk_text
 from milu.knowledge.config import KnowledgeConfig
