@@ -68,7 +68,10 @@ class DoubaoLLM(BaseLLM):
         流式聊天接口。
 
         Doubao 特有参数映射:
-            web_search (bool) → tools列表追加 {"type": "web_search"}
+            web_search (bool) → 不支持。豆包 OpenAI 兼容 chat completions 端点要求
+                tools 内每一项均为 {"type":"function",...}，无法注入内置联网工具项；
+                原生联网需走「应用(Bot)」端点或 Responses API（本框架未接入）。
+                此处忽略该参数并一次性提示改用内置 web_search 工具联网。
         """
         client = self._get_client()
 
@@ -98,11 +101,20 @@ class DoubaoLLM(BaseLLM):
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
-        # extra_body: 联网搜索（通过 tools 列表注入 web_search 类型）
-        if validated.get("web_search"):
-            tools_list = request_params.get("tools", [])
-            tools_list.append({"type": "web_search"})
-            request_params["tools"] = tools_list
+        # 联网搜索：豆包的 OpenAI 兼容 chat completions 端点【不支持】把
+        # {"type": "web_search"} 作为 tools 项注入——该端点校验 tools 内每一项都
+        # 必须是 {"type": "function", "function": {...}}，否则直接 400
+        # "missing tools.function parameter"，连带把同批的正常函数调用一起打挂
+        # （即便只发一句「你好」，Agent 也会带上全套内置函数工具，故必崩）。
+        # 豆包原生联网需走「应用(Bot)」端点或 Responses API（本框架统一使用
+        # chat completions，未接入）。因此这里不再注入非法工具项，改为一次性提示
+        # 用户使用内置 web_search 工具（BUILTIN_TOOLS，后端可配 bocha/tavily）联网。
+        if validated.get("web_search") and "web_search" not in self._warned_params:
+            logger.warning(
+                "[doubao] 原生联网搜索在 chat completions 端点不可用，已忽略 web_search "
+                "参数；如需联网请使用内置 web_search 工具（设置 WEB_SEARCH_PROVIDER=bocha/tavily）"
+            )
+            self._warned_params.add("web_search")
 
         try:
             response = await client.chat.completions.create(**request_params)

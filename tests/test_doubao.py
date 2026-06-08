@@ -139,8 +139,12 @@ class TestDoubaoChat:
         assert call_kwargs["stream"] is True
 
     @pytest.mark.asyncio
-    async def test_web_search_injects_tool(self):
-        """联网搜索：web_search=True 应在 tools 列表中追加 {"type": "web_search"}"""
+    async def test_web_search_does_not_corrupt_tools(self):
+        """联网搜索：豆包 chat completions 端点要求 tools 内每项均为 function，
+        故 web_search=True 时【不得】注入裸 {"type": "web_search"} 项——否则会触发
+        400 "missing tools.function" 并连带打挂同批的正常函数调用。
+        此处验证：web_search 与函数工具共存时，发往 API 的 tools 仅含合法 function 项。
+        """
         from milu.llm.base.message import Message, MessageRole
         from milu.llm.providers.doubao import DoubaoLLM
 
@@ -151,6 +155,10 @@ class TestDoubaoChat:
                 usage=MockUsage(prompt_tokens=8, completion_tokens=4, total_tokens=12),
             )
 
+        function_tool = {
+            "type": "function",
+            "function": {"name": "get_weather", "description": "查天气", "parameters": {}},
+        }
         llm = DoubaoLLM(api_key="test-key", model="doubao-pro")
         mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
@@ -158,10 +166,13 @@ class TestDoubaoChat:
         with patch.object(llm, "_get_client", return_value=mock_client):
             messages = [Message(role=MessageRole.USER, content="今天天气如何")]
             results = []
-            async for chunk in llm.chat(messages, web_search=True):
+            async for chunk in llm.chat(messages, web_search=True, tools=[function_tool]):
                 results.append(chunk)
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
-        assert "tools" in call_kwargs
-        tools_list = call_kwargs["tools"]
-        assert {"type": "web_search"} in tools_list
+        tools_list = call_kwargs.get("tools", [])
+        # 不得出现无 function 字段的非法工具项
+        assert {"type": "web_search"} not in tools_list
+        assert all(t.get("type") == "function" and "function" in t for t in tools_list)
+        # 原有的函数工具必须原样保留，函数调用不被破坏
+        assert function_tool in tools_list
