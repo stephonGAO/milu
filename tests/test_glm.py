@@ -158,3 +158,45 @@ class TestGLMChat:
         # GLM不支持thinking_level，不应出现在extra_body中
         assert "thinking_level" not in call_kwargs.get("extra_body", {})
         assert "effort" not in call_kwargs.get("extra_body", {})
+
+    @pytest.mark.asyncio
+    async def test_web_search_injects_nonempty_subobject(self):
+        """联网搜索：GLM 要求 web_search 工具项带【非空】的 web_search 子对象，
+        否则 400 "tools[N].web_search 不能为空"。验证注入的项含合法子对象，
+        且与既有函数工具共存时不破坏函数调用。
+        """
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.glm import GLMLLM
+
+        async def mock_stream():
+            yield MockChunk(choices=[MockChoice(delta=MockDelta(content="搜索结果"))])
+            yield MockChunk(
+                choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
+                usage=MockUsage(prompt_tokens=8, completion_tokens=4, total_tokens=12),
+            )
+
+        function_tool = {
+            "type": "function",
+            "function": {"name": "get_weather", "description": "查天气", "parameters": {}},
+        }
+        llm = GLMLLM(api_key="test-key", model="glm-4")
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream())
+
+        with patch.object(llm, "_get_client", return_value=mock_client):
+            messages = [Message(role=MessageRole.USER, content="今天天气如何")]
+            results = []
+            async for chunk in llm.chat(messages, web_search=True, tools=[function_tool]):
+                results.append(chunk)
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        tools_list = call_kwargs["tools"]
+        # 不得出现裸的、子对象为空的非法 web_search 项
+        assert {"type": "web_search"} not in tools_list
+        ws_items = [t for t in tools_list if t.get("type") == "web_search"]
+        assert len(ws_items) == 1
+        sub = ws_items[0].get("web_search")
+        assert isinstance(sub, dict) and sub  # 子对象存在且非空
+        assert sub.get("enable") == "True"
+        # 原有函数工具原样保留
+        assert function_tool in tools_list

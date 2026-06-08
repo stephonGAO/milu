@@ -68,7 +68,8 @@ class GLMLLM(BaseLLM):
         流式聊天接口。
 
         GLM特有参数映射:
-            web_search (bool) → tools列表追加 {"type": "web_search"}
+            web_search (bool) → tools 列表追加
+                {"type":"web_search","web_search":{"enable":"True","search_result":True}}
             enable_thinking (bool) → extra_body.enable_thinking=True
             thinking_level → GLM不支持等级设置，静默忽略
         """
@@ -104,9 +105,19 @@ class GLMLLM(BaseLLM):
         # extra_body: 联网搜索和思考模式
         extra_body = {}
         if validated.get("web_search"):
-            # GLM通过tools列表中的web_search类型启用联网搜索
+            # GLM 通过 tools 列表中的 web_search 类型启用联网搜索。
+            # ⚠️ 必须带【非空】的 web_search 子对象，否则 400
+            # "tools[N].web_search 不能为空"（裸 {"type":"web_search"} 不合法）。
+            # 字段按智谱官方示例：enable 用字符串 "True"；search_result=True 让搜索
+            # 结果回填进上下文；search_engine 不显式指定，走平台默认（search_std）。
             tools_list = request_params.get("tools", [])
-            tools_list.append({"type": "web_search"})
+            tools_list.append({
+                "type": "web_search",
+                "web_search": {
+                    "enable": "True",
+                    "search_result": True,
+                },
+            })
             request_params["tools"] = tools_list
         if "enable_thinking" in validated:
             # GLM不支持thinking_level等级设置，仅支持开启/关闭
