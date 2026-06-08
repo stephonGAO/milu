@@ -394,12 +394,12 @@ class TestKnowledgeTools:
         token = _current_knowledge.set(rt)
         try:
             result = await kb_ingest._tool_wrapper.func(
-                text="米鹿是一个统一的 Agent 编排框架。\n\n它支持九个大模型厂商。",
+                text="麋鹿是一个统一的 Agent 编排框架。\n\n它支持九个大模型厂商。",
                 source="intro",
             )
             assert "已入库" in result and "intro" in result
 
-            found = await kb_search._tool_wrapper.func(query="米鹿是一个统一的 Agent 编排框架。")
+            found = await kb_search._tool_wrapper.func(query="麋鹿是一个统一的 Agent 编排框架。")
             assert "intro" in found and "相似度" in found
         finally:
             _current_knowledge.reset(token)
@@ -714,7 +714,7 @@ class TestAgentIntegration:
 
     async def test_run_injects_runtime(self):
         """端到端：Agent.run() 注入 → LLM 调 kb_search → 命中预入库内容。"""
-        doc = "米鹿支持向量知识库语义检索。"
+        doc = "麋鹿支持向量知识库语义检索。"
         llm = _KbSearchLLM(query=doc)
         agent = Agent(llm, tools=[], subagents=[], session_enabled=False,
                       knowledge="runner")

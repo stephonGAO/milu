@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🦌 milu（米鹿）
+# 🦌 milu（麋鹿）
 
 **生产级多用户 Agent 框架 —— 国产大模型一等公民。**
 
@@ -35,7 +35,7 @@
 
 milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即开即用，需要时再嵌入：
 
-- 🚀 **直接用**：`milu` 进入对话、`milu serve` 起多用户服务，零代码即得完整能力。
+- 🚀 **直接用**：`milu` 进入对话、`milu serve` 起多用户服务，零代码即得完整能力。CLI 与 Web 界面均支持 **中英文双语**。
 - 🧩 **嵌进你的产品**：`from milu import Agent`，把 Agent 能力嵌入自有后端，再用 AgentPool 扩成多用户/多租户服务——**数据与技术栈完全归你**。
 
 ## 安装
@@ -338,6 +338,6 @@ python -m pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real
 
 <div align="center">
 
-**milu（米鹿/麋鹿）** —— 取自「四不像」：角似鹿非鹿、脸似马非马、蹄似牛非牛、尾似驴非驴——一身集多家之长。
+**milu（麋鹿）** —— 麋鹿世称「四不像」：鹿角、马面、牛蹄、驴尾集于一身，博采众长而自成一格。一如 milu：一套接口，融汇九家大模型之长。
 
 </div>

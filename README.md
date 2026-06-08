@@ -35,7 +35,7 @@ Most agent frameworks stop at single-user demos, and treat Chinese LLM providers
 
 milu is both a ready-to-run agent and a framework to build on — start instantly, embed when you need to:
 
-- 🚀 **Run it**: `milu` for chat, `milu serve` for a multi-user service — full capabilities, zero code.
+- 🚀 **Run it**: `milu` for chat, `milu serve` for a multi-user service — full capabilities, zero code. Both the CLI and the web UI ship in **English and 中文**.
 - 🧩 **Build on it**: `from milu import Agent` to embed agents in your own backend, then scale to multi-user / multi-tenant with AgentPool — **you own your data and stack**.
 
 ## Install
@@ -336,6 +336,6 @@ python -m pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real
 
 <div align="center">
 
-**milu (米鹿 / 麋鹿)** — named after Père David's deer, the legendary Chinese animal that "resembles four creatures yet is none of them" — one body, the strengths of many.
+**milu (麋鹿)** — named after Père David's deer, the legendary Chinese animal that "resembles four creatures yet is none of them" — one body, the strengths of many.
 
 </div>
