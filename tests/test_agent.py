@@ -92,6 +92,112 @@ async def test_tool_call_flow(simple_tool):
 
 
 @pytest.mark.asyncio
+async def test_tool_call_preserves_extra_content(simple_tool):
+    """provider 透传字段（tool_call.extra_content，如 Gemini thought_signature）
+    应被捕获进 assistant 历史消息，并在下一轮回传给 LLM。
+
+    回归：Gemini 思考模型多轮工具调用要求带回 thought_signature，否则
+    400 "Function call is missing a thought_signature"。
+    """
+    sig = {"google": {"thought_signature": "SIG-123"}}
+    seen_messages = []
+    call_count = 0
+
+    async def mock_chat(messages, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        seen_messages.append(list(messages))
+        if call_count == 1:
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': 'call_1',
+                    'function': type('obj', (), {'name': 'get_time', 'arguments': '{}'})(),
+                    'extra_content': sig,
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        else:
+            yield StreamChunk(content="完成", finish_reason="stop")
+            yield StreamChunk(usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+
+    agent = Agent(llm=llm, system_prompt="你是助手", tools=[simple_tool], session_enabled=False)
+
+    async for _ in agent.run("现在几点了？"):
+        pass
+
+    assert call_count == 2  # 工具调用后进入第二轮
+    # 第二轮发给 LLM 的历史里，带 tool_calls 的 assistant 消息应保留 extra_content
+    second_turn = seen_messages[1]
+    assistant_msgs = [
+        m for m in second_turn
+        if m.role == MessageRole.ASSISTANT and m.tool_calls
+    ]
+    assert assistant_msgs, "第二轮历史缺少带工具调用的 assistant 消息"
+    tc = assistant_msgs[0].tool_calls[0]
+    assert tc.get("extra_content") == sig
+    # to_dict() 也应原样透传（真实 provider 据此发往 API）
+    assert assistant_msgs[0].to_dict()["tool_calls"][0]["extra_content"] == sig
+
+
+def _fake_tc(idx, cid, name, args):
+    """构造一个仿 OpenAI SDK 的流式 tool_call delta 对象。"""
+    return type('obj', (), {
+        'index': idx,
+        'id': cid,
+        'function': type('obj', (), {'name': name, 'arguments': args})(),
+    })()
+
+
+def test_merge_tool_calls_parallel_missing_index():
+    """并行工具调用即便 index 缺失（都为 None），也应按唯一 id 拆成多个调用，
+    不能合并成名字拼接的单个调用。
+
+    回归：Gemini 兼容层并行调用 index 缺失/为 0，旧逻辑纯按 index 合并，
+    导致 researcher+coder 被并成 "researchercoder"（工具不存在）。
+    """
+    from milu.agent.agent import _merge_tool_calls
+
+    buffer = []
+    _merge_tool_calls(buffer, [_fake_tc(None, "c1", "researcher", '{"task":"a"}')])
+    _merge_tool_calls(buffer, [_fake_tc(None, "c2", "coder", '{"task":"b"}')])
+
+    assert len(buffer) == 2
+    assert {b["function"]["name"] for b in buffer} == {"researcher", "coder"}
+    assert {b["id"] for b in buffer} == {"c1", "c2"}
+    assert {b["function"]["arguments"] for b in buffer} == {'{"task":"a"}', '{"task":"b"}'}
+
+
+def test_merge_tool_calls_fragmented_args_by_index():
+    """单个调用参数分多片到达（续片无 id），按 index 正确拼接，不误拆。"""
+    from milu.agent.agent import _merge_tool_calls
+
+    buffer = []
+    _merge_tool_calls(buffer, [_fake_tc(0, "c1", "get_time", "")])
+    _merge_tool_calls(buffer, [_fake_tc(0, "", "", '{"tz":')])
+    _merge_tool_calls(buffer, [_fake_tc(0, "", "", '"utc"}')])
+
+    assert len(buffer) == 1
+    assert buffer[0]["id"] == "c1"
+    assert buffer[0]["function"]["name"] == "get_time"
+    assert buffer[0]["function"]["arguments"] == '{"tz":"utc"}'
+
+
+def test_merge_tool_calls_parallel_distinct_index():
+    """并行调用带正确的不同 index（qwen 等）：仍正确拆为多个调用。"""
+    from milu.agent.agent import _merge_tool_calls
+
+    buffer = []
+    _merge_tool_calls(buffer, [_fake_tc(0, "c1", "a", '{}')])
+    _merge_tool_calls(buffer, [_fake_tc(1, "c2", "b", '{}')])
+
+    assert len(buffer) == 2
+    assert [b["function"]["name"] for b in buffer] == ["a", "b"]
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_retry(monkeypatch):
     """429 / 服务过载属瞬时错误，应退避重试本轮而非直接判失败。
 

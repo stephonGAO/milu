@@ -119,7 +119,10 @@ class TestGeminiChat:
         assert results[2].usage.total_tokens == 15
 
     @pytest.mark.asyncio
-    async def test_thinking_enabled(self):
+    async def test_thinking_enabled_no_invalid_field(self):
+        """开启思考：走 Gemini 默认动态思考，不注入任何非法字段。
+        旧实现注入 extra_body.thinking（Gemini 不识别 → 400 Unknown name thinking）。
+        """
         from milu.llm.base.message import Message, MessageRole
         from milu.llm.providers.gemini import GeminiLLM
 
@@ -142,12 +145,17 @@ class TestGeminiChat:
                 pass
 
         kwargs = mock_client.chat.completions.create.call_args.kwargs
-        assert "extra_body" in kwargs
-        assert kwargs["extra_body"]["thinking"]["type"] == "enabled"
-        assert kwargs["extra_body"]["thinking"]["budget_tokens"] == -1
+        # 绝不能再出现非法的 thinking 字段
+        assert "thinking" not in kwargs.get("extra_body", {})
+        assert "thinking" not in kwargs
+        # 开启思考为 Gemini 默认行为，不显式设置 reasoning_effort
+        assert "reasoning_effort" not in kwargs
 
     @pytest.mark.asyncio
-    async def test_thinking_disabled(self):
+    async def test_thinking_disabled_uses_reasoning_effort_none(self):
+        """关闭思考：用 OpenAI 兼容端点的顶层 reasoning_effort="none"，
+        不再用臆造的 extra_body.thinking（会 400 Unknown name thinking）。
+        """
         from milu.llm.base.message import Message, MessageRole
         from milu.llm.providers.gemini import GeminiLLM
 
@@ -167,7 +175,9 @@ class TestGeminiChat:
                 pass
 
         kwargs = mock_client.chat.completions.create.call_args.kwargs
-        assert kwargs["extra_body"]["thinking"]["type"] == "disabled"
+        assert kwargs["reasoning_effort"] == "none"
+        assert "thinking" not in kwargs.get("extra_body", {})
+        assert "thinking" not in kwargs
 
     @pytest.mark.asyncio
     async def test_reasoning_content(self):

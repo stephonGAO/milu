@@ -92,6 +92,31 @@ _META_TOOLS = {"list_catalog", "search_tools", "activate_tools", "load_skill", "
 # 合并工具调用片段
 # ---------------------------------------------------------------------------
 
+def _extract_tool_call_extra_content(tc) -> dict | None:
+    """从原始 tool_call delta 提取 provider 透传的 extra_content。
+
+    目前用于 Gemini 思考模型的 thought_signature——它位于
+    tool_call.extra_content.google.thought_signature，多轮工具调用回传历史时【必须】
+    原样带回（否则 400 "Function call is missing a thought_signature"）。
+    OpenAI SDK 对未知字段 extra="allow"，可能以属性或 model_extra 暴露；值可能是
+    dict 或 pydantic 模型，统一转成普通 dict 以便 JSON 序列化、入历史、回传。
+    非 Gemini provider 不产生该字段，返回 None（通用、无副作用）。
+    """
+    raw = getattr(tc, "extra_content", None)
+    if raw is None:
+        model_extra = getattr(tc, "model_extra", None)
+        if isinstance(model_extra, dict):
+            raw = model_extra.get("extra_content")
+    if raw is None:
+        return None
+    if hasattr(raw, "model_dump"):
+        try:
+            raw = raw.model_dump(exclude_none=True)
+        except Exception:
+            return None
+    return raw if isinstance(raw, dict) and raw else None
+
+
 def _merge_tool_calls(
     buffer: list[dict],
     new_calls: list,
@@ -109,37 +134,58 @@ def _merge_tool_calls(
         buffer（原地修改后返回）
     """
     for tc in new_calls:
-        idx = getattr(tc, "index", 0)
+        idx = getattr(tc, "index", None)
         call_id = getattr(tc, "id", None) or ""
         fn = getattr(tc, "function", None)
         fn_name = getattr(fn, "name", "") if fn else ""
         fn_args = getattr(fn, "arguments", "") if fn else ""
+        # provider 透传字段（如 Gemini thought_signature）——通常随首片到达
+        extra_content = _extract_tool_call_extra_content(tc)
 
-        # 查找是否已有该 index 的 buffer 条目
+        # 续接目标判定：
+        # - 非空 id = 一个新工具调用的起始标志（OpenAI 流式里 id 只在首片出现一次）。
+        #   即便多个并行调用 index 缺失或都为 0（Gemini 兼容层的已知行为），靠唯一 id
+        #   也能正确拆分，不会把 researcher+coder 误并成 "researchercoder"。
+        # - 无 id = 参数续片，按 index 归属；index 也缺失时归到最近一条（buffer[-1]）。
         existing = None
-        for item in buffer:
-            if item["_idx"] == idx:
-                existing = item
-                break
+        if call_id:
+            for item in buffer:
+                if item.get("id") == call_id:
+                    existing = item
+                    break
+        else:
+            if idx is not None:
+                for item in buffer:
+                    if item["_idx"] == idx:
+                        existing = item
+                        break
+            if existing is None and buffer:
+                existing = buffer[-1]
 
         if existing is None:
-            # 新建条目
-            buffer.append({
-                "_idx": idx,
+            # 新建条目；index 缺失时用合成序号保证唯一
+            item = {
+                "_idx": idx if idx is not None else len(buffer),
                 "id": call_id,
                 "function": {
                     "name": fn_name,
                     "arguments": fn_args,
                 },
-            })
+            }
+            if extra_content:
+                item["extra_content"] = extra_content
+            buffer.append(item)
         else:
-            # 追加拼接
-            if call_id:
+            # 追加拼接（id 只在首片出现，不覆盖已有 id）
+            if call_id and not existing.get("id"):
                 existing["id"] = call_id
             if fn_name:
                 existing["function"]["name"] += fn_name
             if fn_args:
                 existing["function"]["arguments"] += fn_args
+            # 后续片若携带 extra_content 也补上（一般首片即有）
+            if extra_content and "extra_content" not in existing:
+                existing["extra_content"] = extra_content
 
     return buffer
 
@@ -952,14 +998,19 @@ class Agent:
                 # 清理 buffer：移除内部字段，转为标准格式
                 resolved_calls = []
                 for item in tool_call_buffer:
-                    resolved_calls.append({
+                    call = {
                         "id": item["id"],
                         "type": "function",
                         "function": {
                             "name": item["function"]["name"],
                             "arguments": item["function"]["arguments"],
                         },
-                    })
+                    }
+                    # provider 透传字段（如 Gemini thought_signature）原样保留——
+                    # 入历史并在回传时由 to_dict() 透传，满足多轮工具调用校验。
+                    if item.get("extra_content"):
+                        call["extra_content"] = item["extra_content"]
+                    resolved_calls.append(call)
 
                 assistant_msg = Message(
                     role=MessageRole.ASSISTANT,

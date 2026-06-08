@@ -67,7 +67,8 @@ class GeminiLLM(BaseLLM):
         流式聊天接口。
 
         Gemini 特有参数映射:
-            enable_thinking (bool) → extra_body.thinking_config
+            enable_thinking=False → reasoning_effort="none"（关闭思考；OpenAI 兼容端点机制）
+            enable_thinking=True  → 不显式设置（Gemini 2.5/3 默认即开启动态思考）
         """
         client = self._get_client()
 
@@ -91,16 +92,17 @@ class GeminiLLM(BaseLLM):
         if "tool_choice" in validated:
             request_params["tool_choice"] = validated["tool_choice"]
 
-        # extra_body: 思考模式
-        # Gemini 2.5 使用 thinking_config.thinking_budget
-        # -1 表示动态思考（模型自行决定 token 数）
-        extra_body = {}
-        if "enable_thinking" in validated and validated["enable_thinking"]:
-            extra_body["thinking"] = {"type": "enabled", "budget_tokens": -1}
-        elif "enable_thinking" in validated and not validated["enable_thinking"]:
-            extra_body["thinking"] = {"type": "disabled"}
-        if extra_body:
-            request_params["extra_body"] = extra_body
+        # 思考控制：Gemini 的 OpenAI 兼容端点用顶层参数 reasoning_effort（"none" 关思考），
+        # 【不是】extra_body.thinking——后者不是合法字段，会直接 400
+        # "Unknown name 'thinking'"（旧实现的 bug；当时注释写的 thinking_config 也没落地）。
+        # 约定：enable_thinking=False → reasoning_effort="none"；enable_thinking=True 不显式
+        # 设置（Gemini 2.5/3 默认即开启动态思考，无需指定，也避开"某些 Gemini 3 拒绝
+        # reasoning_effort=medium"的坑）。
+        # 注意：reasoning_effort="none" 对 2.5 Flash 可彻底关闭思考；2.5 Pro / 3.x 思考模型
+        # 不支持完全关闭，该值通常被忽略（思考保持开启）而不报错。
+        # 如需更细粒度控制，可改用 extra_body={"google":{"thinking_config":{...}}}。
+        if "enable_thinking" in validated and not validated["enable_thinking"]:
+            request_params["reasoning_effort"] = "none"
 
         try:
             response = await client.chat.completions.create(**request_params)
