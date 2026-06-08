@@ -809,6 +809,7 @@ class Agent:
                 # 4. 流式调用 LLM
                 tool_call_buffer: list[dict] = []
                 turn_text_parts: list[str] = []
+                turn_reasoning_parts: list[str] = []  # 累积思考增量，回写 assistant 消息
                 announced_calls: set[int] = set()  # 已发 ToolCallPreparing 的 buffer 下标
 
                 try:
@@ -820,6 +821,7 @@ class Agent:
                                 yield TextDelta(text=chunk.content)
 
                             if chunk.reasoning_content:
+                                turn_reasoning_parts.append(chunk.reasoning_content)
                                 yield ReasoningDelta(text=chunk.reasoning_content)
 
                             # 6. 合并工具调用片段
@@ -908,6 +910,10 @@ class Agent:
 
                 # 7. 记录 assistant 消息到历史
                 assistant_content = "".join(turn_text_parts) if turn_text_parts else None
+                # 思考内容随 assistant 消息保真存储——thinking 模型（如 Kimi）要求带
+                # tool_calls 的 assistant 消息在回传时携带 reasoning_content，否则报错。
+                # 由各 provider 的 _messages_to_dicts() 按需注入，默认不回传（见 Message）。
+                assistant_reasoning = "".join(turn_reasoning_parts) if turn_reasoning_parts else None
 
                 # 清理 buffer：移除内部字段，转为标准格式
                 resolved_calls = []
@@ -925,6 +931,7 @@ class Agent:
                     role=MessageRole.ASSISTANT,
                     content=assistant_content,
                     tool_calls=resolved_calls if resolved_calls else None,
+                    reasoning_content=assistant_reasoning,
                 )
                 self._history.add(assistant_msg)
                 final_text = assistant_content or final_text

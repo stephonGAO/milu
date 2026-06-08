@@ -207,6 +207,10 @@ class Session:
             record["tool_call_id"] = message.tool_call_id
         if message.name:
             record["name"] = message.name
+        # 思考内容：thinking 模型（Kimi）回传带 tool_calls 的 assistant 消息时需要它，
+        # 持久化以保证会话重载后仍能正确回传，不再触发 reasoning_content missing。
+        if message.reasoning_content:
+            record["reasoning_content"] = message.reasoning_content
 
         if not self._append_jsonl(record):
             return -1
@@ -238,6 +242,8 @@ class Session:
                 entry["tool_call_id"] = msg.tool_call_id
             if msg.name:
                 entry["name"] = msg.name
+            if msg.reasoning_content:
+                entry["reasoning_content"] = msg.reasoning_content
             serialized.append(entry)
 
         record: dict[str, Any] = {
@@ -405,6 +411,7 @@ class Session:
             tool_calls=obj.get("tool_calls"),
             tool_call_id=obj.get("tool_call_id"),
             name=obj.get("name"),
+            reasoning_content=obj.get("reasoning_content"),
         )
 
     # ── 元数据 ────────────────────────────────────────────────

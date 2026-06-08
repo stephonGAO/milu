@@ -187,3 +187,49 @@ class TestKimiChat:
         assert "extra_body" in call_kwargs
         # Kimi使用 reasoning_effort 映射 thinking_level
         assert call_kwargs["extra_body"]["reasoning_effort"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_reasoning_content_echoed_on_tool_call_message(self):
+        """thinking 模型回传约束：带 tool_calls 的 assistant 历史消息必须携带
+        reasoning_content，否则 Kimi 报 "thinking is enabled but reasoning_content
+        is missing in assistant tool call message"。验证 _messages_to_dicts 会把
+        Message.reasoning_content 注入到带 tool_calls 的 assistant 消息上，
+        而普通（无 tool_calls）assistant 消息不注入、tool 消息也不受影响。
+        """
+        from milu.llm.base.message import Message, MessageRole
+        from milu.llm.providers.kimi import KimiLLM
+
+        llm = KimiLLM(api_key="test-key", model="kimi-k2-thinking")
+        messages = [
+            Message(role=MessageRole.USER, content="帮我建个计划"),
+            # 带 tool_calls + reasoning_content 的 assistant 消息（需回传 reasoning）
+            Message(
+                role=MessageRole.ASSISTANT,
+                content=None,
+                tool_calls=[{
+                    "id": "call_1", "type": "function",
+                    "function": {"name": "todo_write", "arguments": "{}"},
+                }],
+                reasoning_content="我先列个待办计划……",
+            ),
+            Message(
+                role=MessageRole.TOOL, content="ok",
+                tool_call_id="call_1", name="todo_write",
+            ),
+            # 普通终结回答：有 reasoning 但无 tool_calls，不应注入 reasoning_content
+            Message(
+                role=MessageRole.ASSISTANT,
+                content="计划已建好。",
+                reasoning_content="思考过程……",
+            ),
+        ]
+
+        dicts = llm._messages_to_dicts(messages)
+
+        # 带 tool_calls 的 assistant 消息被注入 reasoning_content
+        assert dicts[1]["role"] == "assistant" and dicts[1]["tool_calls"]
+        assert dicts[1]["reasoning_content"] == "我先列个待办计划……"
+        # tool 消息不含 reasoning_content
+        assert "reasoning_content" not in dicts[2]
+        # 普通 assistant 终结回答不注入 reasoning_content（避免无谓膨胀）
+        assert "reasoning_content" not in dicts[3]
