@@ -64,6 +64,7 @@ from milu.tools.builtin.knowledge_tool import (
     render_knowledge_prompt,
 )
 from milu.knowledge import KnowledgeConfig
+from milu.exceptions import content_safety_hint
 from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
     _current_subagent_events,
@@ -957,6 +958,19 @@ class Agent:
                         # 超过重试上限，放弃
                         logger.error("服务限流/过载超过重试上限: %s", e)
                         del self._rate_retry_count
+
+                    # ── 内容合规 / 安全风控拦截 → 不重试，直接给用户清晰提示 ──
+                    # 国产模型常见（data_inspection_failed / content_filter / 敏感 等）。
+                    # 与限流/网络不同，重试无益；主代理与子代理共用本 run() 循环，
+                    # 故子代理（如 researcher）撞到风控也会产出结构化错误而非静默吞掉。
+                    safety_hint = content_safety_hint(e)
+                    if safety_hint is not None:
+                        logger.warning("内容合规拦截: %s", e)
+                        yield AgentError(
+                            error_type="content_filter",
+                            message=safety_hint,
+                        )
+                        return
 
                     # ── 上下文过长 → 应急压缩后重试 ──
                     context_too_long_keywords = [

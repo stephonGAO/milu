@@ -577,7 +577,7 @@ const I18N={
     "att.uploading":"上传附件 {0}/{1}：{2}…","att.uploadfail":"附件上传失败：{0} — {1}","att.allfail":"附件全部上传失败，已取消发送",
     "status.thinking":"思考中…","status.replying":"回复中…","status.reasoning":"推理中…","status.preparing":"生成工具调用 {0}…",
     "status.safety":"安全判定中…","status.calling":"调用工具 {0}…","status.processing":"处理结果…","status.confirm":"等待确认…","status.subagent":"子代理 {0} 运行中…",
-    "tool.approved":"已同意","tool.denied":"已拒绝","sub.done":"完成","hist.compacted":"历史已压缩 {0} → {1} 条","sess.loaded.sse":"会话已加载 {0}",
+    "tool.approved":"已同意","tool.denied":"已拒绝","sub.done":"完成","sub.error":"子代理执行出错","hist.compacted":"历史已压缩 {0} → {1} 条","sess.loaded.sse":"会话已加载 {0}",
     "err.server":"服务端错误：{0}","err.request":"请求失败：{0}","chat.stopped":"已停止本次回复","chat.reset":"对话已重置","confirm.fail":"确认失败：{0}",
     "sess.empty":"暂无会话","sess.msgs":"{0} 条消息","sess.load":"加载","sess.del":"删除","sess.del.confirm":"确定删除该会话？此操作不可恢复。","hist.tools":"调用工具：{0}","sess.loaded.toast":"已加载 {0}","sess.loaded.line":"会话已加载：{0}（继续对话即接上历史）",
     "sess.new.toast":"新会话：{0}","sess.new.line":"已切换到新会话：{0}","common.saved":"已保存","saved.next":"已保存，下一条消息生效",
@@ -626,7 +626,7 @@ const I18N={
     "att.uploading":"Uploading attachment {0}/{1}: {2}…","att.uploadfail":"Attachment upload failed: {0} — {1}","att.allfail":"All attachments failed to upload; send cancelled",
     "status.thinking":"Thinking…","status.replying":"Replying…","status.reasoning":"Reasoning…","status.preparing":"Preparing tool call {0}…",
     "status.safety":"Safety check…","status.calling":"Calling {0}…","status.processing":"Processing result…","status.confirm":"Awaiting confirmation…","status.subagent":"Subagent {0} running…",
-    "tool.approved":"Approved","tool.denied":"Denied","sub.done":"done","hist.compacted":"History compacted {0} → {1} msgs","sess.loaded.sse":"Session loaded {0}",
+    "tool.approved":"Approved","tool.denied":"Denied","sub.done":"done","sub.error":"sub-agent error","hist.compacted":"History compacted {0} → {1} msgs","sess.loaded.sse":"Session loaded {0}",
     "err.server":"Server error: {0}","err.request":"Request failed: {0}","chat.stopped":"Response stopped","chat.reset":"Conversation reset","confirm.fail":"Confirm failed: {0}",
     "sess.empty":"No sessions","sess.msgs":"{0} messages","sess.load":"Load","sess.del":"Delete","sess.del.confirm":"Delete this session? This cannot be undone.","hist.tools":"Tools: {0}","sess.loaded.toast":"Loaded {0}","sess.loaded.line":"Session loaded: {0} (continue to resume history)",
     "sess.new.toast":"New session: {0}","sess.new.line":"Switched to new session: {0}","common.saved":"Saved","saved.next":"Saved; applies to the next message",
@@ -1018,7 +1018,10 @@ async function sendMsg(){
         else if(ev==="ToolConfirmRequired"){segTool();toolLine("tool",icon(d.approved?"check":"close")+"<span>"+(d.approved?tr("tool.approved"):tr("tool.denied"))+" "+esc(d.tool_name)+"</span>")}
         else if(ev==="ConfirmationRequest"){setStatus(tr("status.confirm"));showConfirm(d)}
         else if(ev==="SubAgentEvent"){segTool();const n=d.subagent_name,inner=d.event||{};
-          if(inner.text!=null&&inner.text!==""){
+          if(inner.message!=null&&inner.error_type!=null){
+            // 子代理内部错误（如内容合规拦截）：即便关闭子代理详情也要醒目透传
+            subTextEl=null;el("tool err",icon("alert")+'<span class="sname">['+esc(n)+']</span>'+esc(inner.message));
+          }else if(inner.text!=null&&inner.text!==""){
             // 流式文本/推理分片：累积进同一行（同一子代理）→ 连贯成段，不再几字一行
             if(!subTextEl||subTextName!==n){subTextEl=toolLine("sub",'<span class="sname">['+esc(n)+']</span>');subTextName=n;subTextRaw="";}
             subTextRaw+=inner.text;
@@ -1030,7 +1033,10 @@ async function sendMsg(){
           }
           setStatus(tr("status.subagent",esc(n)));
         }
-        else if(ev==="SubAgentDone"){segTool();subTextEl=null;subTextName=null;toolLine("sub",icon("check")+'<span class="sname">['+esc(d.subagent_name)+']</span>'+tr("sub.done"))}
+        else if(ev==="SubAgentDone"){segTool();subTextEl=null;subTextName=null;
+          if(d.is_error){el("tool err",icon("alert")+'<span class="sname">['+esc(d.subagent_name)+']</span>'+esc(d.final_text||tr("sub.error")))}
+          else{toolLine("sub",icon("check")+'<span class="sname">['+esc(d.subagent_name)+']</span>'+tr("sub.done"))}
+        }
         else if(ev==="HistoryCompacted"){sysline(tr("hist.compacted",d.original_count,d.compacted_count))}
         else if(ev==="SessionLoaded"){sysline(tr("sess.loaded.sse",d.session_id))}
         else if(ev==="AgentDone"){enhanceCodeBlocks(asstEl);clearStatus();resetToolLog();asstEl=thinkEl=null;asstText="";seg=null;const u=d.total_usage||{};el("meta-done","turns="+d.turn_count+(u.total_tokens?(" · tokens="+u.total_tokens):""))}

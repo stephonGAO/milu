@@ -124,7 +124,11 @@ async def render_turn(
 
         # ── 子代理内部事件 ──
         elif isinstance(event, SubAgentEvent):
+            # 子代理内部错误（如内容合规拦截）即便关闭详情也要透传，避免被静默吞掉
             if not show_subagent:
+                if isinstance(event.event, AgentError):
+                    print(f"\n  {c('red', '[ERROR]')} {c('magenta', f'[{event.subagent_name}]')} "
+                          f"{c('red', event.event.message)}", flush=True)
                 continue
             name = event.subagent_name
             tag = c("magenta", f"[{name}]")
@@ -167,6 +171,10 @@ async def render_turn(
         # ── 子代理完成 ──
         elif isinstance(event, SubAgentDone):
             if not show_subagent:
+                # 关闭详情时仍透传错误结果（含内容合规提示）
+                if event.is_error and event.final_text:
+                    print(f"\n  {c('red', '[ERROR]')} {c('magenta', f'[{event.subagent_name}]')} "
+                          f"{c('red', event.final_text)}", flush=True)
                 continue
             name = event.subagent_name
             tag = c("magenta", f"[{name}]")

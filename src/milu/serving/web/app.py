@@ -52,6 +52,7 @@ from milu.agent.events import (
     ToolConfirmRequired,
 )
 from milu.cli.config import DEFAULT_MODELS, DEFAULT_PROVIDER, env_key_name
+from milu.exceptions import content_safety_hint
 from milu.llm.base.vision import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES
 from milu.llm.providers import ModelRegistry
 from milu.resources import default_session_dir, user_data_dir
@@ -510,17 +511,28 @@ def create_app(
                 async def _run():
                     try:
                         async for evt in agent.run(user_input, images=images or None):
-                            # 子代理内部事件：按配置开关决定是否转发给前端（默认隐藏）
+                            # 子代理内部事件：按配置开关决定是否转发给前端（默认隐藏）。
+                            # 但**错误必须透传**——否则子代理的内容合规拦截会被静默吞掉，
+                            # 用户只看到主代理「子代理遇到点问题」式的含糊解释。
                             if not show_subagent and isinstance(evt, (SubAgentEvent, SubAgentDone)):
-                                continue
+                                is_err = (
+                                    (isinstance(evt, SubAgentDone) and evt.is_error)
+                                    or (isinstance(evt, SubAgentEvent)
+                                        and isinstance(evt.event, AgentError))
+                                )
+                                if not is_err:
+                                    continue
                             await queue.put(("event", _sse(evt.__class__.__name__,
                                                            _to_jsonable(evt))))
                             if isinstance(evt, (AgentDone, AgentError)):
                                 break
                     except Exception as e:  # noqa: BLE001
                         logger.exception("Agent run 异常 (user=%s)", user_id)
+                        # 内容合规拦截：给友好提示（而非裸露的英文 400 报文）
+                        hint = content_safety_hint(e)
                         await queue.put(("event", _sse("AgentError", {
-                            "error_type": "exception", "message": str(e)})))
+                            "error_type": "content_filter" if hint else "exception",
+                            "message": hint or str(e)})))
                     finally:
                         await queue.put(("done", None))
 
