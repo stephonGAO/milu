@@ -150,7 +150,14 @@
     radial-gradient(1200px 400px at 70% -10%, #eef2ff66, transparent 70%) var(--bg)}
   #chat{flex:1;overflow-y:auto;padding:22px 22px 8px}
   .turn{margin-bottom:18px;max-width:880px}
-  .turn.u{margin-left:auto;display:flex;justify-content:flex-end}
+  .turn.u{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end}
+  /* 用户消息复制：悬停/聚焦时显示操作行 */
+  .msg-actions{display:flex;justify-content:flex-end;margin-top:3px;opacity:0;transition:opacity var(--t)}
+  .turn.u:hover .msg-actions,.turn.u:focus-within .msg-actions{opacity:1}
+  .msg-copy{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--dim);background:transparent;
+    border:1px solid var(--line);border-radius:var(--r-sm);padding:3px 8px;cursor:pointer;transition:all var(--t)}
+  .msg-copy:hover{background:var(--bg-soft);color:var(--ink-2);border-color:var(--line-2)}
+  .msg-copy .ic{width:13px;height:13px}
   .bubble{line-height:1.7;word-wrap:break-word;overflow-wrap:anywhere}
   .bubble.user{background:var(--grad);color:#fff;padding:10px 14px;border-radius:14px 14px 4px 14px;
     max-width:78%;width:fit-content;box-shadow:0 4px 14px rgba(79,70,229,.28);font-size:14px}
@@ -186,6 +193,15 @@
   .bubble li{margin:3px 0}
   .bubble p{margin:4px 0}
   .bubble a{color:var(--brand);text-decoration:underline;text-underline-offset:2px}
+  /* 表格：窄屏可横向滚动，斑马纹 + 表头底色 */
+  .bubble .md-table{overflow-x:auto;margin:10px 0;border:1px solid var(--line-2);border-radius:var(--r-sm)}
+  .bubble table{border-collapse:collapse;font-size:13px;line-height:1.5;width:100%}
+  .bubble th,.bubble td{border:1px solid var(--line-2);padding:7px 12px;text-align:left;vertical-align:top}
+  .bubble thead th{background:var(--bg-soft);font-weight:600;color:var(--ink);white-space:nowrap}
+  .bubble tbody tr:nth-child(even){background:var(--bg-soft)}
+  .bubble blockquote{margin:8px 0;padding:5px 14px;border-left:3px solid var(--brand-soft);
+    background:var(--bg-soft);border-radius:0 var(--r-sm) var(--r-sm) 0;color:var(--sub)}
+  .bubble hr{border:none;border-top:1px solid var(--line-2);margin:14px 0}
 
   /* 欢迎页 */
   .welcome{max-width:640px;margin:6vh auto 0;text-align:center;padding:0 20px;animation:fade .35s ease}
@@ -552,7 +568,7 @@ const I18N={
     "modal.title":"危险工具确认","modal.tool":"工具：","modal.msg.ph":"拒绝时可填给 LLM 的指示（可选）","modal.deny":"拒绝","modal.allow":"同意执行",
     "welcome.title":"milu · 多用户 Agent 服务","welcome.desc":"统一 9 家国产/海外大模型 · 工具与 MCP · 子代理 · 技能 · 会话与定时任务 · 向量知识库。左侧可切换厂商/模型/模式并管理各能力。",
     "suggest.cando":"介绍一下你能做什么","suggest.kb":"用一句话解释什么是向量知识库",
-    "copy.code":"复制代码","copy.label":"复制","copy.done":"已复制到剪贴板","copy.fail":"复制失败",
+    "copy.code":"复制代码","copy.label":"复制","copy.msg":"复制消息","copy.done":"已复制到剪贴板","copy.fail":"复制失败",
     "toollog.title":"工具过程","toollog.steps":"（{0} 步）",
     "att.max":"附件最多 10 个","att.toobig":"{0} 超过 {1}MB 上限","att.remove":"移除","analyze.att":"（请分析附件）",
     "att.uploading":"上传附件 {0}/{1}：{2}…","att.uploadfail":"附件上传失败：{0} — {1}","att.allfail":"附件全部上传失败，已取消发送",
@@ -601,7 +617,7 @@ const I18N={
     "modal.title":"Confirm risky tool","modal.tool":"Tool: ","modal.msg.ph":"Optional note to the LLM if denying","modal.deny":"Deny","modal.allow":"Approve",
     "welcome.title":"milu · Multi-user Agent Service","welcome.desc":"Unifies 9 Chinese/global LLMs · tools & MCP · subagents · skills · sessions & schedules · vector knowledge base. Switch provider/model/mode and manage capabilities on the left.",
     "suggest.cando":"What can you do?","suggest.kb":"Explain vector knowledge bases in one sentence",
-    "copy.code":"Copy code","copy.label":"Copy","copy.done":"Copied to clipboard","copy.fail":"Copy failed",
+    "copy.code":"Copy code","copy.label":"Copy","copy.msg":"Copy message","copy.done":"Copied to clipboard","copy.fail":"Copy failed",
     "toollog.title":"Tool steps","toollog.steps":" ({0} steps)",
     "att.max":"Up to 10 attachments","att.toobig":"{0} exceeds the {1}MB limit","att.remove":"Remove","analyze.att":"(analyze attachment)",
     "att.uploading":"Uploading attachment {0}/{1}: {2}…","att.uploadfail":"Attachment upload failed: {0} — {1}","att.allfail":"All attachments failed to upload; send cancelled",
@@ -668,18 +684,77 @@ document.querySelectorAll(".tabs .tab").forEach(b=>b.onclick=()=>{
 
 // ── 轻量 Markdown 渲染 ──
 function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+// 行内格式：先转义防 XSS，再套行内标签
+function mdInline(s){
+  s=esc(s);
+  s=s.replace(/`([^`]+)`/g,"<code>$1</code>");
+  s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
+  s=s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,"$1<em>$2</em>");
+  s=s.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return s;
+}
+// 拆分表格行为单元格（去外层竖线、支持转义竖线 \|）
+function mdCells(line){
+  let s=line.trim();
+  if(s.startsWith("|"))s=s.slice(1);
+  if(s.endsWith("|"))s=s.slice(0,-1);
+  return s.split(/(?<!\\)\|/).map(c=>c.trim().replace(/\\\|/g,"|"));
+}
+// 块级解析：表格 / 标题 / 列表 / 引用 / 分隔线 / 段落
+function mdBlocks(text){
+  const lines=text.split("\n");let out="",para=[];
+  const flush=()=>{if(para.length){out+="<p>"+para.map(mdInline).join("<br>")+"</p>";para=[]}};
+  for(let i=0;i<lines.length;i++){
+    const t=lines[i].trim();
+    if(!t){flush();continue}
+    // 表格：当前行含 |，下一行为分隔行（仅 | : - 空格，且含 - 与 |）
+    const next=(lines[i+1]||"").trim();
+    if(t.includes("|") && next.includes("|") && next.includes("-") && /^[\s|:\-]+$/.test(next)){
+      flush();
+      const header=mdCells(t);
+      const aligns=mdCells(next).map(c=>{const l=c.startsWith(":"),r=c.endsWith(":");return l&&r?"center":r?"right":l?"left":""});
+      const cell=(c,idx,tag)=>"<"+tag+(aligns[idx]?' style="text-align:'+aligns[idx]+'"':"")+">"+mdInline(c)+"</"+tag+">";
+      let body="";i++;
+      while(i+1<lines.length && lines[i+1].trim() && lines[i+1].includes("|")){
+        i++;const cells=mdCells(lines[i]);
+        body+="<tr>"+cells.map((c,idx)=>cell(c,idx,"td")).join("")+"</tr>";
+      }
+      out+='<div class="md-table"><table><thead><tr>'+header.map((c,idx)=>cell(c,idx,"th")).join("")+"</tr></thead><tbody>"+body+"</tbody></table></div>";
+      continue;
+    }
+    // 标题（# ~ ######，样式复用 h1-h3）
+    let m;
+    if(m=t.match(/^(#{1,6})\s+(.+)$/)){flush();const lv=Math.min(m[1].length,3);out+="<h"+lv+">"+mdInline(m[2])+"</h"+lv+">";continue}
+    // 分隔线
+    if(/^([-*_])\1\1+$/.test(t)){flush();out+="<hr>";continue}
+    // 引用块
+    if(/^>\s?/.test(t)){
+      flush();const q=[];
+      while(i<lines.length && /^>\s?/.test(lines[i].trim())){q.push(lines[i].trim().replace(/^>\s?/,""));i++}
+      i--;out+="<blockquote>"+q.map(mdInline).join("<br>")+"</blockquote>";continue;
+    }
+    // 有序列表
+    if(/^\d+[.)]\s+/.test(t)){
+      flush();let items="";
+      while(i<lines.length && /^\d+[.)]\s+/.test(lines[i].trim())){items+="<li>"+mdInline(lines[i].trim().replace(/^\d+[.)]\s+/,""))+"</li>";i++}
+      i--;out+="<ol>"+items+"</ol>";continue;
+    }
+    // 无序列表
+    if(/^[-*+]\s+/.test(t)){
+      flush();let items="";
+      while(i<lines.length && /^[-*+]\s+/.test(lines[i].trim())){items+="<li>"+mdInline(lines[i].trim().replace(/^[-*+]\s+/,""))+"</li>";i++}
+      i--;out+="<ul>"+items+"</ul>";continue;
+    }
+    // 普通段落（软换行用 <br> 保留）
+    para.push(t);
+  }
+  flush();return out;
+}
 function md(src){
-  let out="", parts=src.split(/```/);
+  const parts=String(src).split(/```/);let out="";
   for(let i=0;i<parts.length;i++){
     if(i%2===1){const seg=parts[i].replace(/^[a-zA-Z0-9]*\n/,"");out+="<pre><code>"+esc(seg)+"</code></pre>";continue}
-    let t=esc(parts[i]);
-    t=t.replace(/`([^`]+)`/g,"<code>$1</code>");
-    t=t.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
-    t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-    t=t.replace(/^### (.+)$/gm,"<h3>$1</h3>").replace(/^## (.+)$/gm,"<h2>$1</h2>").replace(/^# (.+)$/gm,"<h1>$1</h1>");
-    t=t.replace(/^[-*] (.+)$/gm,"<li>$1</li>");
-    t=t.replace(/(<li>.*<\/li>)/s,"<ul>$1</ul>");
-    out+=t;
+    out+=mdBlocks(parts[i]);
   }
   return out;
 }
@@ -709,6 +784,8 @@ function enhanceCodeBlocks(container){
   });
 }
 chat.addEventListener("click",e=>{
+  const mc=e.target.closest(".msg-copy");
+  if(mc){navigator.clipboard.writeText(mc._copyText||"").then(()=>toast(tr("copy.done"),"success")).catch(()=>toast(tr("copy.fail"),"error"));return}
   const b=e.target.closest(".copy-btn");if(!b)return;
   const pre=b.closest("pre");const code=pre.querySelector("code");
   const txt=code?code.innerText:pre.innerText;
@@ -855,6 +932,12 @@ async function sendMsg(){
   let ub=esc(input||tr("analyze.att"));
   if(atts.length)ub+='<div class="atts">'+atts.map(f=>(isImg(f.name)?icon("image")+" ":icon("file")+" ")+esc(f.name)).join("<br>")+"</div>";
   const turn=el("turn u"); turn.innerHTML='<div class="bubble user">'+ub+'</div>';
+  if(input){  // 有文字内容才挂复制按钮（纯附件消息无可复制文本）
+    const acts=document.createElement("div");acts.className="msg-actions";
+    acts.innerHTML='<button class="msg-copy" type="button" aria-label="'+esc(tr("copy.msg"))+'">'+icon("copy")+'<span>'+tr("copy.label")+'</span></button>';
+    acts.querySelector(".msg-copy")._copyText=input;   // 存原始文本，避免转义/HTML 污染
+    turn.appendChild(acts);
+  }
   $("input").value="";$("input").style.height="auto";scrollChat(true);
   if(!isCmd){attFiles=[];renderAtts();}
   setStatus(tr("status.thinking"));
