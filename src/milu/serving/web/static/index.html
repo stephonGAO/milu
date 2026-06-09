@@ -572,7 +572,7 @@ const I18N={
     "welcome.title":"milu · 多用户 Agent 服务","welcome.desc":"统一 9 家国产/海外大模型 · 工具与 MCP · 子代理 · 技能 · 会话与定时任务 · 向量知识库。左侧可切换厂商/模型/模式并管理各能力。",
     "suggest.cando":"介绍一下你能做什么","suggest.kb":"用一句话解释什么是向量知识库",
     "copy.code":"复制代码","copy.label":"复制","copy.msg":"复制消息","copy.done":"已复制到剪贴板","copy.fail":"复制失败",
-    "toollog.title":"工具过程","toollog.steps":"（{0} 步）",
+    "toollog.title":"工具过程","toollog.steps":"（{0} 次调用）",
     "att.max":"附件最多 10 个","att.toobig":"{0} 超过 {1}MB 上限","att.remove":"移除","analyze.att":"（请分析附件）",
     "att.uploading":"上传附件 {0}/{1}：{2}…","att.uploadfail":"附件上传失败：{0} — {1}","att.allfail":"附件全部上传失败，已取消发送",
     "status.thinking":"思考中…","status.replying":"回复中…","status.reasoning":"推理中…","status.preparing":"生成工具调用 {0}…",
@@ -621,7 +621,7 @@ const I18N={
     "welcome.title":"milu · Multi-user Agent Service","welcome.desc":"Unifies 9 Chinese/global LLMs · tools & MCP · subagents · skills · sessions & schedules · vector knowledge base. Switch provider/model/mode and manage capabilities on the left.",
     "suggest.cando":"What can you do?","suggest.kb":"Explain vector knowledge bases in one sentence",
     "copy.code":"Copy code","copy.label":"Copy","copy.msg":"Copy message","copy.done":"Copied to clipboard","copy.fail":"Copy failed",
-    "toollog.title":"Tool steps","toollog.steps":" ({0} steps)",
+    "toollog.title":"Tool steps","toollog.steps":" ({0} calls)",
     "att.max":"Up to 10 attachments","att.toobig":"{0} exceeds the {1}MB limit","att.remove":"Remove","analyze.att":"(analyze attachment)",
     "att.uploading":"Uploading attachment {0}/{1}: {2}…","att.uploadfail":"Attachment upload failed: {0} — {1}","att.allfail":"All attachments failed to upload; send cancelled",
     "status.thinking":"Thinking…","status.replying":"Replying…","status.reasoning":"Reasoning…","status.preparing":"Preparing tool call {0}…",
@@ -815,7 +815,7 @@ $("toBottom").onclick=()=>chat.scrollTo({top:chat.scrollHeight,behavior:"smooth"
 
 // ── 工具过程折叠块 ──
 let toolsOpenDefault=localStorage.getItem("milu_tools_open")==="1";
-let toolLog=null, toolNames=[], toolSteps=0;
+let toolLog=null, toolNames=[];
 // 子代理流式文本累积器：把连续文本分片并入同一行，避免每个分片单独成行
 let subTextEl=null, subTextName=null, subTextRaw="";
 function ensureToolLog(){
@@ -832,14 +832,16 @@ function toolLine(cls,html,isErr){
   const tl=ensureToolLog();
   const d=document.createElement("div");d.className=cls;d.innerHTML=html;
   tl.querySelector(".tl-body").appendChild(d);
-  toolSteps++;
   if(isErr) tl.querySelector(".tl-head").classList.add("haserr");
+  // 计数取「实际工具调用次数」(toolNames，仅 ToolCallStart 累加)，而非日志行数——
+  // 否则子代理流式文本/结果/完成等每行都计入，2 个工具会被显示成几十「步」
   const uniq=[...new Set(toolNames)].filter(Boolean);
-  tl.querySelector(".tl-sum").textContent=tr("toollog.title")+(uniq.length?(" · "+uniq.slice(0,4).join(", ")+(uniq.length>4?"…":"")):"")+tr("toollog.steps",toolSteps);
+  const n=toolNames.length;
+  tl.querySelector(".tl-sum").textContent=tr("toollog.title")+(uniq.length?(" · "+uniq.slice(0,4).join(", ")+(uniq.length>4?"…":"")):"")+(n?tr("toollog.steps",n):"");
   scrollChat();
   return d;
 }
-function resetToolLog(){toolLog=null;toolNames=[];toolSteps=0;subTextEl=null;subTextName=null;subTextRaw="";}
+function resetToolLog(){toolLog=null;toolNames=[];subTextEl=null;subTextName=null;subTextRaw="";}
 
 // 清空聊天窗口
 function clearChat(){chat.innerHTML="";resetToolLog();statusEl=null;}
