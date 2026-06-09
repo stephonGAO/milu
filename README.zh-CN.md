@@ -53,7 +53,8 @@ milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即
 **用 pip** —— 如果你已经有 Python 3.10+：
 
 ```bash
-pip install milu              # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
+pip install -U milu           # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
+                              # -U 首次安装也行，已装则升级到最新
 ```
 
 <details>
@@ -61,7 +62,7 @@ pip install milu              # 全功能：CLI、Web 服务、RAG 知识库、M
 
 1. 到 [python.org/downloads](https://www.python.org/downloads/) 下载 Python 3.10+。Windows 安装时**务必勾选 “Add Python to PATH”**。
 2. 打开终端（Windows 用 PowerShell · macOS 用 终端）验证：`python --version` 应显示 3.10 或更高。
-3. 执行 `pip install milu`
+3. 执行 `pip install -U milu`
 4. 输入 `milu` 开始对话。
 </details>
 

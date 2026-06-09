@@ -53,7 +53,8 @@ milu is both a ready-to-run agent and a framework to build on — start instantl
 **With pip** — if you already have Python 3.10+:
 
 ```bash
-pip install milu              # everything included: CLI, web service, RAG, MCP
+pip install -U milu           # everything included: CLI, web service, RAG, MCP
+                              # -U installs fresh, and upgrades an existing install to the latest
 ```
 
 <details>
@@ -61,7 +62,7 @@ pip install milu              # everything included: CLI, web service, RAG, MCP
 
 1. Download Python 3.10+ from [python.org/downloads](https://www.python.org/downloads/). On Windows, tick **"Add Python to PATH"** during setup.
 2. Open a terminal (Windows: PowerShell · macOS: Terminal) and check: `python --version` should print 3.10 or higher.
-3. `pip install milu`
+3. `pip install -U milu`
 4. `milu` to start chatting.
 </details>
 
