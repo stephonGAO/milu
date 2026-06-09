@@ -10,7 +10,6 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
-[![GitHub stars](https://img.shields.io/github/stars/stephonGAO/milu?style=flat&logo=github&label=stars)](https://github.com/stephonGAO/milu/stargazers)
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -24,43 +23,37 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 
 Most agent frameworks stop at single-user demos, and treat Chinese LLM providers as an afterthought. milu starts where they stop:
 
-- 🏭 **From demo to production in one library** — `AgentPool` gives you per-user agent isolation, LRU/TTL eviction, global concurrency limits and shared MCP processes. The question every framework leaves as "an exercise for the reader" — *"my demo works, how do I serve 100 concurrent users without sessions bleeding into each other?"* — is answered here, backed by 1100+ tests. The same pool maps tenants to their own API keys (`KeyedLLMProvider`), so it scales from a side project to multi-tenant SaaS.
-- 🇨🇳 **Chinese LLMs as first-class citizens** — Qwen, DeepSeek, Kimi, GLM, MiniMax, Doubao natively supported alongside OpenAI, Gemini and Claude. No `base_url` juggling, provider quirks (thinking mode, built-in web search, parameter differences) pre-adapted, plus a China-reachable search backend out of the box.
-- 🔋 **Batteries actually included** — 20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
-- 🛡️ **A real safety model** — four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
-- 🪶 **Thin by design** — built directly on the `openai` SDK as the unified HTTP client. Events stream out as plain dataclasses. No chains, no graphs, no DSL to learn.
+- 🏭 **From demo to production in one library**<br>
+  `AgentPool` gives you per-user agent isolation, LRU/TTL eviction, global concurrency limits and shared MCP processes. The question every framework leaves as "an exercise for the reader" — *"my demo works, how do I serve 100 concurrent users without sessions bleeding into each other?"* — is answered here, backed by 1100+ tests. The same pool maps tenants to their own API keys (`KeyedLLMProvider`), so it scales from a side project to multi-tenant SaaS.
+- 🇨🇳 **Chinese LLMs as first-class citizens**<br>
+  Qwen, DeepSeek, Kimi, GLM, MiniMax, Doubao natively supported alongside OpenAI, Gemini and Claude. No `base_url` juggling, provider quirks (thinking mode, built-in web search, parameter differences) pre-adapted, plus a China-reachable search backend out of the box.
+- 🔋 **Batteries actually included**<br>
+  20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
+- 🛡️ **A real safety model**<br>
+  Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
+- 🪶 **Thin by design**<br>
+  Built directly on the `openai` SDK as the unified HTTP client. Events stream out as plain dataclasses. No chains, no graphs, no DSL to learn.
 
 ## Two ways to use it
 
 milu is both a ready-to-run agent and a framework to build on — start instantly, embed when you need to:
 
-- 🚀 **Run it**: `milu` for chat, `milu serve` for a multi-user service — full capabilities, zero code. Both the CLI and the web UI ship in **English and 中文**.
-- 🧩 **Build on it**: `from milu import Agent` to embed agents in your own backend, then scale to multi-user / multi-tenant with AgentPool — **you own your data and stack**.
+- 🚀 **Run it**<br>
+  `milu` for chat, `milu serve` for a multi-user service — full capabilities, zero code. Both the CLI and the web UI ship in **English and 中文**.
+- 🧩 **Build on it**<br>
+  `from milu import Agent` to embed agents in your own backend, then scale to multi-user / multi-tenant with AgentPool — **you own your data and stack**.
+
+---
 
 ## Install
 
-**Easiest — no existing Python needed.** [uv](https://github.com/astral-sh/uv) installs Python and milu for you:
-
-```bash
-# 1. install uv (one line, needs no Python)
-curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
-
-# 2. install milu (uv fetches a Python automatically if missing)
-uv tool install milu
-```
+> [!TIP]
+> **One `pip install milu` gets everything** — CLI, web service, RAG knowledge base and MCP are all included. You only need at least one provider API key to start.
 
 **With pip** — if you already have Python 3.10+:
 
 ```bash
 pip install milu              # everything included: CLI, web service, RAG, MCP
-```
-
-**Docker** — no Python on the host at all:
-
-```bash
-cp .env.example .env          # fill in at least one provider API key
-docker compose up -d
 ```
 
 <details>
@@ -72,7 +65,28 @@ docker compose up -d
 4. `milu` to start chatting.
 </details>
 
+**No existing Python? — the easiest one-liner.** [uv](https://github.com/astral-sh/uv) installs Python and milu for you:
+
+```bash
+# 1. install uv (one line, needs no Python)
+curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
+
+# 2. install milu (uv fetches a Python automatically if missing)
+uv tool install milu
+```
+
+**Docker** — no Python on the host at all:
+
+```bash
+cp .env.example .env          # fill in at least one provider API key
+docker compose up -d
+```
+
 ## Quick start
+
+> [!NOTE]
+> First run launches an interactive setup wizard — pick a provider, paste an API key, and you're chatting. Zero config to first conversation.
 
 **CLI** — zero config to first conversation:
 
@@ -98,9 +112,11 @@ async for event in agent.run("What time is it? Use a tool to check."):
 milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
 ```
 
+---
+
 ## How it compares
 
-| | milu | LangChain | CrewAI | smolagents | Qwen-Agent |
+| Capability | milu | LangChain | CrewAI | smolagents | Qwen-Agent |
 |---|---|---|---|---|---|
 | Chinese providers native (6) | ✅ | community pkgs | via LiteLLM | via LiteLLM | Qwen family |
 | Multi-user pool, in-library | ✅ AgentPool | platform (paid) | platform | — | — |
@@ -113,19 +129,28 @@ milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.
 
 > ✅ = built-in; "—" = not built-in (often available via an external platform or a few lines of your own code). Reflects each library as of June 2026 — these move fast, so corrections are welcome via issue/PR.
 >
-> **When milu is the right fit:** you're building on Chinese LLMs, you need a production multi-user / multi-tenant service (not just a single-user demo), and you want batteries included — runnable as-is or embeddable as a library, Or as a pure and flexible development core and intelligent base.
+> **When milu is the right fit:** you're building on Chinese LLMs, you need a production multi-user / multi-tenant service (not just a single-user demo), and you want batteries included — runnable as-is or embeddable as a library, Or as a strong, bold and flexible development core and intelligent base.
 >
-> **When to choose something else:** for the largest integration ecosystem, [LangChain](https://github.com/langchain-ai/langchain); for pure multi-agent orchestration, [CrewAI](https://github.com/crewAIInc/crewAI) or [AutoGen](https://github.com/microsoft/autogen); for the most minimal code-first agents, [smolagents](https://github.com/huggingface/smolagents).
+> **When to choose something else:** for the largest integration ecosystem, [LangChain](https://github.com/langchain-ai/langchain); for pure multi-agent orchestration, [CrewAI](https://github.com/crewAIInc/crewAI) or [AutoGen](https://github.com/microsoft/autogen); for a tiny, barebones core with almost nothing built in, [smolagents](https://github.com/huggingface/smolagents).
 
 ## What you can build
 
-- **Personal AI assistant** — `milu` drops you into a chat in one command; long-term memory remembers your preferences, scheduled tasks handle reminders and daily digests, and built-in tools (web search, files, docs, vision) are ready to use — all running locally, your data stays yours.
-- **Enterprise knowledge assistant** — load manuals / FAQs / policies into the RAG knowledge base; auto-retrieval each turn, source-aware answers that separate "internal docs vs web", no hallucinated guesses. Per-user isolated sessions and memory.
-- **Customer-support / ticket bot** — high-volume repetitive queries and ticket triage; AgentPool handles many concurrent users, safety modes gate what actions run.
-- **Vertical / industry assistant** — sub-agents + document & vision reading + MCP to plug into your own systems and databases, bringing domain knowledge and real data in.
-- **An "AI coworker" for your team** — pull tasks from chat, nudge progress on a schedule, auto-generate recap summaries (scheduled tasks + multi-user + tools).
-- **Private / on-prem deployment** — `docker compose up -d`; runs entirely in your environment with Chinese (or any) LLMs, data never leaves.
-- **Multi-tenant SaaS / a base for AI app vendors** — `KeyedLLMProvider` maps tenants to their own API keys; the pool enforces per-user instance and concurrency isolation — scale from a side project to a multi-tenant product.
+- **Personal AI assistant**<br>
+  `milu` drops you into a chat in one command; long-term memory remembers your preferences, scheduled tasks handle reminders and daily digests, and built-in tools (web search, files, docs, vision) are ready to use — all running locally, your data stays yours.
+- **Enterprise knowledge assistant**<br>
+  Load manuals / FAQs / policies into the RAG knowledge base; auto-retrieval each turn, source-aware answers that separate "internal docs vs web", no hallucinated guesses. Per-user isolated sessions and memory.
+- **Customer-support / ticket bot**<br>
+  High-volume repetitive queries and ticket triage; AgentPool handles many concurrent users, safety modes gate what actions run.
+- **Vertical / industry assistant**<br>
+  Sub-agents + document & vision reading + MCP to plug into your own systems and databases, bringing domain knowledge and real data in.
+- **An "AI coworker" for your team**<br>
+  Pull tasks from chat, nudge progress on a schedule, auto-generate recap summaries (scheduled tasks + multi-user + tools).
+- **Private / on-prem deployment**<br>
+  `docker compose up -d`; runs entirely in your environment with Chinese (or any) LLMs, data never leaves.
+- **Multi-tenant SaaS / a base for AI app vendors**<br>
+  `KeyedLLMProvider` maps tenants to their own API keys; the pool enforces per-user instance and concurrency isolation — scale from a side project to a multi-tenant product.
+
+---
 
 ## Examples
 
@@ -200,6 +225,9 @@ agent.set_mode("talk")              # read-only: unsafe tools blocked
 | `manual` | safe tools run; unsafe tools emit a confirmation event and wait |
 | `auto` (default) | autonomous; unsafe calls are screened by an **AI safety judge** (allow / confirm / deny) |
 | `superwork` | full permissions, no checks |
+
+> [!WARNING]
+> `superwork` skips every safety check (including the AI judge). Use it only for fully trusted tasks.
 
 Sub-agents inherit the parent's mode and confirmation callback — delegation is never a bypass.
 </details>
@@ -302,6 +330,8 @@ AgentPool (multi-user, optional)
 
 Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOpenAI` client, so LLM instances are coroutine-safe and shareable across users.
 
+---
+
 ## Production notes
 
 - **Scaling out**: route by `user_id` (e.g. nginx `ip_hash`); per-session serialization is handled by in-process entry locks — no distributed locks needed. Sessions persist to disk and recover after eviction or restart.
@@ -317,6 +347,8 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 - [ ] English documentation set (architecture & guides — currently Chinese)
 - [ ] Prebuilt images on a container registry
 - [ ] One-click installers / standalone binaries (no Python required)
+
+---
 
 ## Contributing
 

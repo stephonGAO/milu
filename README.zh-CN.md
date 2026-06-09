@@ -10,7 +10,6 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
-[![GitHub stars](https://img.shields.io/github/stars/stephonGAO/milu?style=flat&logo=github&label=stars)](https://github.com/stephonGAO/milu/stargazers)
 
 [English](README.md) | **简体中文**
 
@@ -24,43 +23,37 @@
 
 多数 agent 框架止步于单用户 demo，又把国产模型当二等公民。milu 从它们止步的地方开始：
 
-- 🏭 **一个库走完 demo 到生产** —— `AgentPool` 提供 per-user 实例隔离、LRU/TTL 淘汰、全局并发限流、共享 MCP 进程。每个框架都留给你自己解决的问题——*「demo 跑通了，怎么让 100 个用户同时用且会话互不串扰？」*——这里有现成答案，1100+ 测试兜底。同一个池还能把租户映射到各自的 API Key（`KeyedLLMProvider`），从个人项目平滑长到多租户 SaaS。
-- 🇨🇳 **国产模型一等公民** —— 通义千问、DeepSeek、Kimi、GLM、MiniMax、豆包原生支持，与 OpenAI、Gemini、Claude 同级。不用自己维护 base_url 路由表，各家的思考模式、自带联网搜索、参数差异已经适配好，搜索工具自带国内可直连的后端（博查）。
-- 🔋 **真·开箱即用** —— 20+ 内置工具（文件、Shell、Python、网页抓取/搜索、Office/PDF 文档读取、图片视觉输入）、MCP 协议（stdio/HTTP/SSE）、子代理、技能、会话持久化、上下文自动压缩、长期记忆、RAG 知识库、定时任务，外加一个内置的多用户 Web 服务。
-- 🛡️ **真正的安全模型** —— 四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
-- 🪶 **薄封装，不造概念** —— 直接以 `openai` SDK 为统一 HTTP 客户端，事件以普通 dataclass 流式输出。没有链、没有图、没有需要学习的 DSL。
+- 🏭 **一个库走完 demo 到生产**<br>
+  `AgentPool` 提供 per-user 实例隔离、LRU/TTL 淘汰、全局并发限流、共享 MCP 进程。每个框架都留给你自己解决的问题——*「demo 跑通了，怎么让 100 个用户同时用且会话互不串扰？」*——这里有现成答案，1100+ 测试兜底。同一个池还能把租户映射到各自的 API Key（`KeyedLLMProvider`），从个人项目平滑长到多租户 SaaS。
+- 🇨🇳 **国产模型一等公民**<br>
+  通义千问、DeepSeek、Kimi、GLM、MiniMax、豆包原生支持，与 OpenAI、Gemini、Claude 同级。不用自己维护 base_url 路由表，各家的思考模式、自带联网搜索、参数差异已经适配好，搜索工具自带国内可直连的后端（博查）。
+- 🔋 **真·开箱即用**<br>
+  20+ 内置工具（文件、Shell、Python、网页抓取/搜索、Office/PDF 文档读取、图片视觉输入）、MCP 协议（stdio/HTTP/SSE）、子代理、技能、会话持久化、上下文自动压缩、长期记忆、RAG 知识库、定时任务，外加一个内置的多用户 Web 服务。
+- 🛡️ **真正的安全模型**<br>
+  四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
+- 🪶 **薄封装，不造概念**<br>
+  直接以 `openai` SDK 为统一 HTTP 客户端，事件以普通 dataclass 流式输出。没有链、没有图、没有需要学习的 DSL。
 
 ## 两种用法
 
 milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即开即用，需要时再嵌入：
 
-- 🚀 **直接用**：`milu` 进入对话、`milu serve` 起多用户服务，零代码即得完整能力。CLI 与 Web 界面均支持 **中英文双语**。
-- 🧩 **嵌进你的产品**：`from milu import Agent`，把 Agent 能力嵌入自有后端，再用 AgentPool 扩成多用户/多租户服务——**数据与技术栈完全归你**。
+- 🚀 **直接用**<br>
+  `milu` 进入对话、`milu serve` 起多用户服务，零代码即得完整能力。CLI 与 Web 界面均支持 **中英文双语**。
+- 🧩 **嵌进你的产品**<br>
+  `from milu import Agent`，把 Agent 能力嵌入自有后端，再用 AgentPool 扩成多用户/多租户服务——**数据与技术栈完全归你**。
+
+---
 
 ## 安装
 
-**最简单 —— 无需预装 Python。** 用 [uv](https://github.com/astral-sh/uv)，它会顺带把 Python 装好：
-
-```bash
-# 1. 安装 uv（一行命令，不需要 Python）
-curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
-
-# 2. 安装 milu（缺 Python 时 uv 会自动下载一个）
-uv tool install milu
-```
+> [!TIP]
+> **一条 `pip install milu` 全功能到手** —— CLI、Web 服务、RAG 知识库、MCP 全部内置。开始前只需准备至少一家厂商的 API Key。
 
 **用 pip** —— 如果你已经有 Python 3.10+：
 
 ```bash
 pip install milu              # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
-```
-
-**Docker** —— 宿主机完全不用装 Python：
-
-```bash
-cp .env.example .env          # 填入至少一家厂商的 API Key
-docker compose up -d
 ```
 
 <details>
@@ -72,7 +65,28 @@ docker compose up -d
 4. 输入 `milu` 开始对话。
 </details>
 
+**没有 Python 环境？—— 最简一行装。** 用 [uv](https://github.com/astral-sh/uv)，它会顺带把 Python 装好：
+
+```bash
+# 1. 安装 uv（一行命令，不需要 Python）
+curl -LsSf https://astral.sh/uv/install.sh | sh            # macOS / Linux
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
+
+# 2. 安装 milu（缺 Python 时 uv 会自动下载一个）
+uv tool install milu
+```
+
+**Docker** —— 宿主机完全不用装 Python：
+
+```bash
+cp .env.example .env          # 填入至少一家厂商的 API Key
+docker compose up -d
+```
+
 ## 快速开始
+
+> [!NOTE]
+> 首次运行 `milu` 会自动进入配置向导 —— 选厂商、填 API Key，然后直接开聊。零配置到第一次对话。
 
 **命令行** —— 零配置到第一次对话：
 
@@ -98,9 +112,11 @@ async for event in agent.run("现在几点了？用工具查一下"):
 milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1:8000
 ```
 
+---
+
 ## 横向对比
 
-| | milu | LangChain | CrewAI | smolagents | Qwen-Agent |
+| 能力 | milu | LangChain | CrewAI | smolagents | Qwen-Agent |
 |---|---|---|---|---|---|
 | 国产模型原生支持（6 家） | ✅ | 社区包零散 | 经 LiteLLM | 经 LiteLLM | 仅 Qwen 系 |
 | 多用户并发池（库内置） | ✅ AgentPool | 平台（收费） | 平台 | — | — |
@@ -113,19 +129,28 @@ milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1
 
 > ✅ = 库内直接提供；「—」= 未内置（通常可经外部平台或少量自研代码补齐）。数据截至 2026 年 6 月，竞品迭代很快，欢迎经 issue/PR 指正。
 >
-> **何时选 milu：** 你要基于国产大模型构建、需要的是生产级多用户 / 多租户服务（而不止单用户 demo）、且想要开箱即用——既能直接跑，也能当库嵌入。或作为一个纯净灵活的开发核心与智能底座。
+> **何时选 milu：** 你要基于国产大模型构建、需要的是生产级多用户 / 多租户服务（而不止单用户 demo）、且想要开箱即用——既能直接跑，也能当库嵌入，或作为一个强大但灵活的开发核心与智能底座。
 >
-> **何时该选别的框架：** 要最大的第三方生态 / 集成，选 [LangChain](https://github.com/langchain-ai/langchain)；纯多 agent 编排，选 [CrewAI](https://github.com/crewAIInc/crewAI) / [AutoGen](https://github.com/microsoft/autogen)；要极简代码优先的 agent，选 [smolagents](https://github.com/huggingface/smolagents)。
+> **何时该选别的框架：** 要最大的第三方生态 / 集成，选 [LangChain](https://github.com/langchain-ai/langchain)；纯多 agent 编排，选 [CrewAI](https://github.com/crewAIInc/crewAI) / [AutoGen](https://github.com/microsoft/autogen)；要一个极小、近乎零内置功能的裸核，选 [smolagents](https://github.com/huggingface/smolagents)。
 
 ## 你可以用它做什么
 
-- **个人 AI 助理** —— `milu` 一条命令进入对话；长期记忆记住你的偏好与习惯、定时任务帮你提醒与发每日简报、内置联网搜索 / 文件 / 文档 / 视觉等工具随手可用——全程本地运行，数据归你自己。
-- **企业知识库助手** —— 把手册 / FAQ / 规章制度灌入 RAG 知识库，每轮自动检索、回答区分「内部资料 vs 网络来源」，杜绝大模型张口就来的幻觉；每个员工独立会话与记忆，互不干扰。
-- **智能客服 / 工单机器人** —— 高频重复咨询、工单分类与初步处理，AgentPool 扛高并发多用户，安全模式管住可执行动作。
-- **行业垂直助手（工业 / 医疗 / 法务等）** —— 子代理分工 + 文档 / 图片视觉读取 + MCP 接入行业系统与数据库，把行业知识和真实数据接进来。
-- **团队「AI 同事」** —— 从对话里抓任务、按节奏催进度、定时生成复盘小结（定时任务 + 多用户 + 工具组合），把人机协同变成团队每天能感知的一两件事。
-- **私有化部署的内部助手** —— `docker compose up -d` 起多用户服务，国产模型直连、数据全部落本地，不依赖任何外部平台。
-- **多租户 SaaS / 给应用服务商做底座** —— `KeyedLLMProvider` 按租户映射各自 API Key，资源池保证实例与并发隔离，从个人项目平滑长到多租户产品。
+- **个人 AI 助理**<br>
+  `milu` 一条命令进入对话；长期记忆记住你的偏好与习惯、定时任务帮你提醒与发每日简报、内置联网搜索 / 文件 / 文档 / 视觉等工具随手可用——全程本地运行，数据归你自己。
+- **企业知识库助手**<br>
+  把手册 / FAQ / 规章制度灌入 RAG 知识库，每轮自动检索、回答区分「内部资料 vs 网络来源」，杜绝大模型张口就来的幻觉；每个员工独立会话与记忆，互不干扰。
+- **智能客服 / 工单机器人**<br>
+  高频重复咨询、工单分类与初步处理，AgentPool 扛高并发多用户，安全模式管住可执行动作。
+- **行业垂直助手（工业 / 医疗 / 法务等）**<br>
+  子代理分工 + 文档 / 图片视觉读取 + MCP 接入行业系统与数据库，把行业知识和真实数据接进来。
+- **团队「AI 同事」**<br>
+  从对话里抓任务、按节奏催进度、定时生成复盘小结（定时任务 + 多用户 + 工具组合），把人机协同变成团队每天能感知的一两件事。
+- **私有化部署的内部助手**<br>
+  `docker compose up -d` 起多用户服务，国产模型直连、数据全部落本地，不依赖任何外部平台。
+- **多租户 SaaS / 给应用服务商做底座**<br>
+  `KeyedLLMProvider` 按租户映射各自 API Key，资源池保证实例与并发隔离，从个人项目平滑长到多租户产品。
+
+---
 
 ## 渐进式示例
 
@@ -200,6 +225,9 @@ agent.set_mode("talk")              # 只读：不安全工具一律拦截
 | `manual` | 安全工具直接执行；不安全工具产出确认事件并等待 |
 | `auto`（默认） | 自主决策；不安全调用交 **AI 安全判定器**三态裁决（放行/转确认/拒绝） |
 | `superwork` | 全权限，跳过所有检查 |
+
+> [!WARNING]
+> `superwork` 会跳过所有安全检查（含 AI 判定器），仅在完全信任任务时使用。
 
 子代理继承父 Agent 的模式与确认回调——**委派不构成安全旁路**。
 </details>
@@ -302,6 +330,8 @@ AgentPool（多用户，可选）
 
 Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` 客户端，LLM 实例协程安全、可跨用户共享。
 
+---
+
 ## 生产部署要点
 
 - **横向扩容**：按 `user_id` 粘性路由（如 nginx `ip_hash`）；同会话由进程内 entry 锁串行，**无需分布式锁**。会话落盘，淘汰/重启后自动恢复。
@@ -317,6 +347,8 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 - [ ] 英文文档集（架构与指南，当前为中文）
 - [ ] 容器镜像发布到镜像仓库
 - [ ] 一键安装器 / 独立可执行文件（无需预装 Python）
+
+---
 
 ## 贡献
 
