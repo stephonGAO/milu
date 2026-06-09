@@ -43,7 +43,7 @@ DEFAULT_MODELS: dict[str, str] = {
     "kimi": "kimi-k2.6",
     "glm": "glm-5",
     "minimax": "MiniMax-M3",
-    "doubao": "doubao-pro",
+    "doubao": "doubao-seed-2-0-lite-260428",
     "openai": "gpt-4o-mini",
     "gemini": "gemini-3.5-flash",
     "anthropic": "claude-sonnet-4.6",
