@@ -202,6 +202,9 @@
   .bubble blockquote{margin:8px 0;padding:5px 14px;border-left:3px solid var(--brand-soft);
     background:var(--bg-soft);border-radius:0 var(--r-sm) var(--r-sm) 0;color:var(--sub)}
   .bubble hr{border:none;border-top:1px solid var(--line-2);margin:14px 0}
+  /* 历史回放：助手消息里的工具调用提示行 */
+  .hist-tools{font-size:11.5px;color:var(--faint);margin:-2px 0 8px;display:inline-flex;align-items:center;gap:5px}
+  .hist-tools .ic{width:13px;height:13px}
 
   /* 欢迎页 */
   .welcome{max-width:640px;margin:6vh auto 0;text-align:center;padding:0 20px;animation:fade .35s ease}
@@ -576,7 +579,7 @@ const I18N={
     "status.safety":"安全判定中…","status.calling":"调用工具 {0}…","status.processing":"处理结果…","status.confirm":"等待确认…","status.subagent":"子代理 {0} 运行中…",
     "tool.approved":"已同意","tool.denied":"已拒绝","sub.done":"完成","hist.compacted":"历史已压缩 {0} → {1} 条","sess.loaded.sse":"会话已加载 {0}",
     "err.server":"服务端错误：{0}","err.request":"请求失败：{0}","chat.stopped":"已停止本次回复","chat.reset":"对话已重置","confirm.fail":"确认失败：{0}",
-    "sess.empty":"暂无会话","sess.msgs":"{0} 条消息","sess.load":"加载","sess.loaded.toast":"已加载 {0}","sess.loaded.line":"会话已加载：{0}（继续对话即接上历史）",
+    "sess.empty":"暂无会话","sess.msgs":"{0} 条消息","sess.load":"加载","sess.del":"删除","sess.del.confirm":"确定删除该会话？此操作不可恢复。","hist.tools":"调用工具：{0}","sess.loaded.toast":"已加载 {0}","sess.loaded.line":"会话已加载：{0}（继续对话即接上历史）",
     "sess.new.toast":"新会话：{0}","sess.new.line":"已切换到新会话：{0}","common.saved":"已保存","saved.next":"已保存，下一条消息生效",
     "sched.created":"任务已创建","sched.createfail":"创建失败：{0}","sched.empty.tasks":"暂无任务","sched.empty.results":"暂无结果",
     "badge.enabled":"启用","badge.disabled":"禁用","badge.success":"成功","badge.failed":"失败",
@@ -625,7 +628,7 @@ const I18N={
     "status.safety":"Safety check…","status.calling":"Calling {0}…","status.processing":"Processing result…","status.confirm":"Awaiting confirmation…","status.subagent":"Subagent {0} running…",
     "tool.approved":"Approved","tool.denied":"Denied","sub.done":"done","hist.compacted":"History compacted {0} → {1} msgs","sess.loaded.sse":"Session loaded {0}",
     "err.server":"Server error: {0}","err.request":"Request failed: {0}","chat.stopped":"Response stopped","chat.reset":"Conversation reset","confirm.fail":"Confirm failed: {0}",
-    "sess.empty":"No sessions","sess.msgs":"{0} messages","sess.load":"Load","sess.loaded.toast":"Loaded {0}","sess.loaded.line":"Session loaded: {0} (continue to resume history)",
+    "sess.empty":"No sessions","sess.msgs":"{0} messages","sess.load":"Load","sess.del":"Delete","sess.del.confirm":"Delete this session? This cannot be undone.","hist.tools":"Tools: {0}","sess.loaded.toast":"Loaded {0}","sess.loaded.line":"Session loaded: {0} (continue to resume history)",
     "sess.new.toast":"New session: {0}","sess.new.line":"Switched to new session: {0}","common.saved":"Saved","saved.next":"Saved; applies to the next message",
     "sched.created":"Task created","sched.createfail":"Create failed: {0}","sched.empty.tasks":"No tasks","sched.empty.results":"No results",
     "badge.enabled":"Enabled","badge.disabled":"Disabled","badge.success":"Success","badge.failed":"Failed",
@@ -840,6 +843,31 @@ function resetToolLog(){toolLog=null;toolNames=[];toolSteps=0;subTextEl=null;sub
 
 // 清空聊天窗口
 function clearChat(){chat.innerHTML="";resetToolLog();statusEl=null;}
+// 历史回放：把加载会话返回的消息渲染到内容区（纯追加，调用方先 clearChat）
+function renderHistory(msgs){
+  (msgs||[]).forEach(m=>{
+    if(m.role==="user"){
+      let body=esc(m.content||"");
+      if(m.images&&m.images.length)body+='<div class="atts">'+m.images.map(p=>icon("image")+" "+esc(String(p).split(/[\\/]/).pop())).join("<br>")+"</div>";
+      if(!body)body=esc(tr("analyze.att"));
+      const turn=el("turn u");turn.innerHTML='<div class="bubble user">'+body+'</div>';
+      if(m.content){  // 历史用户消息同样可复制
+        const acts=document.createElement("div");acts.className="msg-actions";
+        acts.innerHTML='<button class="msg-copy" type="button" aria-label="'+esc(tr("copy.msg"))+'">'+icon("copy")+'<span>'+tr("copy.label")+'</span></button>';
+        acts.querySelector(".msg-copy")._copyText=m.content;turn.appendChild(acts);
+      }
+    }else if(m.role==="assistant"){
+      if(m.content){
+        const wrap=el("turn");
+        wrap.innerHTML='<div class="asst"><div class="avatar" role="img" aria-label="milu"></div><div class="abody"><div class="role">milu</div></div></div>';
+        const b=document.createElement("div");b.className="bubble assistant";b.innerHTML=md(m.content);
+        wrap.querySelector(".abody").appendChild(b);enhanceCodeBlocks(b);
+      }
+      if(m.tools&&m.tools.length)el("hist-tools",icon("wrench")+esc(tr("hist.tools",m.tools.join("、"))));
+    }
+  });
+  scrollChat(true);
+}
 
 // ── 欢迎页 ──
 const SUGGESTS=[
@@ -1053,21 +1081,43 @@ $("saveSet").onclick=async()=>{
 };
 
 // ── 会话 ──
+// 复刻后端的确定性派生 id（{user}__{session} 经文件系统安全化），用于判断某条
+// 会话卡片是否为当前活动会话（删除当前会话后需清空内容区）
+function derivedSid(){
+  const uid=$("uid").value.trim()||"default",sid=$("sid").value.trim()||"default";
+  return (uid+"__"+sid).replace(/[^A-Za-z0-9_.-]/g,"_").slice(0,128);
+}
 async function loadSessions(){
   const box=$("sessList");skel(box,3);
   const r=await api("/api/sessions");const {sessions}=await r.json();
   if(!sessions.length){box.innerHTML=emptyHTML("sessions",tr("sess.empty"));return}
   box.innerHTML="";
   sessions.forEach(s=>{
-    const c=el2("card");c.innerHTML=`<div class="title">${esc(s.session_id||"")}</div><div class="meta">${esc(tr("sess.msgs",s.message_count||0))} · ${esc(s.model||"")}</div><div class="actions"><button class="btn sm sec">${esc(tr("sess.load"))}</button></div>`;
-    c.querySelector("button").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"load",session_id:s.session_id})});clearChat();toast(tr("sess.loaded.toast",s.session_id),"success");sysline(tr("sess.loaded.line",s.session_id))};
+    const c=el2("card");c.innerHTML=`<div class="title">${esc(s.session_id||"")}</div><div class="meta">${esc(tr("sess.msgs",s.message_count||0))} · ${esc(s.model||"")}</div><div class="actions"><button class="btn sm sec sess-load">${esc(tr("sess.load"))}</button><button class="btn sm danger sess-del">${esc(tr("sess.del"))}</button></div>`;
+    c.querySelector(".sess-load").onclick=async()=>{
+      const r=await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"load",session_id:s.session_id})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok){toast(tr("common.failed"),"error");return}
+      clearChat();sysline(tr("sess.loaded.line",s.session_id));renderHistory(d.messages||[]);
+      toast(tr("sess.loaded.toast",s.session_id),"success");
+    };
+    c.querySelector(".sess-del").onclick=async()=>{
+      if(!confirm(tr("sess.del.confirm")))return;
+      const r=await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"delete",session_id:s.session_id})});
+      if(!r.ok){toast(tr("common.failed"),"error");return}
+      if(s.session_id===derivedSid()){clearChat();showWelcome();}  // 删的是当前会话→清空内容区
+      toast(tr("done.delete"),"success");loadSessions();
+    };
     box.appendChild(c);
   });
 }
-$("sessNew").onclick=()=>{
+$("sessNew").onclick=async()=>{
   const nid="s"+Date.now().toString(36);
   $("sid").value=nid; localStorage.setItem("milu_sid",nid);
-  clearChat(); showWelcome(); toast(tr("sess.new.toast",nid),"success"); sysline(tr("sess.new.line",nid));
+  clearChat(); showWelcome();
+  // 落盘空会话，使新会话立即出现在左侧列表（无需先产生对话）
+  await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"new"})}).catch(()=>{});
+  toast(tr("sess.new.toast",nid),"success"); sysline(tr("sess.new.line",nid));
   loadSettings(); loadSessions();
 };
 $("sessSave").onclick=async()=>{await api("/api/session/action",{method:"POST",body:JSON.stringify({action:"save"})});toast(tr("common.saved"),"success")};

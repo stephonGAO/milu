@@ -210,6 +210,72 @@ def _kb_effective(state, user_id: str, session_id: str) -> dict:
     return kn
 
 
+# ── 历史消息渲染（会话加载用）────────────────────────────
+
+def _content_text(content) -> str:
+    """从消息 content 提取纯文本（str 原样；多模态 list 取 text 块拼接）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text") or "")
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def _content_images(content) -> list[str]:
+    """从多模态 content 提取图片路径（轻量 image_path 引用块）。"""
+    if not isinstance(content, list):
+        return []
+    out = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "image_path":
+            path = block.get("path")
+            if path:
+                out.append(str(path))
+    return out
+
+
+def _history_for_render(agent) -> list[dict]:
+    """把 agent 历史转为前端可渲染的精简消息列表（跳过 system；工具结果不回放）。
+
+    返回项形如 {role, content, images?, tools?}：user/assistant 文本气泡 + assistant
+    工具调用的工具名清单（供前端显示一行「调用工具」提示）。tool 角色结果冗长、
+    且助手工具行已表明调用，故不回放。
+    """
+    out: list[dict] = []
+    try:
+        msgs = agent.history.all_messages if agent and agent.history else []
+    except Exception:
+        return out
+    for m in msgs:
+        role = m.role.value if hasattr(m.role, "value") else str(m.role)
+        if role in ("system", "tool"):
+            continue
+        text = _content_text(m.content)
+        tools = []
+        if role == "assistant" and getattr(m, "tool_calls", None):
+            tools = [((tc.get("function") or {}).get("name") or "")
+                     for tc in m.tool_calls if isinstance(tc, dict)]
+            tools = [t for t in tools if t]
+        # 跳过既无文本又无工具调用的空消息
+        if not text and not tools:
+            continue
+        item: dict = {"role": role, "content": text}
+        images = _content_images(m.content)
+        if images:
+            item["images"] = images
+        if tools:
+            item["tools"] = tools
+        out.append(item)
+    return out
+
+
 # ── 危险工具确认（队列桥接）──────────────────────────────
 
 async def _confirm_unsafe(state, user_id: str, session_id: str,
@@ -882,7 +948,9 @@ def create_app(
             await agent.reset()
             return {"status": "ok", "message": "对话已重置"}
         if action == "new":
-            agent.new_session()
+            # get_or_create_agent 已按新 header sid 建好空会话（Session 构造即 mkdir），
+            # 这里落盘 session.json 补全元数据，使新会话立即出现在列表（无需先产生对话）
+            agent.save_session()
             return {"status": "ok", "session_id": agent.session.session_id if agent.session else None}
         if action == "save":
             agent.save_session()
@@ -893,7 +961,32 @@ def create_app(
                 count = agent.load_session(sid)
             except FileNotFoundError:
                 raise HTTPException(404, f"会话不存在: {sid}")
-            return {"status": "ok", "message_count": count}
+            # 回传历史消息供前端渲染（否则加载后右侧内容区为空白）
+            return {"status": "ok", "message_count": count,
+                    "messages": _history_for_render(agent)}
+        if action == "delete":
+            sid = body.get("session_id", "")
+            # 仅允许删除本用户的会话：① 本用户派生前缀 ② 只含派生 id 合法字符
+            #（即 [A-Za-z0-9_.-]，天然无 / \ —— 杜绝 "testu__../../otheruser__x"
+            # 这类既过前缀又经 .. 穿越删他人/系统目录的攻击）
+            prefix = AgentPool._derive_session_id(x_user_id, "")
+            if not sid or not sid.startswith(prefix) or not re.fullmatch(r"[A-Za-z0-9_.-]+", sid):
+                raise HTTPException(403, "无权删除该会话")
+            base = Path(default_session_dir()).resolve()
+            target = (base / sid).resolve()
+            # 防御纵深：解析后必须是 base 的直接子目录
+            if target.parent != base:
+                raise HTTPException(400, "非法会话路径")
+            # 先摘除可能持有该会话的池实例（_close_entry 不落盘，不会重建目录），
+            # 再删目录。header sid = 去掉派生前缀（文件系统安全 sid 下与原值一致）
+            try:
+                await app.state.pool.remove(x_user_id, sid[len(prefix):])
+            except Exception:
+                pass
+            import shutil
+            if target.exists() and target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+            return {"status": "ok"}
         raise HTTPException(400, f"未知 action: {action}")
 
     # ── 定时任务 ──────────────────────────────────────────
