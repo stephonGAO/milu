@@ -53,6 +53,7 @@ from milu.agent.events import (
 )
 from milu.cli.config import DEFAULT_MODELS, DEFAULT_PROVIDER, env_key_name
 from milu.exceptions import content_safety_hint
+from milu.i18n import t
 from milu.llm.base.vision import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES
 from milu.llm.providers import ModelRegistry
 from milu.resources import default_session_dir, user_data_dir
@@ -1284,20 +1285,53 @@ def create_app_from_env():
     return create_app(**opts)
 
 
+def find_available_port(host: str, start_port: int, max_tries: int = 100) -> int:
+    """从 start_port 起向后探测一个可绑定的端口，返回第一个空闲端口。
+
+    端口被占用时自动 +1 重试，直到找到空闲端口或试满 max_tries。
+    :raises OSError: 连续 max_tries 个端口都被占用时抛出。
+    """
+    import socket
+
+    for offset in range(max_tries):
+        port = start_port + offset
+        if port > 65535:
+            break
+        # 注意：探测 bind 不设 SO_REUSEADDR。Windows 上 SO_REUSEADDR 允许绑定到
+        # 正被监听的端口（端口劫持语义），会把占用端口误判为空闲；不设它才能与
+        # 真实服务器绑定行为一致——端口被占用即 bind 失败、顺延下一个。
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                sock.bind((host, port))
+            except OSError:
+                continue  # 端口被占用，试下一个
+            return port
+    raise OSError(
+        t("从端口 {start} 起连续 {n} 个端口均被占用，无法启动服务。",
+          start=start_port, n=max_tries)
+    )
+
+
 def run_server(host: str = "127.0.0.1", port: int = 8000, reload: bool = False, **opts):
-    """启动 uvicorn 服务。
+    """启动 uvicorn 服务（端口被占用时自动向后顺延）。
 
     :param opts: 透传给 create_app 的标量选项（provider/model/mode/各开关）。
         reload=True 时需 import 字符串，故经环境变量把标量选项传给工厂。
     """
     import uvicorn
 
+    actual_port = find_available_port(host, port)
+    if actual_port != port:
+        print(t("  端口 {old} 被占用，已改用端口 {new}。访问地址: {url}",
+                old=port, new=actual_port,
+                url=f"http://{host}:{actual_port}"))
+
     if reload:
         os.environ["_MILU_SERVE_OPTS"] = json.dumps(opts)
         uvicorn.run("milu.serving.web.app:create_app_from_env",
-                    host=host, port=port, reload=True, factory=True)
+                    host=host, port=actual_port, reload=True, factory=True)
     else:
-        uvicorn.run(create_app(**opts), host=host, port=port)
+        uvicorn.run(create_app(**opts), host=host, port=actual_port)
 
 
 if __name__ == "__main__":

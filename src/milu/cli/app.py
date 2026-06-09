@@ -463,7 +463,7 @@ def _cmd_scheduler(args) -> int:
 def _cmd_serve(args) -> int:
     """启动内置 Web 服务（FastAPI + AgentPool + 可选嵌入调度 + 演示前端）。"""
     try:
-        from milu.serving.web import run_server
+        from milu.serving.web import find_available_port, run_server
     except ImportError as e:  # 理论上不会（懒导入），保险起见
         print(c("red", t("加载 Web 服务失败：{e}", e=e)), file=sys.stderr)
         return 1
@@ -490,6 +490,16 @@ def _cmd_serve(args) -> int:
     )
 
     host, port = args.host, args.port
+    # 端口被占用时向后顺延，使横幅打印的访问地址与实际监听端口一致
+    try:
+        actual_port = find_available_port(host, port)
+    except OSError as e:
+        print(c("red", str(e)), file=sys.stderr)
+        return 1
+    if actual_port != port:
+        print(c("yellow", t("  端口 {old} 被占用，自动改用端口 {new}。", old=port, new=actual_port)))
+        port = actual_port
+
     print(f"{DIVIDER}")
     print(c("bold", c("cyan", t("  milu Web 服务"))))
     print(DIVIDER)

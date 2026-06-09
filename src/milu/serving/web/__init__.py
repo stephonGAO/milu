@@ -12,7 +12,7 @@ fastapi / uvicorn / sse-starlette 现为核心依赖（随 milu 一并安装）�
 """
 from __future__ import annotations
 
-__all__ = ["create_app", "run_server"]
+__all__ = ["create_app", "run_server", "find_available_port"]
 
 
 def create_app(*args, **kwargs):
@@ -24,4 +24,10 @@ def create_app(*args, **kwargs):
 def run_server(*args, **kwargs):
     """启动 uvicorn 服务（延迟导入 uvicorn）。"""
     from .app import run_server as _impl
+    return _impl(*args, **kwargs)
+
+
+def find_available_port(*args, **kwargs):
+    """从指定端口起向后探测一个可绑定的端口（延迟导入）。"""
+    from .app import find_available_port as _impl
     return _impl(*args, **kwargs)
