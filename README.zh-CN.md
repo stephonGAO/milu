@@ -305,7 +305,19 @@ milu providers       列出 9 家厂商与 Key 配置状态
 milu config ...      分层配置（CLI 参数 > 用户级 > 项目级 > 内置默认）
 milu sessions list   查看历史会话
 milu schedule ...    定时任务管理
+milu --lang en ...   临时切换界面语言（zh / en）
 ```
+
+**界面语言（中文 / English）。** CLI 与 Web 界面均支持中英文双语，可用以下任一方式选择界面语言：
+
+```bash
+milu --lang en providers        # 单次覆盖（也可 --lang zh）
+$env:MILU_LANG="en"; milu chat   # 经环境变量按会话覆盖（PowerShell；bash 用 MILU_LANG=en）
+milu config set lang en          # 持久化写入 ~/.milu/config.json
+milu setup                       # 初始化引导第一步即询问语言
+```
+
+优先级：`--lang` > `MILU_LANG` > `config.json` 的 `lang` > 默认 `zh`。Web 界面在顶栏使用 **EN / 中文** 切换按钮。
 
 ## 架构
 

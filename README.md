@@ -305,7 +305,19 @@ milu providers       list 9 providers and key status
 milu config ...      layered config (CLI > user > project > defaults)
 milu sessions list   browse saved sessions
 milu schedule ...    manage scheduled tasks
+milu --lang en ...   switch UI language for one run (zh / en)
 ```
+
+**Language (中文 / English).** Both the CLI and the web UI are fully bilingual. Pick the interface language in any of these ways:
+
+```bash
+milu --lang en providers        # one-off override (also accepts --lang zh)
+$env:MILU_LANG="en"; milu chat   # per-session via env var (PowerShell; bash: MILU_LANG=en)
+milu config set lang en          # persist to ~/.milu/config.json
+milu setup                       # the wizard asks for language as its first step
+```
+
+Priority: `--lang` > `MILU_LANG` > `config.json` `lang` > default `zh`. In the web UI, use the **EN / 中文** toggle in the top bar.
 
 ## Architecture
 
