@@ -892,3 +892,44 @@ async def test_run_early_break_finalize_in_other_context():
     await asyncio.create_task(consume_one())
     # 在主任务（不同 Context）中 finalize —— 修复前此处抛 ValueError
     await gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_continue_after_orphan_tool_calls_repairs_sequence():
+    """回归：上一轮在工具执行前被中断留下孤儿 assistant(tool_calls)，再输入"继续"
+    时，发送给 LLM 的消息序列必须被修复为合法配对（否则 MiniMax 报 400
+    "tool call result does not follow tool call" 且无法恢复）。
+    """
+    from milu.llm.base.message import Message
+
+    captured = {}
+
+    async def mock_chat(messages, *args, **kwargs):
+        # 捕获本次发送给 LLM 的消息序列
+        captured["messages"] = list(messages)
+        yield StreamChunk(content="好的，继续", finish_reason="stop")
+        yield StreamChunk(usage=TokenUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+    agent = Agent(llm=llm, system_prompt="你是助手", session_enabled=False, tools=[])
+
+    # 手工构造"已损坏"历史：assistant(tool_calls) 后没有 tool 结果
+    agent.history.add(Message(role=MessageRole.USER, content="做点事"))
+    agent.history.add(Message(role=MessageRole.ASSISTANT, content="调用工具", tool_calls=[
+        {"id": "call_1", "type": "function", "function": {"name": "shell", "arguments": "{}"}},
+    ]))
+
+    events = []
+    async for event in agent.run("继续"):
+        events.append(event)
+
+    # 不应产生 AgentError（修复前会因 LLM 400 报错）
+    assert not any(isinstance(e, AgentError) for e in events)
+
+    # 发送给 LLM 的序列里，assistant(tool_calls) 后必须紧跟匹配的 tool 结果
+    sent = captured["messages"]
+    idx = next(i for i, m in enumerate(sent)
+               if m.role == MessageRole.ASSISTANT and m.tool_calls)
+    assert sent[idx + 1].role == MessageRole.TOOL
+    assert sent[idx + 1].tool_call_id == "call_1"

@@ -173,3 +173,8 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - 真实 API 测试在 `test_real_api.py` / `test_real_new_providers.py`，需要 `.env` 配置
 - 知识库全面评测：`.venv/Scripts/python tests/benchmark_knowledge.py`（走真实 embedding API，五维度：检索质量 Hit@k/MRR/关键词召回对照 bigram 基线、双阈值评估（自动注入率/注入精度/回捞带/负例拦截）、上下文成本（钳制收益）、性能（并发加速 A/B、冷热缓存）、工具层端到端；自动生成 Markdown 报告到 `docs/知识库评测报告.md`，带达标判定；无 `test_` 前缀不被 pytest 收集）
 - pytest 配置：`asyncio_mode = "auto"`（`pyproject.toml`），所有 async 测试无需 `@pytest.mark.asyncio`
+
+
+## git提交规则
+
+- **重要**：所有自动的git提交的主题都用英文，下面的描述内容使用中文

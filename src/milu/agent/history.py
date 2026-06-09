@@ -29,6 +29,72 @@ def _estimate_tokens(text: str) -> int:
     return int(chinese_chars / 1.5 + other_chars / 4)
 
 
+# 被中断（达到上限/超时/报错）时，补给孤儿 tool_call 的占位结果文本。
+_INTERRUPTED_TOOL_RESULT = (
+    "[工具未执行：上一轮在工具执行前被中断（达到轮次/调用上限、超时或出错）。"
+    "如仍需该结果，请重新发起调用。]"
+)
+
+
+def repair_tool_call_sequence(messages: list[Message]) -> list[Message]:
+    """修复工具调用/结果配对，保证发送给 LLM 的消息序列合法（不改入参，返回新列表）。
+
+    OpenAI 及兼容协议（含 MiniMax）要求：每条 assistant(tool_calls) 之后必须紧跟
+    与各 tool_call_id 一一对应的 tool 结果消息。当上一轮在工具执行【前】被中断
+    （达到 max_turns / tool_call_limit、超时或报错），历史会留下"孤儿"——
+    assistant(tool_calls) 后没有 tool 结果；下一轮再追加 user 消息（如输入"继续"）
+    发送时，MiniMax 报 400 "tool call result does not follow tool call (2013)"，
+    且每次重发都失败，无法恢复。
+
+    本函数修复两类破坏：
+      1. assistant(tool_calls) 缺失对应 tool 结果 → 补一条占位 tool 结果；
+      2. 找不到前置 tool_call 的孤儿 tool 结果（如压缩截断切断了配对）→ 丢弃。
+    幂等：合法序列原样返回。在每次发送前调用，可同时修好「历史已损坏的旧会话」
+    与「未来任何中断源」，无需改写 append-only 会话日志。
+    """
+    result: list[Message] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+        if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
+            result.append(msg)
+            declared = [tc.get("id") for tc in msg.tool_calls if tc.get("id")]
+            # 收集紧随其后的 tool 结果（直到遇到非 tool 消息），按 id 去重
+            seen: dict[str, Message] = {}
+            j = i + 1
+            while j < n and messages[j].role == MessageRole.TOOL:
+                tmsg = messages[j]
+                if tmsg.tool_call_id in declared and tmsg.tool_call_id not in seen:
+                    seen[tmsg.tool_call_id] = tmsg
+                # 不匹配已声明 id 的 tool 结果（孤儿）直接跳过丢弃
+                j += 1
+            # 按声明顺序输出结果；缺失的补占位（满足"每个 tool_call 都有结果"）
+            for cid in declared:
+                if cid in seen:
+                    result.append(seen[cid])
+                else:
+                    name = next(
+                        (tc.get("function", {}).get("name")
+                         for tc in msg.tool_calls if tc.get("id") == cid),
+                        None,
+                    )
+                    result.append(Message(
+                        role=MessageRole.TOOL,
+                        content=_INTERRUPTED_TOOL_RESULT,
+                        tool_call_id=cid,
+                        name=name,
+                    ))
+            i = j
+        elif msg.role == MessageRole.TOOL:
+            # 走到这里说明该 tool 结果前面没有 assistant(tool_calls)（孤儿）→ 丢弃
+            i += 1
+        else:
+            result.append(msg)
+            i += 1
+    return result
+
+
 class ConversationHistory:
     """对话历史管理 - 支持多种截断策略和上下文压缩"""
 

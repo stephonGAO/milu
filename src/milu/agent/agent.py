@@ -17,7 +17,7 @@ import os
 
 from milu.agent.config import AgentConfig, AgentMode
 from milu.tools.executor import ToolExecutor, ToolExecutionResult
-from milu.agent.history import ConversationHistory
+from milu.agent.history import ConversationHistory, repair_tool_call_sequence
 from milu.agent.events import (
     AgentDone,
     AgentError,
@@ -854,6 +854,11 @@ class Agent:
 
                 # 2. 获取截断后的历史消息
                 messages = self._history.get_messages()
+                # 2.5 修复工具调用/结果配对：上一轮在工具执行前被中断（达到上限/超时/
+                # 报错）会留下"孤儿"assistant(tool_calls)，再输入"继续"会让 MiniMax 等
+                # 报 400 "tool call result does not follow tool call" 且无法恢复。
+                # 发送前补全/清理配对（幂等），既修好已损坏的旧会话也防住未来的中断源。
+                messages = repair_tool_call_sequence(messages)
 
                 # 3. 获取工具 schema
                 tool_schemas = self._registry.get_schemas()
