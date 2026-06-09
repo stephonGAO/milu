@@ -288,14 +288,14 @@ class TestRoundBasedCompact:
                 assert tm.content == "short" or "已截断" not in tm.content
 
     def test_dynamic_recent_reduction(self, tmp_dir):
-        """上下文超 30% 时 recent 降为 0"""
+        """用量达 trigger_ratio（0.7）时 recent 降为 0，收紧除最新轮外的所有轮次"""
         session = Session("test", tmp_dir)
-        config = CompactConfig(recent_rounds=3)
+        config = CompactConfig(recent_rounds=3, trigger_ratio=0.7)
         llm = _make_llm()
         compactor = Compactor(llm, compact_config=config, session=session)
 
-        # 模拟高使用率
-        compactor.update_prompt_tokens(3000)  # 3000/8192 > 0.3
+        # 模拟高使用率（达到 L4 触发线）
+        compactor.update_prompt_tokens(6000)  # 6000/8192 ≈ 0.73 >= 0.7
 
         messages = []
         for i in range(5):
@@ -307,9 +307,37 @@ class TestRoundBasedCompact:
 
         result = compactor._round_based_compact(messages)
         tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
-        # 由于 recent=0，所有轮次都应被处理（截断或占位）
+        # 由于 recent=0，除最新一轮外都应被处理（截断或占位）
         processed = [m for m in tool_msgs if "已截断" in m.content or "已压缩" in m.content]
-        assert len(processed) > 0
+        assert len(processed) >= 4  # 5 轮中除 age=0 的最新轮外均被处理
+
+    def test_recent_kept_below_trigger_ratio(self, tmp_dir):
+        """用量在 round_trigger_ratio ~ trigger_ratio 之间时，保留最近 recent_rounds 轮完整"""
+        session = Session("test", tmp_dir)
+        config = CompactConfig(recent_rounds=3, round_trigger_ratio=0.5, trigger_ratio=0.7)
+        llm = _make_llm()
+        compactor = Compactor(llm, compact_config=config, session=session)
+
+        # 用量介于 0.5 ~ 0.7：未达 trigger_ratio，recent 应保持 3
+        compactor.update_prompt_tokens(5000)  # 5000/8192 ≈ 0.61
+
+        messages = []
+        for i in range(5):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 1000, tool_call_id=f"call_{i}", name="file"))
+
+        result = compactor._round_based_compact(messages, usage_ratio=0.61)
+        rounds = Compactor._group_into_rounds(result)
+        # 最近 3 轮的工具结果应保持完整（未截断/占位）
+        kept_full = 0
+        for r in rounds[-3:]:
+            for m in r:
+                if m.role == MessageRole.TOOL and len(m.content) == 1000:
+                    kept_full += 1
+        assert kept_full >= 1
 
     def test_no_nested_header_on_repeated_compact(self, tmp_dir):
         """多次调用 auto_compact 不应产生嵌套截断 header"""
@@ -469,6 +497,60 @@ class TestAutoCompact:
         messages = [_make_user("hello")]
         result = await compactor.auto_compact(messages)
         assert result is messages
+
+    @pytest.mark.asyncio
+    async def test_no_round_compact_below_round_trigger(self, tmp_dir):
+        """用量低于 round_trigger_ratio 时，auto_compact 不做轮次截断（保留完整工具结果）。
+
+        回归用例：修复「大窗口模型窗口还空就过早压缩（170→170）」。
+        """
+        session = Session("test", tmp_dir)
+        config = CompactConfig(round_trigger_ratio=0.5, trigger_ratio=0.7)
+        llm = _make_llm()
+        compactor = Compactor(llm, compact_config=config, session=session)
+
+        # 用量很低（远低于 0.5）——即便有很多轮带长工具结果也不应压缩
+        compactor.update_prompt_tokens(1000)  # 1000/8192 ≈ 0.12 < 0.5
+
+        messages = []
+        for i in range(10):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 2000, tool_call_id=f"call_{i}", name="file"))
+
+        result = await compactor.auto_compact(messages)
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        # 所有工具结果都应保持完整，无任何截断/占位
+        assert all("已截断" not in m.content and "已压缩" not in m.content for m in tool_msgs)
+        assert all(len(m.content) == 2000 for m in tool_msgs)
+
+    @pytest.mark.asyncio
+    async def test_round_compact_runs_above_round_trigger(self, tmp_dir):
+        """用量达到 round_trigger_ratio 时，auto_compact 启动轮次截断。"""
+        session = Session("test", tmp_dir)
+        config = CompactConfig(round_trigger_ratio=0.5, trigger_ratio=0.95, recent_rounds=2)
+        llm = _make_llm()
+        compactor = Compactor(llm, compact_config=config, session=session)
+
+        # 用量达 0.5 ~ 0.95 之间：启动轮次截断，但不触发 L4
+        compactor.update_prompt_tokens(5000)  # 5000/8192 ≈ 0.61 >= 0.5，< 0.95
+
+        messages = []
+        for i in range(10):
+            messages.append(_make_user(f"q{i}"))
+            messages.append(_make_assistant(f"a{i}", tool_calls=[
+                {"id": f"call_{i}", "type": "function", "function": {"name": "file", "arguments": "{}"}}
+            ]))
+            messages.append(_make_tool("x" * 2000, tool_call_id=f"call_{i}", name="file"))
+
+        result = await compactor.auto_compact(messages)
+        tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+        processed = [m for m in tool_msgs if "已截断" in m.content or "已压缩" in m.content]
+        assert len(processed) > 0  # 旧轮被压缩
+        # 未触发 L4（无 LLM 摘要）
+        assert not any("Compacted" in str(m.content) for m in result)
 
     @pytest.mark.asyncio
     async def test_pipeline_triggers_l4(self):

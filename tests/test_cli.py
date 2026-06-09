@@ -55,7 +55,7 @@ def test_load_missing_returns_builtin_defaults(home):
     cfg = load_config()
     assert cfg.llm["provider"] == DEFAULT_PROVIDER
     assert cfg.agent["mode"] == "auto"
-    assert cfg.agent["max_turns"] == 100
+    assert cfg.agent["max_turns"] == 200
 
 
 def test_load_ignores_legacy_api_keys(home):

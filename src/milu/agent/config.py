@@ -28,11 +28,19 @@ class AgentMode(str, Enum):
 
 @dataclass
 class CompactConfig:
-    """上下文压缩配置"""
+    """上下文压缩配置。
+
+    压缩按「上下文实际用量 / 模型最大上下文窗口」分阶段触发，全部与窗口大小挂钩，
+    避免大窗口模型（如 131K 的 qwen、1M 的 minimax）在窗口还很空时就过早压缩：
+      用量 < round_trigger_ratio        → 不压缩（保留完整工具结果）
+      round_trigger_ratio ~ trigger_ratio → 轮次分层截断旧轮工具结果，保留最近 recent_rounds 轮
+      用量 >= trigger_ratio              → 收紧最近轮为 0 + L4 LLM 摘要
+    """
     enabled: bool = True                # 自动压缩总开关
-    trigger_ratio: float = 0.7          # L4 触发：prompt_tokens / max_context_window > 此比例
-    recent_rounds: int = 5              # 保留最近 N 轮工具结果完整（动态：超 30% 时降为 0）
-    max_messages: int = 300              # L1 消息数量上限
+    round_trigger_ratio: float = 0.5    # 轮次分层压缩启动阈值：prompt_tokens / max_context_window >= 此比例才压缩
+    trigger_ratio: float = 0.7          # L4 LLM 摘要触发：prompt_tokens / max_context_window >= 此比例
+    recent_rounds: int = 5              # 保留最近 N 轮工具结果完整（动态：用量达 trigger_ratio 时降为 0）
+    max_messages: int = 300              # L1 消息数量硬上限（条数兜底，与窗口无关）
 
 
 @dataclass
@@ -45,8 +53,11 @@ class AgentConfig:
       - mcp_tools_active_by_default（MCP 工具是否默认激活）
     它们更属于 Agent 实例能力，且 mode 运行期可变；放回实例字段后天然无跨用户串扰风险。
     """
-    max_turns: int = 100            # 最大循环轮次（防无限循环）
+    # 以下 max_turns / tool_call_limit 是「防死循环」兜底，不是正常工作预算。
+    # 真正的成本闸是 total_timeout（默认 1 小时）。复杂编码任务（多文件 CRUD 等）
+    # 轻松超过百次工具调用，故兜底放宽，避免任务做一半就 AgentError 中断。
+    max_turns: int = 200            # 最大循环轮次（防无限循环）
     timeout: float = 300.0         # 单次 LLM 调用超时（秒）
     total_timeout: float = 60 * 60 * 1   # 整个 run() 的总超时（秒）
     max_total_tokens: int | None = None   # 总 token 上限（None=不限制）
-    tool_call_limit: int = 100      # 单次 run() 中最大工具调用次数
+    tool_call_limit: int = 1000     # 单次 run() 中最大工具调用次数

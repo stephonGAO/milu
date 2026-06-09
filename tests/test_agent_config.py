@@ -7,13 +7,13 @@ from milu.agent.config import AgentConfig, CompactConfig
 
 
 def test_default_config():
-    """应有合理的默认值"""
+    """应有合理的默认值（防死循环兜底，放宽以容纳复杂多步任务）"""
     config = AgentConfig()
-    assert config.max_turns == 100
+    assert config.max_turns == 200
     assert config.timeout == 300.0
     assert config.total_timeout == 3600.0
     assert config.max_total_tokens is None
-    assert config.tool_call_limit == 100
+    assert config.tool_call_limit == 1000
 
 
 def test_custom_config():
@@ -36,6 +36,7 @@ def test_compact_config_defaults():
     """CompactConfig 应有合理的默认值"""
     config = CompactConfig()
     assert config.enabled is True
+    assert config.round_trigger_ratio == 0.5
     assert config.trigger_ratio == 0.7
     assert config.recent_rounds == 5
     assert config.max_messages == 300

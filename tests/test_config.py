@@ -59,7 +59,7 @@ def test_builtin_defaults_derived_from_dataclasses():
 
 def test_load_no_files_is_builtin(paths):
     cfg = load_config()
-    assert cfg.agent["max_turns"] == 100
+    assert cfg.agent["max_turns"] == 200
     assert cfg.llm["provider"] == DEFAULT_PROVIDER
 
 
@@ -84,7 +84,7 @@ def test_corrupted_file_falls_back(paths):
     project_config_path().parent.mkdir(parents=True, exist_ok=True)
     project_config_path().write_text("{ not json", encoding="utf-8")
     cfg = load_config()  # 不抛异常
-    assert cfg.agent["max_turns"] == 100
+    assert cfg.agent["max_turns"] == 200
 
 
 def test_legacy_api_keys_ignored(paths):
@@ -99,7 +99,7 @@ def test_legacy_api_keys_ignored(paths):
 
 def test_dotted_get(paths):
     cfg = load_config()
-    assert cfg.get("agent.max_turns") == 100
+    assert cfg.get("agent.max_turns") == 200
     with pytest.raises(KeyError):
         cfg.get("agent.nope")
 
@@ -136,9 +136,10 @@ def test_set_unknown_or_section_raises(paths):
 def test_to_dataclasses(paths):
     cfg = load_config()
     ac = cfg.to_agent_config()
-    assert ac.max_turns == 100 and ac.tool_call_limit == 100
+    assert ac.max_turns == 200 and ac.tool_call_limit == 1000
     cc = cfg.to_compact_config()
     assert cc.recent_rounds == 5
+    assert cc.round_trigger_ratio == 0.5
     pc = cfg.to_pool_config()
     assert pc.max_agents == 200 and pc.max_concurrent_runs == 50
     sc = cfg.to_scheduler_config()
@@ -159,7 +160,7 @@ def test_write_project_template(paths):
     p = write_project_template()
     assert p == project_config_path()
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert data["agent"]["max_turns"] == 100
+    assert data["agent"]["max_turns"] == 200
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "default_models",

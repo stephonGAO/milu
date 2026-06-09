@@ -1,21 +1,27 @@
 """上下文压缩流水线 — 轮次分层 + Token 动态阈值
 
 执行顺序（每轮 LLM 调用前）：
-    L1 snip → 轮次分层工具压缩 → [超阈值?] L4 LLM 摘要
+    L1 snip → [用量 >= round_trigger_ratio?] 轮次分层工具压缩 → [用量 >= trigger_ratio?] L4 LLM 摘要
+
+压缩按「上下文实际用量 / max_context_window」分阶段触发，全部与窗口大小挂钩，
+避免大窗口模型（131K qwen / 1M minimax 等）在窗口还很空时就过早截断工具结果：
+    用量 < round_trigger_ratio          → 不压缩（保留完整工具结果）
+    round_trigger_ratio ~ trigger_ratio → 轮次分层截断旧轮，保留最近 recent_rounds 轮
+    用量 >= trigger_ratio               → 收紧最近轮为 0 + L4 LLM 摘要
 
 层级说明：
-  L1 snip_compact:     消息数 > max_messages 时裁剪中间消息（0 API 调用）
+  L1 snip_compact:     消息数 > max_messages 时裁剪中间消息（0 API 调用，条数兜底）
   轮次分层工具压缩:     按 assistant 消息计轮次，分层处理工具结果（0 API 调用）
     age > old_round_threshold:  ALL tool results → 占位符 + session 文件指针
     age recent~old:             tool results > truncate_threshold → 截断 + 文件指针
-    age 0~recent:               保持不变（动态：上下文超 30% 时 recent 降为 0）
+    age 0~recent:               保持不变（动态：用量达 trigger_ratio 时 recent 降为 0）
 
   动态阈值（根据 max_context_window 自动计算）：
     old_round_threshold = max(5, min(max_context_window // 1500 // 2, 30))
     truncate_threshold  = max(500, min(4000, max_context_window // 20))
 
   L4 compact_history:  调用 LLM 生成对话摘要（1 API 调用）
-    触发条件: prompt_tokens / max_context_window > compact_trigger_ratio
+    触发条件: prompt_tokens / max_context_window >= trigger_ratio
 
 使用方式：
     compactor = Compactor(llm, config, session)
@@ -106,7 +112,10 @@ class Compactor:
             self._last_prompt_tokens = tokens
 
     async def auto_compact(self, messages: list[Message]) -> list[Message]:
-        """自动压缩流水线：L1 snip → 轮次分层 → [超阈值?] L4。
+        """自动压缩流水线：L1 snip →[用量达阈值?] 轮次分层 →[用量更高?] L4。
+
+        压缩按「上下文实际用量 / max_context_window」分阶段触发，与模型窗口挂钩，
+        避免大窗口模型在窗口还空时就过早截断工具结果（见 CompactConfig 文档）。
 
         :param messages: 当前历史消息列表
         :return: 压缩后的消息列表（可能与传入的是同一对象）
@@ -114,16 +123,21 @@ class Compactor:
         if len(messages) <= 1:
             return messages
 
-        # L1: 消息数量裁剪
+        # L1: 消息条数硬上限兜底（防条数爆炸本身拖慢一切，与上下文窗口无关）
         messages = self._snip_compact(messages)
 
-        # 轮次分层工具压缩
-        messages = self._round_based_compact(messages)
+        # 用量一次算清（_last_prompt_tokens 来自上次 API 调用，轮次压缩不改它，算一次即可）
+        usage_ratio = self._calc_usage_ratio(messages)
+
+        # 轮次分层工具压缩：仅当用量达到 round_trigger_ratio 才启动。
+        # 低于此阈值说明窗口还空（尤其大窗口模型），保留完整工具结果，不浪费可用上下文、
+        # 也不会产生「条数不变」的过早压缩噪声。
+        if usage_ratio >= self._config.round_trigger_ratio:
+            messages = self._round_based_compact(messages, usage_ratio)
 
         # L4: Token 比例触发 LLM 摘要
         if self._consecutive_failures < _MAX_CONSECUTIVE_FAILURES:
-            ratio = self._calc_usage_ratio(messages)
-            if ratio >= self._config.trigger_ratio:
+            if usage_ratio >= self._config.trigger_ratio:
                 try:
                     messages = await self._compact_history(messages)
                     self._consecutive_failures = 0
@@ -254,12 +268,16 @@ class Compactor:
 
         return rounds
 
-    def _round_based_compact(self, messages: list[Message]) -> list[Message]:
+    def _round_based_compact(
+        self, messages: list[Message], usage_ratio: float | None = None
+    ) -> list[Message]:
         """按轮次分层处理工具结果。
 
         age > old_round_threshold: ALL tool results → 占位符
         age recent~old:           tool results > truncate_threshold chars → 截断
-        age 0~recent:             保持不变（动态：上下文超 30% 时 recent 降为 0）
+        age 0~recent:             保持不变（动态：用量达 trigger_ratio 时 recent 降为 0）
+
+        :param usage_ratio: 当前上下文用量比例；None 时内部计算（供直接调用/测试）。
         """
         # 检查是否有任何 tool 消息
         has_tool = any(m.role == MessageRole.TOOL for m in messages)
@@ -272,10 +290,13 @@ class Compactor:
 
         total_rounds = len(rounds)
 
-        # 动态计算 recent 保留轮数
+        # 动态计算 recent 保留轮数：仅当用量逼近 L4 摘要线（trigger_ratio）时才降到 0，
+        # 收紧到只保留最新一轮、为即将到来的 L4 摘要腾空间。此前（round_trigger_ratio
+        # ~ trigger_ratio 之间）保留最近 recent_rounds 轮完整，给大窗口模型足够工作上下文。
         recent_rounds = self._config.recent_rounds
-        usage_ratio = self._calc_usage_ratio(messages)
-        if usage_ratio > 0.3:
+        if usage_ratio is None:
+            usage_ratio = self._calc_usage_ratio(messages)
+        if usage_ratio >= self._config.trigger_ratio:
             recent_rounds = 0
 
         changed = False

@@ -44,13 +44,15 @@ def build_agent(s: Settings) -> Agent:
 
     apply_security(s)
     llm = build_llm(s)
-    # s.agent 含 mode/session_enabled（非 AgentConfig 字段），故只取运行限额字段构造
+    # s.agent 含 mode/session_enabled（非 AgentConfig 字段），故只取运行限额字段构造。
+    # 兜底默认从 AgentConfig() 派生（单一真相源），避免与 dataclass 默认值脱节。
+    _def = AgentConfig()
     agent_config = AgentConfig(
-        max_turns=s.agent.get("max_turns", 100),
-        timeout=s.agent.get("timeout", 300.0),
-        total_timeout=s.agent.get("total_timeout", 3600.0),
-        max_total_tokens=s.agent.get("max_total_tokens"),
-        tool_call_limit=s.agent.get("tool_call_limit", 100),
+        max_turns=s.agent.get("max_turns", _def.max_turns),
+        timeout=s.agent.get("timeout", _def.timeout),
+        total_timeout=s.agent.get("total_timeout", _def.total_timeout),
+        max_total_tokens=s.agent.get("max_total_tokens", _def.max_total_tokens),
+        tool_call_limit=s.agent.get("tool_call_limit", _def.tool_call_limit),
     )
     history = ConversationHistory(
         strategy="auto_compact",
