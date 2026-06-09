@@ -558,7 +558,13 @@ class AgentPool:
         entry = handle.entry
         entry.active_count = max(0, entry.active_count - 1)
         entry.last_used = time.monotonic()
-        self._entries.move_to_end(entry.key)
+        # 容错：run 进行期间该 entry 可能已被 remove()（运行时切换厂商/模型/模式等）
+        # 或其他路径从池字典摘除——remove() 明确允许移除运行中的实例（见其 docstring），
+        # 运行协程照常跑完，但此刻 entry 已不在 _entries，move_to_end 会抛 KeyError。
+        # LRU 刷新对已摘除的 entry 无意义，跳过即可。单线程事件循环内 in 检查与
+        # move_to_end 之间无 await，故该判断原子安全。
+        if entry.key in self._entries:
+            self._entries.move_to_end(entry.key)
 
     async def get_or_create_agent(
         self,
