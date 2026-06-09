@@ -13,7 +13,7 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 
 **English** | [简体中文](README.zh-CN.md)
 
-<img src="assets/demo-hero.gif" alt="milu demo" width="820">
+<img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/demo-hero.gif" alt="milu demo" width="820">
 
 </div>
 
@@ -293,7 +293,7 @@ Cron-style scheduling per user, executed inside `milu chat` / `milu serve` (or a
 ## CLI
 
 <!-- demo-cli.gif (optional) goes here. After recording (see assets/RECORDING.md), uncomment the line below and delete this note. -->
-<!-- <img src="assets/demo-cli.gif" alt="milu CLI demo" width="760"> -->
+<!-- <img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/demo-cli.gif" alt="milu CLI demo" width="760"> -->
 
 ```text
 milu                 interactive chat (first run launches setup wizard)
@@ -310,7 +310,7 @@ milu schedule ...    manage scheduled tasks
 ## Architecture
 
 <div align="center">
-<img src="assets/architecture.svg" alt="milu architecture" width="860">
+<img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/architecture.svg" alt="milu architecture" width="860">
 </div>
 
 <details>

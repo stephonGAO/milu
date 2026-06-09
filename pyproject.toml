@@ -5,7 +5,7 @@ description = "Unified AI agent framework: one interface for 9 LLM providers (Qw
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "stephon", email = "gelstephon@gmail.com" }]
+authors = [{ name = "stephon" }]
 keywords = [
     "ai", "agent", "llm", "agent-framework", "openai", "mcp", "rag",
     "multi-provider", "qwen", "deepseek", "kimi", "glm", "claude", "gemini",
