@@ -1387,8 +1387,16 @@ class Agent:
                         # 标记流程约束状态
                         if tool_name == "todo_write" and not exec_result.is_error:
                             self._plan_created = True
+                        # 「已开始工作」仅由"有副作用"的工具触发：只读调查类工具
+                        # （file_read / web_search / doc_read / kb_search / 只读 shell 等）
+                        # 是制定计划之前的研究阶段，不应触发守卫——否则「先读代码理解
+                        # → 再列 todo 计划 → 执行」这一自然流程会被「已开始执行任务后
+                        # 不能再创建计划」拦死。判定复用 _is_safe_call（兼顾静态 is_safe
+                        # 标记与动态 safe_check，能正确识别只读 shell / GET 请求等）。
                         if tool_name not in _PLAN_TOOLS and tool_name not in _META_TOOLS:
-                            self._work_started = True
+                            call_args = item["call"].get("function", {}).get("arguments", "{}")
+                            if wrapper is not None and not self._is_safe_call(wrapper, call_args):
+                                self._work_started = True
 
                         # 将工具结果加入历史
                         self._history.add(Message(

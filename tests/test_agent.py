@@ -623,15 +623,20 @@ async def test_plan_tools_only_batch_allowed():
 
 @pytest.mark.asyncio
 async def test_plan_blocked_after_work_started():
-    """已经开始执行非计划工具后，再调用 todo_write 应被拒绝"""
+    """已经开始执行"有副作用"的工具后，再调用 todo_write 应被拒绝。
+
+    注意：守卫只由不安全（有副作用）工具触发；只读调查类工具不触发
+    （见 test_plan_allowed_after_readonly_research）。故这里用 is_safe=False 的
+    写文件工具代表"开始干活"。
+    """
 
     @tool(name="todo_write", description="计划工具")
     async def dummy_todo_write(items: list) -> str:
         return "计划已更新"
 
-    @tool(name="get_time", description="获取时间")
-    async def get_time() -> str:
-        return "2026-05-28 10:00"
+    @tool(name="write_file", description="写文件（有副作用）", is_safe=False)
+    async def write_file(path: str) -> str:
+        return f"已写入 {path}"
 
     call_count = 0
 
@@ -640,13 +645,13 @@ async def test_plan_blocked_after_work_started():
         call_count += 1
 
         if call_count == 1:
-            # 第一轮：调用普通工具（非计划工具）
+            # 第一轮：调用有副作用的工具（开始干活）
             yield StreamChunk(tool_calls=[
                 type('obj', (), {
-                    'index': 0, 'id': 'call_gt',
+                    'index': 0, 'id': 'call_wf',
                     'function': type('obj', (), {
-                        'name': 'get_time',
-                        'arguments': '{}'
+                        'name': 'write_file',
+                        'arguments': '{"path": "a.txt"}'
                     })()
                 })()
             ])
@@ -674,7 +679,87 @@ async def test_plan_blocked_after_work_started():
     agent = Agent(
         llm=llm,
         system_prompt="你是助手",
-        tools=[dummy_todo_write, get_time],
+        tools=[dummy_todo_write, write_file],
+        config=AgentConfig(max_turns=5),
+        judge_llm=False,   # 关闭 AI 判定，保持 mock_chat 调用序列干净
+    )
+
+    events = []
+    async for event in agent.run("帮我做几件事"):
+        events.append(event)
+
+    tool_results = [e for e in events if isinstance(e, ToolResult)]
+    # 应有 2 个 ToolResult：write_file（成功）+ todo_write（被拒绝）
+    assert len(tool_results) == 2
+
+    # write_file 正常执行
+    assert tool_results[0].tool_name == "write_file"
+    assert tool_results[0].is_error is False
+
+    # todo_write 被拦截
+    assert tool_results[1].tool_name == "todo_write"
+    assert tool_results[1].is_error is True
+    assert "流程约束" in tool_results[1].output
+    assert "已经开始执行" in tool_results[1].output
+
+
+@pytest.mark.asyncio
+async def test_plan_allowed_after_readonly_research():
+    """只读调查类工具（is_safe=True）执行后，仍可创建 todo 计划。
+
+    回归用例：「先读代码理解 → 再列 todo 计划 → 执行」是自然工作流，
+    研究阶段（只读工具）不应触发「已开始工作后禁止建计划」的守卫。
+    """
+
+    @tool(name="todo_write", description="计划工具")
+    async def dummy_todo_write(items: list) -> str:
+        return "计划已更新"
+
+    @tool(name="read_file", description="读文件（只读调查）")  # 默认 is_safe=True
+    async def read_file(path: str) -> str:
+        return f"文件 {path} 的内容……"
+
+    call_count = 0
+
+    async def mock_chat(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # 第一轮：只读调查（读代码理解任务）
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': 'call_rf',
+                    'function': type('obj', (), {
+                        'name': 'read_file',
+                        'arguments': '{"path": "a.txt"}'
+                    })()
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        elif call_count == 2:
+            # 第二轮：研究完成后创建计划（应被允许）
+            yield StreamChunk(tool_calls=[
+                type('obj', (), {
+                    'index': 0, 'id': 'call_tw',
+                    'function': type('obj', (), {
+                        'name': 'todo_write',
+                        'arguments': '{"items": [{"content": "任务1", "status": "pending"}]}'
+                    })()
+                })()
+            ])
+            yield StreamChunk(finish_reason="tool_calls")
+        else:
+            yield StreamChunk(content="计划已就绪，开始执行", finish_reason="stop")
+            yield StreamChunk(usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+
+    agent = Agent(
+        llm=llm,
+        system_prompt="你是助手",
+        tools=[dummy_todo_write, read_file],
         config=AgentConfig(max_turns=5),
     )
 
@@ -683,18 +768,16 @@ async def test_plan_blocked_after_work_started():
         events.append(event)
 
     tool_results = [e for e in events if isinstance(e, ToolResult)]
-    # 应有 2 个 ToolResult：get_time（成功）+ todo_write（被拒绝）
+    # 应有 2 个 ToolResult：read_file（成功）+ todo_write（成功，未被拦截）
     assert len(tool_results) == 2
 
-    # get_time 正常执行
-    assert tool_results[0].tool_name == "get_time"
+    assert tool_results[0].tool_name == "read_file"
     assert tool_results[0].is_error is False
 
-    # todo_write 被拦截
+    # 关键断言：研究之后的 todo_write 未被守卫拦截
     assert tool_results[1].tool_name == "todo_write"
-    assert tool_results[1].is_error is True
-    assert "流程约束" in tool_results[1].output
-    assert "已经开始执行" in tool_results[1].output
+    assert tool_results[1].is_error is False
+    assert "计划已更新" in tool_results[1].output
 
 
 @pytest.mark.asyncio
