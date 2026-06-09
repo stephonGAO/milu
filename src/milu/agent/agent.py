@@ -401,10 +401,6 @@ class Agent:
             # 共享 manager 应为「已连接」状态：直接注册其工具（不再拉起新进程）。
             self._register_mcp_tools(mcp_manager.get_tools())
 
-        # 流程约束状态标记
-        self._work_started = False   # 非计划工具是否已执行
-        self._plan_created = False   # todo_write 是否已被成功调用
-
         # todo 计划的内存后端：无 session 时承载计划（同一 Agent 跨轮保留）。
         # 有 session 时不用它（计划落盘 session_dir/plan.json）。在 run() 入口择一注入。
         self._in_memory_plan: list[dict] = []
@@ -517,8 +513,6 @@ class Agent:
         self._history.clear()
         if self._session is not None:
             self._session.reset()
-        self._work_started = False
-        self._plan_created = False
         # v2: TodoManager 已删除，plan 状态由 session/plan.json 承载
         # reset() 不需要清空 plan 文件（plan 跨 reset 保留）
 
@@ -540,8 +534,6 @@ class Agent:
         self._session = SessionClass(SessionClass.generate_id(), base_dir, model=model)
         self._history.clear()
         self._history.attach_session(self._session)
-        self._work_started = False
-        self._plan_created = False
 
     def load_session(self, session_id: str) -> int:
         """加载历史会话，恢复对话。返回消息数量。"""
@@ -554,8 +546,6 @@ class Agent:
         base_dir = self._session.base_dir if self._session else self._session_dir
         self._session = SessionClass.load_session(session_id, base_dir)
         self._history.load_from_session(self._session)
-        self._work_started = False
-        self._plan_created = False
         return self._session.message_count
 
     # -- 内部方法 ------------------------------------------------------------
@@ -821,9 +811,6 @@ class Agent:
             total_tool_calls = 0
             start_time = time.monotonic()
             final_text = ""
-
-            self._work_started = False
-            # self._plan_created = False #如果之前创建过任务，但对话中断后又继续，agent就认为没有创建过就不能再使用工具更新了。
 
             while True:
                 turn_count += 1
@@ -1103,30 +1090,12 @@ class Agent:
                         ))
                     continue  # 跳过确认循环和 asyncio.gather，直接进入下一轮
 
-                # ── 10a.6 跨轮次执行顺序守卫 ──
-                # 如果已经执行过非计划工具，禁止再创建计划
-                if self._work_started and not self._plan_created:
-                    late_plan = batch_names & _PLAN_TOOLS
-                    if late_plan:
-                        plan_names = ", ".join(late_plan)
-                        error_msg = (
-                            f"流程约束：已经开始执行任务后不能再创建计划（{plan_names}）。"
-                            f"请直接继续完成工作，无需补做计划。"
-                        )
-                        for call in resolved_calls:
-                            tc_id = call.get("id", "")
-                            tn = call.get("function", {}).get("name", "")
-                            ta = call.get("function", {}).get("arguments", "{}")
-                            yield ToolCallStart(tool_name=tn, tool_call_id=tc_id, arguments=ta)
-                            yield ToolResult(
-                                tool_name=tn, tool_call_id=tc_id,
-                                output=error_msg, is_error=True,
-                            )
-                            self._history.add(Message(
-                                role=MessageRole.TOOL, content=error_msg,
-                                tool_call_id=tc_id, name=tn,
-                            ))
-                        continue
+                # 注：原「跨轮次顺序守卫」（开始干活后禁止再创建计划）已移除。
+                # 它把"已开始工作"等同于"调用过不安全工具"，无法区分「用强力工具做
+                # 只读调查」与「真正动手修改」（如 `ls ... 2>&1` 被误判为写操作），
+                # 反复误拦合法的「调查→列计划→执行」工作流。对齐 Claude Code：
+                # 任何时候都可创建/更新 todo 计划。仅保留上面的「计划工具不与其他
+                # 工具同批」批次隔离守卫（真实的协议/顺序约束）。
 
                 # ── 10a.7 talk 模式安全检查 ──
                 # talk 模式下，阻止所有不安全工具调用
@@ -1388,20 +1357,6 @@ class Agent:
                             output=exec_result.output,
                             is_error=exec_result.is_error,
                         )
-
-                        # 标记流程约束状态
-                        if tool_name == "todo_write" and not exec_result.is_error:
-                            self._plan_created = True
-                        # 「已开始工作」仅由"有副作用"的工具触发：只读调查类工具
-                        # （file_read / web_search / doc_read / kb_search / 只读 shell 等）
-                        # 是制定计划之前的研究阶段，不应触发守卫——否则「先读代码理解
-                        # → 再列 todo 计划 → 执行」这一自然流程会被「已开始执行任务后
-                        # 不能再创建计划」拦死。判定复用 _is_safe_call（兼顾静态 is_safe
-                        # 标记与动态 safe_check，能正确识别只读 shell / GET 请求等）。
-                        if tool_name not in _PLAN_TOOLS and tool_name not in _META_TOOLS:
-                            call_args = item["call"].get("function", {}).get("arguments", "{}")
-                            if wrapper is not None and not self._is_safe_call(wrapper, call_args):
-                                self._work_started = True
 
                         # 将工具结果加入历史
                         self._history.add(Message(

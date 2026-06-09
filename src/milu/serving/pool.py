@@ -28,9 +28,8 @@
 #    会话持久化（JSONL 追加写）。多用户写同一份 Session 文件 → A 的回复被记到
 #    B 的会话里，且 JSONL 行交叉，P0 致命。
 #
-# 3. self._work_started / self._plan_created : bool
-#    run() 内的流程控制标记（控制"是否已注入工作清单"等）。两个并发 run 都会
-#    看到 False → 重复进入"创建清单"分支，污染 LLM 上下文。
+# 3. run() 内的瞬时流程/重试计数标记（实例字段，如 _conn_retry_count 等）
+#    绑实例的 run 上下文。两个并发 run 共享同一字段 → 互相干扰、计数错乱。
 #
 
 #
@@ -58,7 +57,7 @@
 #   - history 是按时间累积的列表（不是一次性参数）
 #   - Session 是持久化文件句柄（绑实例）
 #   - subagent 闭包是 Agent 创建时绑定的（绑实例）
-#   - _work_started 是 run() 内的流程标记（绑实例的 run 上下文）
+#   - 断连/限流重试计数是 run() 内的流程标记（绑实例的 run 上下文）
 # 因此 **唯一可行方案是 per-user Agent**：每个 (user_id, session_id) 一份独立
 # Agent 实例。
 #

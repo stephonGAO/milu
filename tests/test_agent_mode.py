@@ -727,6 +727,23 @@ class TestShellSafe:
         for cmd in blocked:
             assert _is_safe_shell({"command": cmd}) is False, f"should block: {cmd}"
 
+    def test_fd_redirect_not_treated_as_write(self):
+        """fd 复制（2>&1 / 1>&2）与丢弃到 /dev/null 是只读，不应被当成写文件。
+
+        回归：旧正则 `>\\s*\\S` 把 `2>&1` 的 `>&` 误判为写重定向，导致只读的
+        `ls ... 2>&1` 被判非安全（进而误触发已删除的 todo 守卫、talk 模式误拦）。
+        """
+        from milu.tools.builtin.shell_command import _is_safe_shell
+
+        allowed = [
+            "ls -la /tmp 2>&1 | head -50",
+            "ls -la 2>/dev/null",
+            "cat a.txt 1>&2",
+            "grep foo bar.txt 2>&1",
+        ]
+        for cmd in allowed:
+            assert _is_safe_shell({"command": cmd}) is True, f"should allow: {cmd}"
+
     def test_path_prefix_stripped(self):
         """带路径前缀的命令应正确提取基础命令名"""
         from milu.tools.builtin.shell_command import _is_safe_shell

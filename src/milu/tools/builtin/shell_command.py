@@ -39,8 +39,11 @@ _SAFE_COMMANDS = {
     "type", "command",
 }
 
-# 管道/重定向中可能包含写入操作的分隔符
-_WRITE_INDICATORS = re.compile(r">\s*\S|>>\s*\S|\|\s*tee\b|\|\s*sudo\b")
+# 写文件重定向 / 危险管道检测（判定命令是否只读）。
+# 仅匹配"写入文件"的重定向：> file / >> file。
+# 排除 ① fd 复制（2>&1、1>&2 等 >& 形式——只是把 stderr 并到 stdout，并非写文件；
+# 此前 `>\s*\S` 会把 `ls ... 2>&1` 误判为写操作）；② 丢弃到 /dev/null（只读命令常用）。
+_WRITE_INDICATORS = re.compile(r">>?\s*(?!&|/dev/null\b)\S|\|\s*tee\b|\|\s*sudo\b")
 
 
 def _is_safe_shell(args: dict) -> bool:

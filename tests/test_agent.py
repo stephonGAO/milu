@@ -622,12 +622,12 @@ async def test_plan_tools_only_batch_allowed():
 
 
 @pytest.mark.asyncio
-async def test_plan_blocked_after_work_started():
-    """已经开始执行"有副作用"的工具后，再调用 todo_write 应被拒绝。
+async def test_plan_allowed_after_work_started():
+    """即使已经执行过"有副作用"的工具，之后仍可创建/更新 todo 计划。
 
-    注意：守卫只由不安全（有副作用）工具触发；只读调查类工具不触发
-    （见 test_plan_allowed_after_readonly_research）。故这里用 is_safe=False 的
-    写文件工具代表"开始干活"。
+    原「跨轮次顺序守卫」（开始干活后禁止建计划）已移除——它无法区分"用强力
+    工具做只读调查"与"真正动手修改"，反复误拦合法的「调查→列计划→执行」工作流。
+    对齐 Claude Code：任何时候都可创建/更新 todo。本用例锁定该行为不回退。
     """
 
     @tool(name="todo_write", description="计划工具")
@@ -657,7 +657,7 @@ async def test_plan_blocked_after_work_started():
             ])
             yield StreamChunk(finish_reason="tool_calls")
         elif call_count == 2:
-            # 第二轮：尝试创建计划（应被拦截）
+            # 第二轮：动手后再创建计划（守卫已移除，应被允许）
             yield StreamChunk(tool_calls=[
                 type('obj', (), {
                     'index': 0, 'id': 'call_tw',
@@ -689,18 +689,17 @@ async def test_plan_blocked_after_work_started():
         events.append(event)
 
     tool_results = [e for e in events if isinstance(e, ToolResult)]
-    # 应有 2 个 ToolResult：write_file（成功）+ todo_write（被拒绝）
+    # 应有 2 个 ToolResult：write_file（成功）+ todo_write（成功，未被拦截）
     assert len(tool_results) == 2
 
     # write_file 正常执行
     assert tool_results[0].tool_name == "write_file"
     assert tool_results[0].is_error is False
 
-    # todo_write 被拦截
+    # 关键断言：动手之后的 todo_write 不再被守卫拦截
     assert tool_results[1].tool_name == "todo_write"
-    assert tool_results[1].is_error is True
-    assert "流程约束" in tool_results[1].output
-    assert "已经开始执行" in tool_results[1].output
+    assert tool_results[1].is_error is False
+    assert "计划已更新" in tool_results[1].output
 
 
 @pytest.mark.asyncio
