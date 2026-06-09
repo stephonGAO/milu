@@ -18,6 +18,24 @@ def _make_ddgs_mock(results: list[dict]):
 class TestWebSearch:
     """web_search 功能测试"""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_search_backend_env(self):
+        """隔离环境中的搜索后端配置。
+
+        开发机的项目 .env 可能设了 WEB_SEARCH_PROVIDER（如 bocha），框架启动时
+        会自动加载，导致本类中假设「默认走 DDG」的用例被路由到真实后端、mock 失效。
+        这里临时清除相关变量，确保用例在任何机器上都确定性地走默认 DDG 路径。
+        """
+        import os
+        keys = ("WEB_SEARCH_PROVIDER", "SEARCH_API_URL", "SEARCH_API_KEY")
+        saved = {k: os.environ.pop(k, None) for k in keys}
+        try:
+            yield
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
     @pytest.mark.asyncio
     async def test_search_with_results(self):
         """搜索返回结果"""
