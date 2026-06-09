@@ -40,6 +40,12 @@ class DoubaoLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（未收录回退到 _capabilities 的 131072，覆盖 doubao-1.x）
+    _context_windows = {
+        "doubao-seed-2-0": 262144,   # Seed 2.0 系列为 256K（模型名用连字符 -2-0-）
+        "doubao-seed-2.0": 262144,   # 兼容点号写法
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -56,9 +62,6 @@ class DoubaoLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://ark.cn-beijing.volces.com/api/v3"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

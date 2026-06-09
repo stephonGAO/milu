@@ -95,6 +95,9 @@ def _builtin_defaults() -> dict:
                 "model": None,
                 "web_search": True,
                 "enable_thinking": False,
+                # 显式覆盖上下文窗口（tokens）。null=按模型名自动解析；
+                # 仅当使用内置表未收录的模型、且自动解析不准时才需手动设置。
+                "context_window": None,
             },
             **asdict(AgentConfig()),
         },

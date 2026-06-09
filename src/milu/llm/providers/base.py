@@ -6,7 +6,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from openai import AsyncOpenAI
 
@@ -67,17 +67,35 @@ class BaseLLM(ABC):
         - 可用参数查询
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "", **kwargs):
+    # 各厂商在子类覆盖：声明该厂商的「基线能力」。其 max_context_window 字段作为
+    # 「未知模型」的保守回退窗口；具体模型的真实窗口由 _context_windows 表解析。
+    _capabilities: "ModelCapabilities" = ModelCapabilities()
+
+    # 各厂商在子类覆盖：{模型名片段(小写): 上下文窗口}。
+    # 同一厂商旗下不同模型窗口差异极大（如 gpt-3.5-turbo 16K vs gpt-4.1 1M），
+    # 故窗口必须随模型解析，而非用一个写死的厂商常量（见 _resolve_context_window）。
+    _context_windows: dict[str, int] = {}
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "",
+        context_window: int | None = None,
+        **kwargs,
+    ):
         """
         初始化LLM实例。
 
         参数:
             api_key: API密钥，为None时从环境变量读取
             model: 模型名称
+            context_window: 显式覆盖上下文窗口（tokens）。用于内置表未收录的模型，
+                优先级最高；为 None 时按模型名解析、再回退厂商保守默认。
             **kwargs: 其他配置参数
         """
         self._api_key = api_key
         self.model = model
+        self._context_window_override = context_window
         self._extra_kwargs = kwargs
         self._client: AsyncOpenAI | None = None
         self._warned_params: set[str] = set()
@@ -95,10 +113,40 @@ class BaseLLM(ABC):
         ...
 
     @property
-    @abstractmethod
     def capabilities(self) -> ModelCapabilities:
-        """该厂商/模型的能力声明"""
-        ...
+        """该厂商/模型的能力声明。
+
+        基线能力来自子类的 `_capabilities`，其中 max_context_window 按当前模型动态
+        解析（见 _resolve_context_window）——同厂不同模型窗口差异极大，不能用一个
+        写死的厂商常量。其余能力字段（supports_* 等）沿用厂商级声明。
+        """
+        resolved = self._resolve_context_window()
+        if resolved == self._capabilities.max_context_window:
+            return self._capabilities
+        return replace(self._capabilities, max_context_window=resolved)
+
+    def _resolve_context_window(self) -> int:
+        """解析当前模型的上下文窗口（tokens）。
+
+        优先级：① 显式覆盖 context_window > ② _context_windows 表按模型名匹配
+        （最长片段优先，子串匹配，兼容带日期/后缀的模型名）> ③ 厂商保守默认
+        （_capabilities.max_context_window，用于未收录的模型）。
+        """
+        override = self._context_window_override
+        if isinstance(override, int) and override > 0:
+            return override
+
+        model = (self.model or "").lower()
+        if model and self._context_windows:
+            best_key = None
+            best_win = None
+            for key, win in self._context_windows.items():
+                if key.lower() in model and (best_key is None or len(key) > len(best_key)):
+                    best_key, best_win = key, win
+            if best_win is not None:
+                return best_win
+
+        return self._capabilities.max_context_window
 
     @abstractmethod
     def _get_available_param_names(self) -> set[str]:

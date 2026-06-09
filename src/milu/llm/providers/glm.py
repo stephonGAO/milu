@@ -40,6 +40,15 @@ class GLMLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（未收录回退到 _capabilities 的 131072=128K，覆盖 glm-4.5 等）。
+    # 数据截至 2026-06：GLM-5 / 4.6 为 200K；GLM-5.1 官方基础规格 200K，但主流三方渠道
+    # 以 1M 提供且实测可用，故取 1M（若部署仅 200K，用 context_window 覆盖回 200000）。
+    _context_windows = {
+        "glm-5.1": 1_000_000,   # 三方渠道 1M（最长片段优先于 glm-5）
+        "glm-5": 200_000,
+        "glm-4.6": 200_000,
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -56,9 +65,6 @@ class GLMLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://open.bigmodel.cn/api/paas/v4"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

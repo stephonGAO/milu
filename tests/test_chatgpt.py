@@ -69,7 +69,8 @@ class TestChatGPTCapabilities:
         assert caps.supports_thinking is False
         assert caps.supports_embedding is False
         assert caps.supports_image_generation is False
-        assert caps.max_context_window == 200000
+        # 按模型解析：gpt-4o 真实窗口 128K（旧实现误报 200K）
+        assert caps.max_context_window == 128000
         assert caps.supported_output_formats == ("text", "json")
 
     def test_provider_name(self):

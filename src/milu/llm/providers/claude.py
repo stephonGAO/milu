@@ -37,9 +37,25 @@ class ClaudeLLM(BaseLLM):
         supports_document=True,
         supports_image_generation=False,
         supports_audio_generation=False,
-        max_context_window=200000,
+        max_context_window=200000,   # 200K：旧版 Claude 默认（未收录模型回退）
         supported_output_formats=("text", "json"),
     )
+
+    # 各模型真实上下文窗口（未收录回退到 _capabilities 的 200000=200K，覆盖 3.x/4.x 基础版）。
+    # 数据截至 2026-06。兼容点号与连字符两种模型 id 写法（如 claude-opus-4-8-20260...）。
+    # 注意：Opus 4.6/4.8 在 Claude API 默认即 1M；Sonnet 4.6 的 1M 目前仍是 API beta，
+    # 若部署未开启 1M（仅 200K），用 context_window=200000 显式覆盖以防溢出。
+    # Haiku 4.5（当前最新 Haiku）为 200K，与回退默认一致，显式列出便于核对。
+    _context_windows = {
+        "claude-opus-4.8": 1_000_000,
+        "claude-opus-4-8": 1_000_000,
+        "claude-opus-4.6": 1_000_000,
+        "claude-opus-4-6": 1_000_000,
+        "claude-sonnet-4.6": 1_000_000,
+        "claude-sonnet-4-6": 1_000_000,
+        "claude-haiku-4.5": 200_000,
+        "claude-haiku-4-5": 200_000,
+    }
 
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
@@ -55,9 +71,6 @@ class ClaudeLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://api.anthropic.com/v1/"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

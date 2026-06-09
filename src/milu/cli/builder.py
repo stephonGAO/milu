@@ -22,6 +22,9 @@ def build_llm(s: Settings) -> BaseLLM:
     }
     if s.api_key:
         kwargs["api_key"] = s.api_key
+    # 显式覆盖上下文窗口（内置表未收录的模型用）；None 时由 provider 按模型名解析
+    if s.context_window:
+        kwargs["context_window"] = s.context_window
     return ModelRegistry.create(s.provider, **kwargs)
 
 

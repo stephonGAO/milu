@@ -15,7 +15,7 @@ class TestKimiCapabilities:
     def test_capabilities(self):
         from milu.llm.providers.kimi import KimiLLM
 
-        llm = KimiLLM(api_key="test", model="moonshot-v1-8k")
+        llm = KimiLLM(api_key="test", model="kimi-k2.6")
         caps = llm.capabilities
 
         # 基础能力
@@ -36,7 +36,7 @@ class TestKimiCapabilities:
         assert caps.supports_image_generation is False
         assert caps.supports_audio_generation is False
 
-        # 模型规格
+        # 模型规格：按模型解析——kimi-k2.x 当前系列均为 256K
         assert caps.max_context_window == 262144
         assert caps.supported_output_formats == ("text", "json")
 

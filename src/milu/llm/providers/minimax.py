@@ -41,6 +41,12 @@ class MiniMaxLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（未收录回退到 _capabilities 的 1000000）。数据截至 2026-06：
+    _context_windows = {
+        "minimax-m3": 1_048_576,   # M3 官方为二进制 1M = 1,048,576
+        "minimax-m2": 204_800,     # M2.x 系列（含 m2.7）均为 204.8K（子串匹配）
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -60,10 +66,6 @@ class MiniMaxLLM(BaseLLM):
     @property
     def base_url(self) -> str:
         return "https://api.minimax.chat/v1"
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

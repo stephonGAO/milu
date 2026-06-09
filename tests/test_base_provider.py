@@ -136,6 +136,41 @@ class TestBaseLLM:
         llm = ConcreteLLM()
         assert llm.model == "test-model"
 
+    # ---------- 上下文窗口按模型解析测试 ----------
+
+    def test_context_window_resolution(self):
+        """_resolve_context_window：覆盖 > 模型表（最长片段优先）> 厂商保守默认。"""
+
+        class _ResolvLLM(BaseLLM):
+            _capabilities = ModelCapabilities(max_context_window=8192)  # 保守回退
+            _context_windows = {"big": 1_000_000, "big-pro": 2_000_000}
+
+            @property
+            def provider_name(self) -> str:
+                return "resolv"
+
+            @property
+            def base_url(self) -> str:
+                return "https://x"
+
+            def _get_available_param_names(self) -> set[str]:
+                return set()
+
+            async def chat(self, messages, **kwargs):
+                yield StreamChunk(content="x")
+
+        # 未知模型 → 回退保守默认
+        assert _ResolvLLM(model="unknown").capabilities.max_context_window == 8192
+        # 模型表命中（子串匹配）
+        assert _ResolvLLM(model="big").capabilities.max_context_window == 1_000_000
+        # 最长片段优先：'big-pro' 同时含 'big' 与 'big-pro'，取后者
+        assert _ResolvLLM(model="big-pro-2026").capabilities.max_context_window == 2_000_000
+        # 显式覆盖优先级最高（即便模型在表中）
+        assert _ResolvLLM(model="big", context_window=123456).capabilities.max_context_window == 123456
+        # 其余能力字段不受影响（仍来自基线 _capabilities）
+        caps = _ResolvLLM(model="big").capabilities
+        assert caps.supported_output_formats == ("text",)
+
     # ---------- 可用参数测试 ----------
 
     def test_get_available_params_contains_expected(self):

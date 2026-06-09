@@ -39,6 +39,12 @@ class DeepSeekLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（未收录回退到 _capabilities 的 131072，覆盖 v3.x/chat/reasoner=128K）
+    # 数据截至 2026-06：V4 全系（v4 / v4-flash / v4-pro）均为 1M 长上下文。
+    _context_windows = {
+        "deepseek-v4": 1_000_000,   # 子串匹配覆盖 v4 / v4-flash / v4-pro
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -54,9 +60,6 @@ class DeepSeekLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://api.deepseek.com/v1"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

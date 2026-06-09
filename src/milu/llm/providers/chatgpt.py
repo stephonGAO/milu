@@ -37,9 +37,19 @@ class ChatGPTLLM(BaseLLM):
         supports_document=True,
         supports_image_generation=False,
         supports_audio_generation=False,
-        max_context_window=200000,
+        max_context_window=128000,   # 保守默认：现代 OpenAI 模型多为 128K（未知模型回退）
         supported_output_formats=("text", "json"),
     )
+
+    # 各模型真实上下文窗口（OpenAI 旗下窗口差异极大，必须按模型解析）。数据截至 2026-06。
+    # 注意子串 + 最长片段匹配："gpt-5" 兜底 5.x 系列为 400K，5.4/5.5 显式覆盖为 1M。
+    _context_windows = {
+        "o4-mini": 200000,
+        "gpt-5": 400000,             # GPT-5 / 5.2 / 5.3 均 400K（5.4/5.5 由下方覆盖）
+        "gpt-5.2": 400000,
+        "gpt-5.4": 1_047_576,        # GPT-5.4 起 API 扩展到 ~1M
+        "gpt-5.5": 1_047_576,
+    }
 
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
@@ -56,9 +66,6 @@ class ChatGPTLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://api.openai.com/v1"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

@@ -36,9 +36,17 @@ class GeminiLLM(BaseLLM):
         supports_document=True,
         supports_image_generation=False,
         supports_audio_generation=False,
-        max_context_window=1048576,
+        max_context_window=1048576,   # 1M：Flash/Pro 系列默认，未收录模型的回退
         supported_output_formats=("text", "json"),
     )
+
+    # 各模型真实上下文窗口（未收录回退到 1048576=1M）。数据截至 2026-06：
+    # 当前 Gemini 3.x / 2.5 系列均为 1M（显式列出便于核对）；仅 1.5 Pro 为 2M。
+    _context_windows = {
+        "gemini-3.5-flash": 1_048_576,
+        "gemini-3.1-pro": 1_048_576,
+        "gemini-3-flash-preview": 1_048_576,
+    }
 
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
@@ -55,9 +63,6 @@ class GeminiLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

@@ -40,6 +40,15 @@ class KimiLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（小写片段匹配）。数据截至 2026-06。
+    # 当前在用的 Kimi K2 系列（k2.6 最新 / k2.5 / k2-thinking）均为 256K=262144；
+    # moonshot-v1-* 是被 K2 取代的旧版模型名（窗口小得多），保留以防仍调用旧模型时溢出。
+    _context_windows = {
+        "kimi-k2.6": 262144,
+        "kimi-k2.5": 262144,
+        "kimi-k2-thinking": 262144,
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -56,9 +65,6 @@ class KimiLLM(BaseLLM):
     def base_url(self) -> str:
         return "https://api.moonshot.cn/v1"
 
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names

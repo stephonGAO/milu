@@ -40,6 +40,17 @@ class QwenLLM(BaseLLM):
         supported_output_formats=("text", "json"),
     )
 
+    # 各模型真实上下文窗口（小写片段匹配；未收录回退到 _capabilities 的 131072=128K）
+    # 数据截至 2026-06：qwen3.6/3.7 全系（plus/flash/max）均为 1M 原生窗口。
+    _context_windows = {
+        "qwen3.7-max": 1_000_000,
+        "qwen3.7-plus": 1_000_000,
+        "qwen3.6-max": 1_000_000,
+        "qwen3.6-plus": 1_000_000,
+        "qwen3.6-flash": 1_000_000,
+        "qwen-long": 10_000_000,     # 长文档模型 10M
+    }
+
     _param_names = {
         "temperature", "top_p", "max_tokens", "stop",
         "frequency_penalty", "presence_penalty",
@@ -55,10 +66,6 @@ class QwenLLM(BaseLLM):
     @property
     def base_url(self) -> str:
         return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-    @property
-    def capabilities(self) -> ModelCapabilities:
-        return self._capabilities
 
     def _get_available_param_names(self) -> set[str]:
         return self._param_names
