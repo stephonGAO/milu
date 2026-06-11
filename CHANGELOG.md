@@ -2,6 +2,13 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [0.1.2] - 2026-06-11
+
+### 变更
+
+- **`ddgs` 降级为可选依赖 `milu[ddg]`**：ddgs（DuckDuckGo 搜索后端）的底层 HTTP 客户端 primp 是 Rust 扩展，在没有预编译 wheel 的平台（Termux/Android、Alpine、部分 ARM Linux）会让 `pip install milu` 卡死在源码编译（maturin 报 `ANDROID_API_LEVEL` 缺失、aws-lc-sys 编译失败等），而 DDG 在国内网络本就不可用。现从核心依赖移除：`web_search.py` 顶层导入改为首次走 ddg 后端时延迟加载，未安装时返回友好提示（引导 `pip install "milu[ddg]"` 或改配 `WEB_SEARCH_PROVIDER=bocha/tavily`），不再阻断 `import milu`；setup 向导选择 ddg 时检测并提示缺库。需要 DuckDuckGo 免 Key 搜索的用户执行 `pip install "milu[ddg]"` 即恢复原行为。
+- **移动端（Termux）安装**：上述变更后 `pkg install python python-numpy python-lxml python-pillow rust binutils` + `export ANDROID_API_LEVEL=24` 后即可正常 `pip install milu`（pydantic-core/rpds-py 仍需现场编译，属正常耗时）。
+
 ## [0.1.1] - 2026-06-09
 
 维护性修复与体验优化（兼容 0.1.0，无破坏性变更）。

@@ -1,7 +1,8 @@
 """内置工具：网页搜索（可插拔后端）
 
 后端通过环境变量 WEB_SEARCH_PROVIDER 选择（默认 ddg）：
-- ddg    : DuckDuckGo（ddgs 库，无需 API Key；中国大陆网络不可直连）
+- ddg    : DuckDuckGo（ddgs 库，无需 API Key；中国大陆网络不可直连。
+           ddgs 为可选依赖：pip install "milu[ddg]"，详见下方 _load_ddgs）
 - tavily : Tavily Search API（需 TAVILY_API_KEY；为 LLM 设计，返回已清洗摘要）
 - bocha  : 博查搜索 API（需 BOCHA_API_KEY；国内可直连）
 
@@ -18,7 +19,6 @@ import logging
 import os
 
 import httpx
-from ddgs import DDGS
 
 from milu.tools.decorator import tool
 
@@ -26,6 +26,23 @@ logger = logging.getLogger(__name__)
 
 _TAVILY_ENDPOINT = "https://api.tavily.com/search"
 _BOCHA_ENDPOINT = "https://api.bochaai.com/v1/web-search"
+
+# ddgs 为可选依赖（extra: milu[ddg]）——其底层 HTTP 客户端 primp 是 Rust 扩展，
+# 在无预编译 wheel 的平台（Termux/Alpine 等）会让 pip install milu 卡死在源码编译。
+# 故不做顶层导入，首次走 ddg 后端时才延迟加载；缓存到模块属性，测试可直接 patch DDGS。
+DDGS = None
+
+
+def _load_ddgs():
+    """延迟导入 DDGS 类；未安装 ddgs 时返回 None（由调用方给出友好提示）。"""
+    global DDGS
+    if DDGS is None:
+        try:
+            from ddgs import DDGS as _DDGS
+        except ImportError:
+            return None
+        DDGS = _DDGS
+    return DDGS
 
 
 def _format_results(items: list[dict], query: str) -> str:
@@ -94,9 +111,16 @@ async def web_search(query: str, num_results: int = 5) -> str:
 
 async def _duckduckgo_search(query: str, num_results: int) -> str:
     """DuckDuckGo（ddgs 库，同步 API 包装为异步）"""
+    ddgs_cls = _load_ddgs()
+    if ddgs_cls is None:
+        return (
+            "错误: 未安装 ddgs 库，无法使用 DuckDuckGo 搜索。"
+            '请执行 pip install ddgs（或 pip install "milu[ddg]"），'
+            "或配置 WEB_SEARCH_PROVIDER=bocha/tavily 改用其他搜索后端。"
+        )
 
     def _sync_search():
-        d = DDGS()
+        d = ddgs_cls()
         return d.text(query, max_results=num_results)
 
     try:

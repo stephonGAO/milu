@@ -55,6 +55,8 @@ milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即
 ```bash
 pip install -U milu           # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
                               # -U 首次安装也行，已装则升级到最新
+pip install -U "milu[ddg]"    # 可选：web_search 的 DuckDuckGo 免 Key 后端（国内网络用不到；
+                              # 含 Rust 扩展依赖，保持可选以便 Termux/Alpine 等平台正常安装）
 ```
 
 <details>

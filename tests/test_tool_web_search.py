@@ -80,6 +80,18 @@ class TestWebSearch:
             assert result.count("https://example.com/") == 3
 
     @pytest.mark.asyncio
+    async def test_ddgs_not_installed(self):
+        """ddgs 为可选依赖（milu[ddg]）：未安装时返回友好提示，不抛 ImportError"""
+        import sys
+        # DDGS 缓存置 None + 屏蔽 ddgs 模块（sys.modules 值为 None → import 即抛 ImportError）
+        with patch("milu.tools.builtin.web_search.DDGS", None, create=True):
+            with patch.dict(sys.modules, {"ddgs": None}):
+                result = await web_search(query="test")
+        assert "ddgs" in result
+        assert "milu[ddg]" in result
+        assert "WEB_SEARCH_PROVIDER" in result
+
+    @pytest.mark.asyncio
     async def test_tool_wrapper_metadata(self):
         """@tool 元数据正确"""
         wrapper = web_search._tool_wrapper

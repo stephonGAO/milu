@@ -55,6 +55,8 @@ milu is both a ready-to-run agent and a framework to build on — start instantl
 ```bash
 pip install -U milu           # everything included: CLI, web service, RAG, MCP
                               # -U installs fresh, and upgrades an existing install to the latest
+pip install -U "milu[ddg]"    # optional: adds the key-free DuckDuckGo backend for web_search
+                              # (Rust-based dep; kept optional so milu installs on Termux/Alpine)
 ```
 
 <details>

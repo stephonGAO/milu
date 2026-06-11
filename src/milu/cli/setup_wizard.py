@@ -49,7 +49,7 @@ PROVIDER_KEY_URLS: dict[str, str] = {
 SEARCH_BACKENDS: list[tuple[str, str, str | None, str | None]] = [
     ("bocha", "博查搜索 —— 国内直连，推荐", "BOCHA_API_KEY", "https://open.bochaai.com"),
     ("tavily", "Tavily —— 为 LLM 设计，需国际网络", "TAVILY_API_KEY", "https://app.tavily.com"),
-    ("ddg", "DuckDuckGo —— 免 Key，国内网络不可用", None, None),
+    ("ddg", 'DuckDuckGo —— 免 Key，国内网络不可用；需 pip install "milu[ddg]"', None, None),
 ]
 
 
@@ -211,6 +211,10 @@ def _step_search() -> tuple[str | None, str | None, str | None]:
 
     env_name = next(b[2] for b in SEARCH_BACKENDS if b[0] == backend)
     if env_name is None:  # ddg 免 Key
+        try:
+            import ddgs  # noqa: F401
+        except ImportError:
+            print(c("yellow", t('  未检测到 ddgs 库（可选依赖），使用前请执行: pip install "milu[ddg]"')))
         return backend, None, None
 
     existing = os.environ.get(env_name)
