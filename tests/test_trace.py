@@ -94,6 +94,21 @@ def _trace_rows():
 
 # ── 基础：span 树结构 / runs 索引 ─────────────────────────
 
+async def test_trace_captures_real_model_attribute():
+    """provider 把模型名存在公开属性 llm.model（非 _model_config）——
+    trace 须从 .model 取到真实模型名，否则瀑布/对比里显示为 '?'（回归守卫）。"""
+    llm = make_llm_with_tool()
+    llm.model = "minimax-text-01"   # 真实 provider 的存储位置（见 providers/base.py）
+    agent = _make_agent(llm)
+    await _consume(agent)
+    rows = load_run_index()
+    assert rows[0]["model"] == "minimax-text-01"
+    spans = load_trace(rows[0]["trace_path"], rows[0]["trace_id"])
+    for s in spans:
+        if s["kind"] in ("agent", "generation"):
+            assert s["attributes"].get("gen_ai.request.model") == "minimax-text-01"
+
+
 async def test_trace_basic_structure():
     agent = _make_agent(make_llm_with_tool())
     events = await _consume(agent)

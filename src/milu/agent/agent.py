@@ -589,12 +589,25 @@ class Agent:
 
     @staticmethod
     def _extract_model_name(llm) -> str:
-        """从 LLM 实例安全提取模型名称。"""
+        """从 LLM 实例安全提取模型名称。
+
+        所有内置 provider 把模型名存在**公开属性 `self.model`**
+        （见 llm/providers/base.py），故优先取它；`_model_config.model`
+        作兜底，兼容自定义封装与既有测试桩。
+        """
+        # ① 公开属性 self.model —— 内置 provider 的真实存储位置
         try:
-            config = getattr(llm, '_model_config', None)
+            model = getattr(llm, "model", None)
+            if isinstance(model, str) and model:
+                return model
+        except Exception:
+            pass
+        # ② 兜底：_model_config.model（自定义封装可能用此结构）
+        try:
+            config = getattr(llm, "_model_config", None)
             if config is not None and not isinstance(config, type):
-                model = getattr(config, 'model', None)
-                if isinstance(model, str):
+                model = getattr(config, "model", None)
+                if isinstance(model, str) and model:
                     return model
         except Exception:
             pass
