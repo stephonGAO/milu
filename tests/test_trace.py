@@ -213,7 +213,7 @@ async def test_trace_disabled_no_artifacts():
     agent = _make_agent(make_llm_with_tool(), trace=False)
     events = await _consume(agent)
     assert any(isinstance(e, AgentDone) for e in events)
-    assert not (user_data_dir() / "runs.jsonl").exists()
+    assert not (user_data_dir() / "runs").exists()
     assert not (user_data_dir() / "traces").exists()
 
 
@@ -428,3 +428,81 @@ async def test_run_report_cost_with_price_table():
     # 220 input + 15 output（每百万单价 1/2 元）
     assert report["cost_estimate"] == pytest.approx(220 / 1e6 * 1.0 + 15 / 1e6 * 2.0)
     assert report["cost_currency"] == "CNY"
+
+
+# ── 运行索引：按用户分文件 / 轮转上限 / 旧文件迁移 ──────────
+
+def _mk_report(trace_id: str, user_id, started_at: float):
+    """构造最小 RunReport（仅填聚合/排序/过滤用到的字段）。"""
+    from milu.observability import RunReport
+    return RunReport(
+        trace_id=trace_id, started_at=started_at, provider="p", model="m",
+        mode="auto", session_id=None, user_id=user_id, status="ok",
+        error_type=None, duration_ms=1.0, turn_count=1,
+        input_tokens=1, output_tokens=1, reasoning_tokens=0,
+        cost_estimate=None, cost_currency=None, ttft_ms=None,
+        llm_time_ms=0.0, tool_time_ms=0.0, judge_time_ms=0.0, wait_time_ms=0.0,
+        tool_calls=0, tool_errors=0, judge_denies=0, judge_confirms=0,
+        fail_opens=0, compactions=0, subagent_runs=0,
+    )
+
+
+async def test_runs_index_split_by_user():
+    """不同 user_id 的运行落到各自文件；按 user_id 读只拿回本用户的。"""
+    from milu.observability import append_run_index
+    append_run_index(_mk_report("aaa", "alice", 1.0))
+    append_run_index(_mk_report("bbb", "bob", 2.0))
+    append_run_index(_mk_report("ccc", "alice", 3.0))
+
+    runs_dir = user_data_dir() / "runs"
+    assert (runs_dir / "alice.jsonl").exists()
+    assert (runs_dir / "bob.jsonl").exists()
+    # Web 口径：按 user_id 只读自己那份，不扫他人
+    alice = load_run_index(user_id="alice")
+    assert {r["trace_id"] for r in alice} == {"aaa", "ccc"}
+    assert load_run_index(user_id="bob")[0]["trace_id"] == "bbb"
+    # CLI 口径：聚合所有用户、按时间倒序
+    allrows = load_run_index(all_users=True)
+    assert [r["trace_id"] for r in allrows] == ["ccc", "bbb", "aaa"]
+
+
+async def test_runs_index_none_user_goes_to_default():
+    """user_id 为 None（CLI 单人）→ default.jsonl。"""
+    from milu.observability import append_run_index
+    append_run_index(_mk_report("xxx", None, 1.0))
+    assert (user_data_dir() / "runs" / "default.jsonl").exists()
+    assert load_run_index()[0]["trace_id"] == "xxx"
+
+
+async def test_runs_index_rotation_caps_lines():
+    """超过上限后只保留最近 N 条（最旧的被丢弃）。"""
+    from milu.observability import append_run_index
+    for i in range(25):
+        append_run_index(_mk_report(f"t{i:02d}", "u", float(i)), max_lines=10)
+    rows = load_run_index(user_id="u", limit=0)
+    assert len(rows) == 10
+    # 保留的是最近 10 条 t15..t24（最新在前）
+    assert rows[0]["trace_id"] == "t24"
+    assert {r["trace_id"] for r in rows} == {f"t{i}" for i in range(15, 25)}
+
+
+async def test_runs_index_legacy_migration(monkeypatch):
+    """旧版单文件 ~/.milu/runs.jsonl 首次访问按 user_id 拆分迁移，源文件改名 .migrated。"""
+    import json as _json
+    from milu.observability import append_run_index
+    legacy = user_data_dir() / "runs.jsonl"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        _json.dumps({"trace_id": "old1", "user_id": "alice", "started_at": 1.0}) + "\n"
+        + _json.dumps({"trace_id": "old2", "user_id": None, "started_at": 2.0}) + "\n",
+        encoding="utf-8")
+
+    # 任意一次访问触发迁移
+    append_run_index(_mk_report("new1", "alice", 3.0))
+
+    assert not legacy.exists()                                   # 旧文件已改名
+    assert legacy.with_name("runs.jsonl.migrated").exists()
+    # 旧 alice 行 + 新 alice 行都在 alice.jsonl
+    assert {r["trace_id"] for r in load_run_index(user_id="alice")} == {"old1", "new1"}
+    # 旧的无 user_id 行归入 default
+    assert load_run_index(user_id="default")[0]["trace_id"] == "old2"

@@ -1,8 +1,16 @@
 """RunReport —— 单次运行的指标聚合（可测量、可比较的载体）。
 
 顶层运行结束时由 Tracer 收集到的 span 树聚合而成，追加一行到
-~/.milu/runs.jsonl 运行索引（与 scheduler outbox 同款 append 形态），
-供 CLI `milu trace list/compare/stats` 与 Web 观测面板消费。
+**按用户分文件**的运行索引 ~/.milu/runs/{safe_user_id}.jsonl，供 CLI
+`milu trace list/compare/stats` 与 Web 观测面板消费。
+
+为什么按用户分文件（与 memory/scheduler/knowledge 同款 {safe_user_id} 约定）：
+- Web 多用户场景只读自己那份，不必扫描他人数据（隔离 + 性能）；
+- 每份各自轮转上限（RUNS_INDEX_MAX_LINES），杜绝单个全局文件无限增长——
+  这是 milu 中唯一全局、永久追加的 JSONL，长期运行会越读越慢，故加 LRU 式
+  截断（每次 append 后若超上限即丢弃最旧行、原子重写）。
+旧版单文件 ~/.milu/runs.jsonl 首次访问自动按 user_id 拆分迁移（源文件改名
+.migrated 保留可回退），与 scheduler 的迁移同款。
 
 口径说明：
 - token 合计 = 全部 generation span 之和（**含子代理**的 LLM 调用；
@@ -16,6 +24,9 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import os
+import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,6 +34,10 @@ from milu.observability.pricing import estimate_cost
 from milu.observability.span import Span
 
 logger = logging.getLogger(__name__)
+
+# 每个用户的运行索引保留的最近运行条数上限（超出丢弃最旧行）。
+# 5000 条 ≈ 数千次对话历史，足够本地观测；文件大小因此封顶在数 MB。
+RUNS_INDEX_MAX_LINES = 5000
 
 
 @dataclass
@@ -63,9 +78,89 @@ class RunReport:
         return dataclasses.asdict(self)
 
 
-def _runs_index_path() -> Path:
+def _safe_user(user_id: str | None) -> str:
+    """user_id 文件系统安全化（与 memory/scheduler 同一规则）。"""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", (user_id or "default").strip() or "default")[:64]
+
+
+def _runs_dir() -> Path:
     from milu.resources import user_data_dir
-    return user_data_dir() / "runs.jsonl"
+    return user_data_dir() / "runs"
+
+
+def _runs_index_path(user_id: str | None = None) -> Path:
+    """某用户的运行索引文件路径（user_id 为 None → default.jsonl，CLI 单人）。"""
+    return _runs_dir() / f"{_safe_user(user_id)}.jsonl"
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """原子写文本（同目录临时文件 + fsync + os.replace，仿 knowledge/scheduler）。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def _trim_runs(path: Path, max_lines: int) -> None:
+    """超过上限时只保留最近 max_lines 行（原子重写）。
+
+    在每次 append 之后调用：追加本身是 append-only（崩溃安全），仅当行数
+    超限才整读 + 原子重写截断。read 成本被上限封顶（稳态 ≈ max_lines 行），
+    且 append 每轮对话才一次（夹在 LLM 调用之间），其耗时可忽略。
+    """
+    if max_lines <= 0:
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        if len(lines) <= max_lines:
+            return
+        _atomic_write_text(path, "".join(lines[-max_lines:]))
+    except OSError as e:
+        logger.warning("运行索引轮转失败（已忽略）: %s", e)
+
+
+def _migrate_legacy_runs() -> None:
+    """旧版单文件 ~/.milu/runs.jsonl → runs/{safe_user_id}.jsonl（按 user_id 拆分，幂等）。
+
+    源文件改名 .migrated 保留（可回退）。损坏行跳过；user_id 缺失归入 default。
+    迁移即按上限截断各用户文件，避免迁移后首次 append 读超大文件。
+    """
+    from milu.resources import user_data_dir
+    legacy = user_data_dir() / "runs.jsonl"
+    if not legacy.exists():
+        return
+    buckets: dict[str, list[str]] = {}
+    try:
+        with open(legacy, encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    uid = json.loads(line).get("user_id")
+                except ValueError:
+                    continue
+                buckets.setdefault(_safe_user(uid), []).append(
+                    line if line.endswith("\n") else line + "\n")
+        runs_dir = _runs_dir()
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        for safe, lines in buckets.items():
+            dest = runs_dir / f"{safe}.jsonl"
+            # 追加到（可能已存在的）目标，再截断到上限
+            with open(dest, "a", encoding="utf-8") as f:
+                f.writelines(lines)
+            _trim_runs(dest, RUNS_INDEX_MAX_LINES)
+        # 提交点：改名旧文件，后续不再触发迁移（os.replace 原子，并发只一个成功）
+        os.replace(legacy, legacy.with_name("runs.jsonl.migrated"))
+    except OSError as e:
+        logger.warning("旧版运行索引迁移失败（已忽略）: %s", e)
 
 
 def build_run_report(
@@ -156,21 +251,30 @@ def build_run_report(
     )
 
 
-def append_run_index(report: RunReport, path: "Path | str | None" = None) -> None:
-    """把 RunReport 追加到运行索引（一行 JSON）。失败由调用方统一 fail-silent。"""
-    p = Path(path) if path else _runs_index_path()
+def append_run_index(
+    report: RunReport,
+    path: "Path | str | None" = None,
+    max_lines: int = RUNS_INDEX_MAX_LINES,
+) -> None:
+    """把 RunReport 追加到该用户的运行索引（一行 JSON），并按上限轮转。
+
+    path 显式给定时直接用（测试/程序化）；否则按 report.user_id 落到
+    runs/{safe_user_id}.jsonl（user_id 为 None → default.jsonl，CLI 单人）。
+    失败由调用方统一 fail-silent。
+    """
+    if path is not None:
+        p = Path(path)
+    else:
+        _migrate_legacy_runs()
+        p = _runs_index_path(report.user_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps(report.to_dict(), ensure_ascii=False, default=str) + "\n")
+    _trim_runs(p, max_lines)
 
 
-def load_run_index(
-    limit: int = 50,
-    path: "Path | str | None" = None,
-    user_id: str | None = None,
-) -> list[dict]:
-    """读取运行索引（最新在前）。损坏行跳过；user_id 给定时按其过滤。"""
-    p = Path(path) if path else _runs_index_path()
+def _read_runs_file(p: Path) -> list[dict]:
+    """读单个运行索引文件的所有行（损坏行跳过）。"""
     if not p.exists():
         return []
     rows: list[dict] = []
@@ -181,16 +285,48 @@ def load_run_index(
                 if not line:
                     continue
                 try:
-                    row = json.loads(line)
+                    rows.append(json.loads(line))
                 except ValueError:
                     continue
-                if user_id is not None and row.get("user_id") != user_id:
-                    continue
-                rows.append(row)
     except OSError as e:
         logger.warning("读取运行索引失败: %s", e)
-        return []
-    rows.reverse()
+    return rows
+
+
+def load_run_index(
+    limit: int = 50,
+    path: "Path | str | None" = None,
+    user_id: str | None = None,
+    all_users: bool = False,
+) -> list[dict]:
+    """读取运行索引（最新在前，按 started_at 降序）。损坏行跳过。
+
+    数据源（三选一）：
+    - path 显式给定 → 只读该文件（测试/程序化）；
+    - all_users=True → 聚合 runs/ 下所有用户文件（CLI：本机即真相，看全部）；
+    - user_id 给定 → 只读该用户文件（Web：按 X-User-Id 隔离，不扫他人）；
+    - 都没有 → default.jsonl（CLI 单人）。
+    user_id 同时给定时再按其过滤行（path/all_users 场景下生效）。
+    """
+    _migrate_legacy_runs()
+    if path is not None:
+        # 显式文件：可能含多用户行（旧格式/测试），按 user_id 二次过滤
+        rows = _read_runs_file(Path(path))
+        if user_id is not None:
+            rows = [r for r in rows if r.get("user_id") == user_id]
+    elif all_users:
+        rows = []
+        d = _runs_dir()
+        if d.is_dir():
+            for f in d.glob("*.jsonl"):
+                rows.extend(_read_runs_file(f))
+        if user_id is not None:
+            rows = [r for r in rows if r.get("user_id") == user_id]
+    else:
+        # 按用户文件读取：文件本身即该用户分区（含迁移来的 user_id=None 旧行、
+        # CLI 的 default 行），不再二次过滤——与 scheduler/memory 读分区同语义
+        rows = _read_runs_file(_runs_index_path(user_id))
+    rows.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
     return rows[:limit] if limit else rows
 
 

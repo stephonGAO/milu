@@ -1,6 +1,7 @@
 """`milu trace` 子命令 —— 运行追踪的终端查看（list / show / compare / stats）。
 
-数据源：~/.milu/runs.jsonl 运行索引 + 各运行的 trace.jsonl（RunReport.trace_path
+数据源：~/.milu/runs/{user}.jsonl 运行索引（按用户分文件，CLI 聚合全部）
++ 各运行的 trace.jsonl（RunReport.trace_path
 定位）。只读，不依赖 LLM；trace_id 支持前缀匹配（list 输出的短 id 即可用）。
 """
 from __future__ import annotations
@@ -67,8 +68,11 @@ def _bar(dur_ms, total_ms, width: int = 10) -> str:
 
 
 def _find_run(tid_prefix: str) -> dict | None:
-    """按 trace_id 前缀在运行索引中定位（取最新命中）。"""
-    for r in load_run_index(limit=0):
+    """按 trace_id 前缀在运行索引中定位（取最新命中）。
+
+    CLI 跨所有用户文件聚合查找（本机即真相，任何 id 都应可定位）。
+    """
+    for r in load_run_index(limit=0, all_users=True):
         if r.get("trace_id", "").startswith(tid_prefix):
             return r
     return None
@@ -77,7 +81,8 @@ def _find_run(tid_prefix: str) -> dict | None:
 # ── list ──────────────────────────────────────────────────
 
 def _trace_list(args) -> int:
-    rows = load_run_index(limit=getattr(args, "n", 20) or 20)
+    # CLI 聚合所有用户文件（保持"看全部"语义；运行索引已按用户分文件、各自轮转）
+    rows = load_run_index(limit=getattr(args, "n", 20) or 20, all_users=True)
     model_filter = getattr(args, "model", None)
     if model_filter:
         rows = [r for r in rows if model_filter in (r.get("model") or "")]
@@ -267,7 +272,7 @@ def _percentile(sorted_vals: list[float], q: float) -> float:
 
 
 def _trace_stats(args) -> int:
-    rows = load_run_index(limit=0)
+    rows = load_run_index(limit=0, all_users=True)
     if not rows:
         print(c("dim", t("暂无运行记录")))
         return 0

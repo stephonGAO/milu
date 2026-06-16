@@ -3,7 +3,8 @@
 让每一次 Agent.run() 可解释、可测量、可比较、可追溯、可视化：
 一次运行 = 一棵 span 树（invoke_agent 根 → chat/execute_tool/guardrail/
 blocked_on_user/compact 子级，子代理整树嵌套），落盘 trace.jsonl +
-运行索引 runs.jsonl。属性命名对齐 OTel GenAI semantic conventions v1.37+，
+按用户分文件的运行索引 runs/{safe_user_id}.jsonl（各自轮转上限）。
+属性命名对齐 OTel GenAI semantic conventions v1.37+，
 将来 OTLP 导出零映射。设计与调研结论见 docs/可观测性方案设计.md。
 
 用法：
