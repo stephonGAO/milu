@@ -6,7 +6,8 @@
       "provider": "qwen",
       "model": "qwen3.6-plus",
       "web_search": true,
-      "enable_thinking": false
+      "enable_thinking": false,
+      "context_window": null
     },
     "max_turns": 100,
     "timeout": 300.0,
@@ -16,6 +17,7 @@
   },
   "compact": {
     "enabled": true,
+    "round_trigger_ratio": 0.5,
     "trigger_ratio": 0.7,
     "recent_rounds": 5,
     "max_messages": 300
@@ -46,6 +48,14 @@
     "auto_top_k": 3,
     "auto_min_score": 0.5,
     "batch_size": 10
+  },
+  "observability": {
+    "//": "Agent 运行追踪（可观测性）。enabled：应用层总开关——CLI/Web 据此决定是否给 Agent 开追踪（库内直接构造 Agent 仍默认关，保持单测纯净）；默认开仅本地落盘（trace.jsonl + runs.jsonl，数据不出本机）。capture_content：参数/输入的内容捕获级别 full/truncated/none（默认 truncated 截断到 max_content_chars 字，会话全文已在 conversation.jsonl 不重复存）。retention_days：~/.milu/traces 下无 session 散件的保留天数。price_table：模型成本估算单价覆盖表（每百万 token），如 {\"MiniMax-M3\": {\"input\": 2.0, \"output\": 8.0, \"currency\": \"CNY\"}}，用户表优先于内置示例表，查不到则成本显示为空不瞎算。",
+    "enabled": true,
+    "capture_content": "truncated",
+    "max_content_chars": 2000,
+    "retention_days": 30,
+    "price_table": {}
   },
   "security": {
     "selfguard_enabled": true
