@@ -146,6 +146,52 @@ async def test_trace_with_session_writes_into_session_dir():
     assert rows[0]["session_id"] == agent.session.session_id
 
 
+def make_stateless_tool_llm():
+    """每次 run 行为一致的 mock：按"最后一条消息角色"决策（而非累积计数），
+    用户消息→调工具、工具结果→出最终文本。同一 agent 多轮调用每轮都稳定
+    产出 2 generation + 1 tool span。"""
+    async def chat(messages, *args, **kwargs):
+        last = messages[-1] if messages else None
+        role = getattr(getattr(last, "role", None), "value", None)
+        if role == "tool":
+            yield StreamChunk(content="完成", finish_reason="stop")
+            yield StreamChunk(usage=TokenUsage(
+                prompt_tokens=120, completion_tokens=5, total_tokens=125))
+        else:
+            yield StreamChunk(tool_calls=[make_tool_call("call_1", "get_time")])
+            yield StreamChunk(finish_reason="tool_calls")
+            yield StreamChunk(usage=TokenUsage(
+                prompt_tokens=100, completion_tokens=10, total_tokens=110))
+    llm = AsyncMock()
+    llm.chat = chat
+    return llm
+
+
+async def test_trace_multi_turn_session_isolated_by_trace_id():
+    """同一会话多轮：trace.jsonl 累积所有轮次的 span（每轮独立 trace_id），
+    但 load_trace(path, trace_id) 必须只返回该轮的 span——否则查看单次运行
+    会把历史轮次一并渲染（前端"点进去含全部历史"的 bug）。"""
+    agent = _make_agent(make_stateless_tool_llm(), session_enabled=True)
+    await _consume(agent, "第一轮")
+    await _consume(agent, "第二轮")
+    await _consume(agent, "第三轮")
+
+    trace_file = agent.session.dir_path / "trace.jsonl"
+    rows = load_run_index()
+    assert len(rows) == 3
+    # 三轮的 trace_id 互不相同
+    tids = {r["trace_id"] for r in rows}
+    assert len(tids) == 3
+    # 不过滤 → 读到全部三轮的 span（每轮 1 agent+2 generation+1 tool = 4）
+    assert len(load_trace(trace_file)) == 12
+    # 按 trace_id 过滤 → 每轮只拿回自己的 4 个 span，且 trace_id 全部一致
+    for r in rows:
+        sub = load_trace(r["trace_path"], r["trace_id"])
+        assert len(sub) == 4
+        assert {s["trace_id"] for s in sub} == {r["trace_id"]}
+        assert sum(1 for s in sub if s["kind"] == "agent") == 1
+
+
 # ── 关闭：零产物 ──────────────────────────────────────────
 
 async def test_trace_disabled_no_artifacts():

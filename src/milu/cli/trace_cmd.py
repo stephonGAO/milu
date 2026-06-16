@@ -167,7 +167,8 @@ def _trace_show(args) -> int:
               file=sys.stderr)
         return 1
     trace_path = run.get("trace_path")
-    spans = load_trace(trace_path) if trace_path else []
+    # 按 trace_id 过滤：会话级 trace.jsonl 累积同会话所有轮次，须只取本次运行
+    spans = load_trace(trace_path, run.get("trace_id")) if trace_path else []
     if not spans:
         print(c("red", t("trace 文件缺失或为空: {p}", p=trace_path)), file=sys.stderr)
         return 1

@@ -839,7 +839,8 @@ def create_app(
                     if r.get("trace_id", "").startswith(trace_id)), None)
         if run is None or not run.get("trace_path"):
             return {"run": None, "spans": []}
-        return {"run": run, "spans": load_trace(run["trace_path"])}
+        # 按 trace_id 过滤：会话级 trace.jsonl 累积同会话所有轮次，须只取本次运行
+        return {"run": run, "spans": load_trace(run["trace_path"], run["trace_id"])}
 
     @app.get("/api/observability/summary")
     async def observability_summary(

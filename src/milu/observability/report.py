@@ -194,8 +194,13 @@ def load_run_index(
     return rows[:limit] if limit else rows
 
 
-def load_trace(trace_path: "Path | str") -> list[dict]:
-    """读取一个 trace.jsonl 的全部 span 行（损坏行跳过）。"""
+def load_trace(trace_path: "Path | str", trace_id: str | None = None) -> list[dict]:
+    """读取 trace.jsonl 的 span 行（损坏行跳过）。
+
+    :param trace_id: 给定时只返回该 trace 的 span。**会话级 trace.jsonl 是
+        append-only、累积同一会话所有轮次的 span（每轮一个独立 trace_id）**，
+        故查看单次运行必须按 trace_id 过滤，否则会把历史轮次的 span 一并渲染。
+    """
     p = Path(trace_path)
     if not p.exists():
         return []
@@ -206,9 +211,12 @@ def load_trace(trace_path: "Path | str") -> list[dict]:
             if not line:
                 continue
             try:
-                spans.append(json.loads(line))
+                span = json.loads(line)
             except ValueError:
                 continue
+            if trace_id is not None and span.get("trace_id") != trace_id:
+                continue
+            spans.append(span)
     return spans
 
 
