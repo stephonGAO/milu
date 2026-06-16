@@ -69,6 +69,16 @@ def build_agent(s: Settings) -> Agent:
     if s.knowledge.get("enabled"):
         from milu.knowledge import KnowledgeConfig
         knowledge = KnowledgeConfig.from_mapping(s.knowledge)
+    # 运行追踪：config.json 的 observability.enabled 为真时启用（本地落盘 trace.jsonl
+    # + runs.jsonl 索引）。同款应用层开关约定；顺带清理过期的散件 trace。
+    trace = False
+    if s.observability.get("enabled"):
+        from milu.observability import TraceConfig, cleanup_old_traces
+        trace = TraceConfig.from_mapping(s.observability)
+        try:
+            cleanup_old_traces(trace.retention_days)
+        except Exception:
+            pass
     return Agent(
         llm=llm,
         mode=s.mode,
@@ -77,6 +87,7 @@ def build_agent(s: Settings) -> Agent:
         history=history,
         subagents=None if s.use_subagents else [],
         knowledge=knowledge,
+        trace=trace,
         on_confirm=confirm_unsafe,
     )
 

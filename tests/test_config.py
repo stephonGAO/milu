@@ -163,9 +163,11 @@ def test_write_project_template(paths):
     assert data["agent"]["max_turns"] == 200
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
-        "agent", "compact", "pool", "scheduler", "knowledge", "default_models",
-        "security", "display", "lang",
+        "agent", "compact", "pool", "scheduler", "knowledge", "observability",
+        "default_models", "security", "display", "lang",
     }
     assert data["lang"] == "zh"   # CLI 界面语言默认中文
     assert data["display"]["show_subagent_events"] is False
     assert data["knowledge"]["enabled"] is True   # 知识库默认开启（空库零开销）
+    assert data["observability"]["enabled"] is True   # 运行追踪默认开启（仅本地落盘）
+    assert data["observability"]["capture_content"] == "truncated"

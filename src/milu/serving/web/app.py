@@ -330,6 +330,13 @@ def _make_agent_factory(state, shared_mcp):
         if kn.get("enabled"):
             from milu.knowledge import KnowledgeConfig
             knowledge = KnowledgeConfig.from_mapping(kn, user_id=user_id)
+        # 运行追踪：config.json observability.enabled（默认 true）→ trace.jsonl 本地
+        # 落盘 + runs 索引按 user_id 标记（观测面板按用户过滤）
+        trace = False
+        ob = getattr(state, "observability_cfg", None) or {}
+        if ob.get("enabled"):
+            from milu.observability import TraceConfig
+            trace = TraceConfig.from_mapping(ob, user_id=user_id)
         return Agent(
             llm=llm,
             tools=[*BUILTIN_TOOLS, create_structured_output_tool()],
@@ -341,6 +348,7 @@ def _make_agent_factory(state, shared_mcp):
             schedule_user=user_id,          # 定时任务按 user_id 隔离
             subagents=None if d.use_subagents else [],
             mcp_manager=shared_mcp,
+            trace=trace,                    # 运行追踪（观测面板数据源）
             on_confirm=lambda t, a: _confirm_unsafe(state, user_id, session_id, t, a),
         )
     return factory
@@ -415,6 +423,15 @@ def create_app(
         mc = load_config()
         # knowledge 分节供 agent_factory 按 user_id 派生知识库（enabled 默认 False）
         st.knowledge_cfg = dict(mc.knowledge)
+        # observability 分节供 agent_factory 派生运行追踪（enabled 默认 True，本地落盘）；
+        # 启动时顺带清理过期的散件 trace
+        st.observability_cfg = dict(mc.observability)
+        if st.observability_cfg.get("enabled"):
+            try:
+                from milu.observability import cleanup_old_traces
+                cleanup_old_traces(int(st.observability_cfg.get("retention_days", 30)))
+            except Exception as e:
+                logger.warning("过期 trace 清理失败（已忽略）：%s", e)
         pool = AgentPool(
             llm_factory=lambda uid, sid: default_llm,
             agent_factory=_make_agent_factory(st, shared_mcp),
@@ -798,6 +815,56 @@ def create_app(
     @app.get("/api/stats")
     async def stats():
         return app.state.pool.get_stats()
+
+    # ── 运行追踪（观测面板数据源，只读）──────────────────
+
+    @app.get("/api/traces")
+    async def get_traces(
+        limit: int = 20,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+    ):
+        """近期运行列表（runs.jsonl 索引，按 user_id 只返回本用户的运行）。"""
+        from milu.observability import load_run_index
+        return {"runs": load_run_index(limit=limit, user_id=x_user_id)}
+
+    @app.get("/api/trace/{trace_id}")
+    async def get_trace(
+        trace_id: str,
+        x_user_id: str = Header("default", alias="X-User-Id"),
+    ):
+        """单次运行的完整 span 树（trace_id 支持前缀匹配；仅限本用户的运行——
+        经 user_id 过滤后的索引定位 trace_path，天然防跨用户读取）。"""
+        from milu.observability import load_run_index, load_trace
+        run = next((r for r in load_run_index(limit=0, user_id=x_user_id)
+                    if r.get("trace_id", "").startswith(trace_id)), None)
+        if run is None or not run.get("trace_path"):
+            return {"run": None, "spans": []}
+        return {"run": run, "spans": load_trace(run["trace_path"])}
+
+    @app.get("/api/observability/summary")
+    async def observability_summary(
+        x_user_id: str = Header("default", alias="X-User-Id"),
+    ):
+        """聚合卡片：运行数 / 成功率 / token / 成本 / p50 耗时 / fail-open 计数。"""
+        from milu.observability import load_run_index
+        rows = load_run_index(limit=0, user_id=x_user_id)
+        costs: dict[str, float] = {}
+        for r in rows:
+            if r.get("cost_estimate") is not None:
+                cur = r.get("cost_currency") or "?"
+                costs[cur] = round(costs.get(cur, 0.0) + r["cost_estimate"], 6)
+        durs = sorted((r.get("duration_ms") or 0) for r in rows)
+        return {
+            "enabled": bool(getattr(app.state, "observability_cfg", {}).get("enabled")),
+            "runs": len(rows),
+            "ok": sum(1 for r in rows if r.get("status") == "ok"),
+            "input_tokens": sum(r.get("input_tokens", 0) for r in rows),
+            "output_tokens": sum(r.get("output_tokens", 0) for r in rows),
+            "cost": costs,
+            "p50_ms": durs[len(durs) // 2] if durs else 0,
+            "tool_calls": sum(r.get("tool_calls", 0) for r in rows),
+            "fail_opens": sum(r.get("fail_opens", 0) for r in rows),
+        }
 
     # ── 知识库管理 ────────────────────────────────────────
 

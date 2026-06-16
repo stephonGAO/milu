@@ -11,6 +11,7 @@
     schedule             定时任务管理（list/run/delete/enable/disable）
     scheduler            调度守护进程（start）
     serve                启动内置 Web 服务（多用户对话 + 全功能演示前端）
+    trace                运行追踪查看（list/show/compare/stats，可观测性）
 
 全局选项（厂商/模型/模式/语言等）写在子命令之后，例如：
     milu chat -p deepseek -m deepseek-chat --mode superwork
@@ -126,6 +127,20 @@ def build_parser() -> argparse.ArgumentParser:
     sdi = sch_sub.add_parser("disable", help=t("禁用指定任务"))
     sdi.add_argument("name", help=t("任务名称"))
     sdi.add_argument("--user", default="default", help=t("用户标识（默认 default）"))
+
+    # trace — 运行追踪查看（可观测性）
+    p_trace = sub.add_parser("trace", help=t("运行追踪查看（list/show/compare/stats）"))
+    trace_sub = p_trace.add_subparsers(dest="trace_action")
+    tl = trace_sub.add_parser("list", help=t("列出近期运行（默认）"))
+    tl.add_argument("-n", type=int, default=20, help=t("条数（默认 20）"))
+    tl.add_argument("--model", help=t("按模型名过滤"))
+    ts = trace_sub.add_parser("show", help=t("树状展示一次运行的完整 span 树"))
+    ts.add_argument("trace_id", help=t("trace_id（支持前缀匹配）"))
+    tc = trace_sub.add_parser("compare", help=t("多次运行对比（耗时/token/成本）"))
+    tc.add_argument("trace_ids", nargs="+", help=t("两个及以上 trace_id"))
+    tst = trace_sub.add_parser("stats", help=t("聚合统计（p50/p95 耗时、token、成本）"))
+    tst.add_argument("--by", choices=["model", "provider", "day"], default="model",
+                     help=t("分组维度（默认 model）"))
 
     # scheduler — 调度守护进程
     p_sched = sub.add_parser("scheduler", help=t("调度守护进程管理（start）"))
@@ -303,6 +318,11 @@ def _cmd_sessions(args) -> int:
         print(f"  {c('cyan', s.get('session_id', '?'))}  {c('dim', time_str)}  "
               + t("{n} 条消息", n=s.get('message_count', 0)) + model_str)
     return 0
+
+
+def _cmd_trace(args) -> int:
+    from milu.cli.trace_cmd import cmd_trace
+    return cmd_trace(args)
 
 
 def _cmd_providers(_args) -> int:
@@ -570,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
         "schedule": _cmd_schedule,
         "scheduler": _cmd_scheduler,
         "serve": _cmd_serve,
+        "trace": _cmd_trace,
     }
     handler = handlers.get(command)
     if handler is None:

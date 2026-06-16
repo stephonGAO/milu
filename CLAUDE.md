@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-milu：统一的 AI 模型抽象层 + Agent 编排引擎。支持 9 个 LLM 提供商（通义千问、Kimi、GLM、DeepSeek、MiniMax、豆包、ChatGPT、Gemini、Claude），提供工具系统（含 MCP 协议）、子 Agent、内置工具、技能（Skills）、文件化系统提示词、会话持久化、上下文自动压缩、向量知识库（RAG）、以及多用户并发资源池等能力。
+milu：统一的 AI 模型抽象层 + Agent 编排引擎。支持 9 个 LLM 提供商（通义千问、Kimi、GLM、DeepSeek、MiniMax、豆包、ChatGPT、Gemini、Claude），提供工具系统（含 MCP 协议）、子 Agent、内置工具、技能（Skills）、文件化系统提示词、会话持久化、上下文自动压缩、向量知识库（RAG）、运行追踪（可观测性）、以及多用户并发资源池等能力。
 
 技术栈：Python 3.10+、openai SDK（作为统一 HTTP 客户端）、hatchling 构建、pytest + pytest-asyncio。
 
@@ -40,6 +40,7 @@ echo "总结这段话" | milu run # 从 stdin 读取指令
 milu providers             # 列出 9 个厂商及 Key 配置状态
 milu config set provider qwen   # 写入 ~/.milu/config.json
 milu sessions list         # 查看历史会话
+milu trace list            # 近期运行列表（可观测性；show <id> 看 span 树瀑布、compare 多次对比、stats 聚合）
 milu serve                 # 启动内置 Web 服务（多用户对话 + 全功能演示前端，默认 127.0.0.1:8000）
 milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任务调度
 # 开发期未重装时也可：.venv/Scripts/python -m milu.cli <args>
@@ -144,6 +145,16 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **结果投递三通道**：outbox JSONL `~/.milu/scheduler_outbox/{user_id}.jsonl`（带 flock append）→ `on_result` 异步回调（服务端推送）→ 系统弹窗（`notify.py`，Windows ctypes MessageBoxW / macOS osascript / Linux notify-send；`SchedulerConfig.notify` 可关）
 - **工具层用户上下文**（`schedule_tool.py`）：`_current_schedule_user` ContextVar 由 `Agent.run()` 入口注入（`Agent(schedule_user=...)`，与 `memory` 平级的能力参数）；**未注入时退化为 "default"（与 memory 的写拒绝是有意差异**，因 schedule 工具在 BUILTIN_TOOLS 默认列表，CLI 单人无注入须兼容）；user_id 不暴露为 LLM 参数（防伪造他人身份）。AgentPool 默认工厂**默认**按 user_id 派生 `schedule_user`（不派生则全部用户共用 default 任务空间，跨用户可见/可删）
 - **工具拆分（参数正交性原则）**：LLM 侧暴露两个工具——`schedule_create`（专职创建，9 个参数全部相关，整体不安全）+ `schedule_manage`（action=list/delete/enable/disable/run_now，schema 极简仅 action+name；`safe_check` 动态判定 list 只读安全，其余走审批/AI 判定）。不合并为单工具的原因：create 专属参数占比过高，管理操作的 schema 会充满无关参数噪音；也不再拆细——delete/enable/disable/run_now 形态一致（都只要 name）
+
+### 9. 可观测性层 (`src/milu/observability/`)
+
+- **解决 Agent 运行黑箱**：一次 `Agent.run()` = 一棵 span 树（trace），让运行可解释/可测量/可比较/可追溯/可视化。设计与业界调研（Langfuse/LangSmith/OTel GenAI/OpenAI Agents SDK/Claude Code）见 `docs/可观测性方案设计.md`
+- **数据模型**（`span.py`/`tracer.py`）：`invoke_agent` 根 span → `chat {model}`（generation，TTFT/usage 增量/finish_reasons）、`execute_tool`（tool）、`guardrail judge`（**三态裁决+理由+fail_open 标记**——judge 最需要可解释）、`blocked_on_user`（审批等待时长+决策，学 Claude Code 把"等人"从工具耗时剥离）、`compact` 子 span。ID 遵循 W3C Trace Context（32/16 hex）、属性名对齐 **OTel GenAI semconv v1.37+ 新名**（`gen_ai.provider.name`/`gen_ai.usage.input_tokens`，废弃名不用），milu 私有走 `milu.*`；JSONL 行带 `schema` 版本，将来 OTLP 导出零映射
+- **接入与隔离**：`Agent(trace=False)` 库默认关（hermetic）；True/`TraceConfig` 开启。Tracer/当前 span 经 **ContextVar 注入**（与 judge/todo 同模式）——子代理沿 asyncio 任务树自动继承父 tracer，其 `invoke_agent` 挂在父 `execute_tool` 之下（委派链路零代码可追溯，不受子代理自身开关影响）；工具批次 gather 任务内各设自己的 span，并发天然隔离。**埋点全部包裹式，不改控制流；fail-silent**（sink 异常只记 warning）；关闭时 NOOP 零开销
+- **落盘**（`sink.py`）：span 结束即 append——有 session → `{session_dir}/{id}/trace.jsonl`（与 conversation.jsonl 并排）；无 session → `~/.milu/traces/{trace_id}.jsonl`（`retention_days` 过期清理）。顶层运行结束聚合 `RunReport`（`report.py`）追加 `~/.milu/runs.jsonl` 索引（带 user_id，Web 按用户过滤；token 合计按 generation span 求和**含子代理**，时间分解只算根直接子级避免重复计）。Sink 可插拔（`extra_sinks`，Web 实时推送/OTLP 导出器均为一个 sink）
+- **成本估算**（`pricing.py`，学 Langfuse 双轨制）：token 用真实 usage，单价查表——config `observability.price_table`（最长前缀匹配）优先于内置示例表，**查不到 cost=None 绝不瞎算**
+- **应用层开关**：config.json `observability` 分节（`enabled` 默认 **true**，仅本地落盘数据不出本机；`capture_content` full/truncated/none 默认 truncated 截 2000 字）——与 knowledge 同款"库默认关、应用层默认开"约定，CLI `build_agent` / Web `agent_factory` 读配置传 `TraceConfig.from_mapping`
+- **消费端**：CLI `milu trace list/show/compare/stats`（`cli/trace_cmd.py`，树状渲染/对比表/p50/p95 聚合，CJK 宽度对齐用 `_pad`）；Web 三端点 `GET /api/traces`、`/api/trace/{id}`（前缀匹配，按 X-User-Id 过滤防跨用户读取）、`/api/observability/summary` + 前端第六面板「观测」（聚合卡片 + 运行列表 + 瀑布图，纯 CSS 色块按 kind 着色，judge 理由直接展示）
 
 ## 关键设计约束（多用户并发 / 无状态化）
 

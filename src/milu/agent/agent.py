@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+import sys
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, Union
@@ -38,6 +39,13 @@ from milu.agent.events import (
 from milu.llm.base.message import Message, MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.llm.providers.base import BaseLLM
+from milu.observability import (
+    NOOP_TRACER,
+    TraceConfig,
+    _current_span as _current_trace_span,
+    _current_tracer,
+    extract_provider_name,
+)
 from milu.tools.registry import ToolRegistry
 from milu.tools.builtin.todo_write import (
     _current_session_dir as _current_todo_session_dir,
@@ -252,6 +260,7 @@ class Agent:
         schedule_user: "str | None" = None,                 # 定时任务用户标识：None→工具层退化为 "default"（CLI 单人）；多用户场景传 user_id（任务文件按用户隔离）
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
+        trace: "bool | TraceConfig" = False,                # 运行追踪：False→关闭（默认，hermetic）；True→默认配置；TraceConfig→定制。CLI/Web 按 config.observability 传入（应用层默认开）
     ):
         self._llm = llm
         # 复制传入的 config，保证每个 Agent 持有独立 AgentConfig 实例（防御性隔离，
@@ -276,6 +285,15 @@ class Agent:
         else:
             self._judge_llm = judge_llm
         self._judge_rules = judge_rules
+        # ── 运行追踪（可观测性，见 docs/可观测性方案设计.md）──
+        # 库内默认关闭（单测 hermetic）；子代理无需开启——run() 入口经 ContextVar
+        # 继承父 tracer 自动把自己的 invoke_agent span 挂在父的工具 span 之下。
+        if trace is True:
+            self._trace_config: TraceConfig | None = TraceConfig()
+        elif isinstance(trace, TraceConfig) and trace.enabled:
+            self._trace_config = trace
+        else:
+            self._trace_config = None
         # session 根目录：None → 用户级默认（与 CWD 解耦）；否则用传入路径
         if session_dir is None:
             from milu.resources import default_session_dir
@@ -582,6 +600,29 @@ class Agent:
             pass
         return ""
 
+    def _build_tracer(self):
+        """构造本次运行的 Tracer（JSONL 落盘）。初始化失败回退 NOOP（fail-silent）。
+
+        落盘路径：有 session → 会话目录 trace.jsonl（与 conversation.jsonl 并排，
+        round 号互相关联）；无 session → ~/.milu/traces/{trace_id}.jsonl。
+        """
+        from milu.observability import JsonlSink, Tracer, new_trace_id
+        cfg = self._trace_config
+        try:
+            tid = new_trace_id()
+            if self._session is not None:
+                path = self._session.dir_path / "trace.jsonl"
+            else:
+                from milu.resources import user_data_dir
+                path = user_data_dir() / "traces" / f"{tid}.jsonl"
+            sinks = [JsonlSink(path)] + list(cfg.extra_sinks)
+            tracer = Tracer(cfg, sinks, trace_id=tid)
+            tracer.trace_path = path
+            return tracer
+        except Exception as e:
+            logger.warning("追踪初始化失败，本次运行不追踪: %s", e)
+            return NOOP_TRACER
+
     @staticmethod
     def _default_prompt_variables() -> dict[str, str]:
         """环境上下文变量（每轮重算），提示词模板可直接引用：
@@ -786,6 +827,44 @@ class Agent:
             self._llm.capabilities, "supports_vision", False
         ))
         vision_token = _current_vision_support.set(vision_supported)
+        # ── 运行追踪（可观测性）──
+        # 顶层运行：按 trace 配置新建 Tracer（JSONL 落盘）并注入 ContextVar；
+        # 子代理运行：经任务树继承父 tracer（不受自身 trace 开关影响），把自己的
+        # invoke_agent span 挂在父的 execute_tool span 之下，委派链路完整可追溯。
+        tracer = _current_tracer.get()
+        tracer_token = None
+        is_trace_owner = False
+        if tracer is None:
+            if self._trace_config is not None:
+                tracer = self._build_tracer()
+                if tracer.enabled:
+                    tracer_token = _current_tracer.set(tracer)
+                    is_trace_owner = True
+            else:
+                tracer = NOOP_TRACER
+        model_name = self._extract_model_name(self._llm)
+        run_span = tracer.start("invoke_agent", kind="agent")
+        run_span_token = None
+        if tracer.enabled:
+            run_span.set_attrs({
+                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.provider.name": extract_provider_name(self._llm),
+                "gen_ai.request.model": model_name,
+                "milu.mode": self._mode.value,
+            })
+            if self._session is not None:
+                run_span.set_attr("gen_ai.conversation.id", self._session.session_id)
+            _clipped_input = tracer.clip(user_input)
+            if _clipped_input is not None:
+                run_span.set_attr("milu.user_input", _clipped_input)
+            run_span_token = _current_trace_span.set(run_span)
+        # 运行结果（finally 的追踪收尾用）：默认 interrupted（消费者提前断开）
+        run_outcome: dict = {"status": "interrupted", "error_type": None}
+        total_usage = TokenUsage()
+        turn_count = 0
+        total_tool_calls = 0
+        start_time = time.monotonic()
+        final_text = ""
         try:
             if images and vision_supported:
                 self._history.add(Message(
@@ -806,18 +885,13 @@ class Agent:
             if self._knowledge is not None and self._knowledge.config.auto_retrieve:
                 await self._knowledge.prepare_auto_context(user_input)
 
-            total_usage = TokenUsage()
-            turn_count = 0
-            total_tool_calls = 0
-            start_time = time.monotonic()
-            final_text = ""
-
             while True:
                 turn_count += 1
 
                 # 1. 检查总超时
                 elapsed = time.monotonic() - start_time
                 if elapsed >= self._config.total_timeout:
+                    run_outcome.update(status="error", error_type="total_timeout")
                     yield AgentError(
                         error_type="total_timeout",
                         message=f"总超时 {self._config.total_timeout}s",
@@ -831,8 +905,17 @@ class Agent:
                 if self._history.compact_enabled:
                     original_count = len(self._history._messages)
                     original_messages = self._history._messages
+                    compact_span = tracer.start("compact", kind="compaction")
                     compacted = await self._history.auto_compact()
                     if compacted is not original_messages:
+                        # 仅实际压缩发生时收尾落盘（未 finish 的 span 自然丢弃）
+                        compact_span.set_attrs({
+                            "milu.compact.strategy": "auto",
+                            "milu.compact.before": original_count,
+                            "milu.compact.after": len(compacted),
+                            "milu.round": turn_count,
+                        })
+                        tracer.finish(compact_span)
                         yield HistoryCompacted(
                             strategy="auto",
                             original_count=original_count,
@@ -858,9 +941,37 @@ class Agent:
                 turn_reasoning_parts: list[str] = []  # 累积思考增量，回写 assistant 消息
                 announced_calls: set[int] = set()  # 已发 ToolCallPreparing 的 buffer 下标
 
+                # generation span：每次（重）调用独立 span（失败尝试 = error span）；
+                # usage 取增量（total_usage 跨轮累计），TTFT 记首个有效 chunk
+                llm_span = tracer.start(f"chat {model_name}", kind="generation")
+                llm_span.set_attrs({
+                    "gen_ai.operation.name": "chat",
+                    "gen_ai.request.model": model_name,
+                    "milu.round": turn_count,
+                    "milu.message_count": len(messages),
+                })
+                pre_usage = (total_usage.prompt_tokens, total_usage.completion_tokens,
+                             total_usage.reasoning_tokens)
+                ttfc_recorded = False
+                finish_reason_seen: str | None = None
+
                 try:
                     async with asyncio.timeout(self._config.timeout):
                         async for chunk in self._llm.chat(messages, **llm_kwargs):
+                            # 追踪：首个有效 chunk 记 TTFT；finish_reason 取最后一个非空
+                            if not ttfc_recorded and (
+                                chunk.content or chunk.reasoning_content or chunk.tool_calls
+                            ):
+                                ttfc_recorded = True
+                                _ms = llm_span.add_event("first_token")
+                                if _ms is not None:
+                                    llm_span.set_attr(
+                                        "gen_ai.response.time_to_first_chunk",
+                                        round(_ms / 1000, 3),
+                                    )
+                            if chunk.finish_reason:
+                                finish_reason_seen = chunk.finish_reason
+
                             # 5. 产出文本/思考事件
                             if chunk.content:
                                 turn_text_parts.append(chunk.content)
@@ -897,12 +1008,16 @@ class Agent:
                             # 流随后自然结束（[DONE]）；整体仍受外层 asyncio.timeout 兜底。
                             # （tool_calls 收尾本就不 break，故 usage 一直能采到。）
                 except asyncio.TimeoutError:
+                    tracer.finish(llm_span, status="error", error_type="call_timeout")
+                    run_outcome.update(status="error", error_type="call_timeout")
                     yield AgentError(
                         error_type="call_timeout",
                         message=f"单次调用超时 {self._config.timeout}s",
                     )
                     return
                 except Exception as e:
+                    # 失败的尝试也是独立 error span（重试会开新 span）
+                    tracer.finish(llm_span, status="error", error_type=type(e).__name__)
                     error_str = str(e).lower()
 
                     # ── 流式连接中断重试（网络抖动、服务端断连）──
@@ -958,6 +1073,7 @@ class Agent:
                     safety_hint = content_safety_hint(e)
                     if safety_hint is not None:
                         logger.warning("内容合规拦截: %s", e)
+                        run_outcome.update(status="error", error_type="content_filter")
                         yield AgentError(
                             error_type="content_filter",
                             message=safety_hint,
@@ -976,8 +1092,16 @@ class Agent:
                         logger.info("检测到上下文过长错误，触发应急压缩: %s", e)
                         original_count = len(self._history._messages)
                         original_messages = self._history._messages
+                        compact_span = tracer.start("compact", kind="compaction")
                         compacted = await self._history.reactive_compact()
                         if compacted is not original_messages:
+                            compact_span.set_attrs({
+                                "milu.compact.strategy": "reactive",
+                                "milu.compact.before": original_count,
+                                "milu.compact.after": len(compacted),
+                                "milu.round": turn_count,
+                            })
+                            tracer.finish(compact_span)
                             yield HistoryCompacted(
                                 strategy="reactive",
                                 original_count=original_count,
@@ -987,6 +1111,18 @@ class Agent:
                         # 压缩无效果，无法恢复，直接抛出
                         raise
                     raise
+
+                # 流式调用成功 → 收尾 generation span（per-call usage 取增量）
+                llm_span.set_attrs({
+                    "gen_ai.usage.input_tokens": total_usage.prompt_tokens - pre_usage[0],
+                    "gen_ai.usage.output_tokens": total_usage.completion_tokens - pre_usage[1],
+                })
+                _reason_delta = total_usage.reasoning_tokens - pre_usage[2]
+                if _reason_delta:
+                    llm_span.set_attr("milu.reasoning_tokens", _reason_delta)
+                if finish_reason_seen:
+                    llm_span.set_attr("gen_ai.response.finish_reasons", [finish_reason_seen])
+                tracer.finish(llm_span)
 
                 # 流式调用成功，重置瞬时错误重试计数器
                 if hasattr(self, '_conn_retry_count'):
@@ -1030,6 +1166,7 @@ class Agent:
                 # 8. 无工具调用 → 结束
                 if not resolved_calls:
                     self.save_session()
+                    run_outcome["status"] = "ok"
                     yield AgentDone(
                         final_text=final_text,
                         total_usage=total_usage,
@@ -1039,6 +1176,7 @@ class Agent:
 
                 # 9. 检查最大轮次
                 if turn_count >= self._config.max_turns:
+                    run_outcome.update(status="error", error_type="max_turns")
                     yield AgentError(
                         error_type="max_turns",
                         message=f"超出最大轮次 {self._config.max_turns}",
@@ -1049,6 +1187,7 @@ class Agent:
                 # ── 10a. 检查工具调用次数上限（提前检查整批）──
                 batch_size = len(resolved_calls)
                 if total_tool_calls + batch_size > self._config.tool_call_limit:
+                    run_outcome.update(status="error", error_type="tool_limit")
                     yield AgentError(
                         error_type="tool_limit",
                         message=f"超出工具调用上限 {self._config.tool_call_limit}",
@@ -1160,16 +1299,42 @@ class Agent:
                         yield SafetyCheckStart(tool_names=tuple(
                             c.get("function", {}).get("name", "") for c in to_judge
                         ))
+                        # guardrail span：记录三态裁决 + 理由 + fail-open 标记——
+                        # 安全判定是最需要"可解释"的环节（fail-open 路径必须可审计）
+                        judge_span = tracer.start("guardrail judge", kind="guardrail")
+                        judge_span.set_attrs({
+                            "milu.judge.tools": [
+                                c.get("function", {}).get("name", "") for c in to_judge
+                            ],
+                            "milu.judge.model": self._extract_model_name(self._judge_llm),
+                            "milu.round": turn_count,
+                        })
                         try:
                             judge_verdicts = await judge_tool_calls(
                                 self._judge_llm, user_input, to_judge,
                                 self._registry, self._judge_rules,
                             )
+                            _id2name = {
+                                c.get("id", ""): c.get("function", {}).get("name", "")
+                                for c in to_judge
+                            }
+                            judge_span.set_attrs({
+                                "milu.judge.fail_open": False,
+                                "milu.judge.verdicts": [
+                                    {"tool": _id2name.get(cid, ""), "id": cid,
+                                     "decision": v.decision, "reason": v.reason}
+                                    for cid, v in judge_verdicts.items()
+                                ],
+                            })
+                            tracer.finish(judge_span)
                         except Exception as e:
                             logger.warning(
                                 "安全判定器调用失败，fail-open 回退为直接执行: %s", e
                             )
                             judge_verdicts = {}
+                            judge_span.set_attr("milu.judge.fail_open", True)
+                            tracer.finish(judge_span, status="error",
+                                          error_type=type(e).__name__)
 
                 # ── 10b. 顺序发出 ToolCallStart + 不安全工具确认 ──
                 confirmed = []
@@ -1251,6 +1416,16 @@ class Agent:
                             if self._confirm_wait_guard
                             else contextlib.nullcontext()
                         )
+                        # 审批等待单独成 span（学 Claude Code blocked_on_user）：
+                        # 把"等人"的时长从工具耗时中剥离，并记录决策
+                        confirm_span = tracer.start(
+                            f"blocked_on_user {tool_name}", kind="confirmation"
+                        )
+                        confirm_span.set_attrs({
+                            "gen_ai.tool.name": tool_name,
+                            "gen_ai.tool.call.id": tool_call_id,
+                            "milu.round": turn_count,
+                        })
                         async with wait_guard:
                             raw_result = await self._on_confirm(tool_name, tool_args)
 
@@ -1261,6 +1436,14 @@ class Agent:
                         else:
                             approved = bool(raw_result)
                             user_message = ""
+
+                        confirm_span.set_attr(
+                            "milu.decision", "approved" if approved else "rejected"
+                        )
+                        _msg_clipped = tracer.clip(user_message) if user_message else None
+                        if _msg_clipped is not None:
+                            confirm_span.set_attr("milu.message", _msg_clipped)
+                        tracer.finish(confirm_span)
 
                         yield ToolConfirmRequired(
                             tool_name=tool_name,
@@ -1301,6 +1484,26 @@ class Agent:
                 if confirmed:
                     async def _execute_one(item):
                         wrapper = item["wrapper"]
+                        # tool span：每个并发调用一个；在本 gather 任务的 Context 中
+                        # 设为当前活动 span → 子代理的 invoke_agent 自动嵌套其下
+                        tool_span = tracer.start(
+                            f"execute_tool {item['tool_name']}", kind="tool"
+                        )
+                        tool_span.set_attrs({
+                            "gen_ai.tool.name": item["tool_name"],
+                            "gen_ai.tool.call.id": item["tool_call_id"],
+                            "gen_ai.tool.type": "function",
+                            "milu.round": turn_count,
+                        })
+                        _args_clipped = tracer.clip(
+                            item["call"].get("function", {}).get("arguments", "")
+                        )
+                        if _args_clipped is not None:
+                            tool_span.set_attr("gen_ai.tool.call.arguments", _args_clipped)
+                        span_token = (
+                            _current_trace_span.set(tool_span)
+                            if tracer.enabled else None
+                        )
                         # v2: subagent 工具注入 per-call events 列表（替代 _last_events 闭包）
                         per_call_events: list[AgentEvent] = []
                         events_token = None
@@ -1311,6 +1514,12 @@ class Agent:
                         finally:
                             if events_token is not None:
                                 _current_subagent_events.reset(events_token)
+                            if span_token is not None:
+                                _current_trace_span.reset(span_token)
+                        tool_span.set_attr("milu.output_len", len(result.output or ""))
+                        tracer.finish(
+                            tool_span, status="error" if result.is_error else "ok"
+                        )
                         return item, result, per_call_events
 
                     results = await asyncio.gather(
@@ -1383,6 +1592,40 @@ class Agent:
                 # 11. 继续循环，LLM 将看到工具结果
 
         finally:
+            # ── 追踪收尾：正常结束 / 错误 / 消费者提前断开统一落盘（fail-silent）──
+            try:
+                if tracer.enabled:
+                    _status = run_outcome["status"]
+                    _err_type = run_outcome["error_type"]
+                    if _status == "interrupted" and sys.exc_info()[0] is not None:
+                        _status = "error"
+                        _err_type = sys.exc_info()[0].__name__
+                    # 根 span 聚合：本 Agent 自身 LLM 调用累计（与 AgentDone 口径一致；
+                    # 全树合计含子代理由 RunReport 按 generation span 求和）
+                    run_span.set_attrs({
+                        "gen_ai.usage.input_tokens": total_usage.prompt_tokens,
+                        "gen_ai.usage.output_tokens": total_usage.completion_tokens,
+                        "milu.turn_count": turn_count,
+                        "milu.tool_calls": total_tool_calls,
+                    })
+                    if total_usage.reasoning_tokens:
+                        run_span.set_attr(
+                            "milu.reasoning_tokens", total_usage.reasoning_tokens
+                        )
+                    tracer.finish(run_span, status=_status, error_type=_err_type)
+                    if is_trace_owner and tracer.config.runs_index:
+                        from milu.observability import append_run_index, build_run_report
+                        append_run_index(build_run_report(
+                            tracer, run_span,
+                            user_id=tracer.config.user_id,
+                            trace_path=tracer.trace_path,
+                        ))
+            except Exception as _trace_err:
+                logger.warning("追踪收尾失败（已忽略）: %s", _trace_err)
+            if tracer_token is not None:
+                _safe_reset(_current_tracer, tracer_token)
+            if run_span_token is not None:
+                _safe_reset(_current_trace_span, run_span_token)
             if session_token is not None:
                 _safe_reset(_current_todo_session_dir, session_token)
             if plan_items_token is not None:

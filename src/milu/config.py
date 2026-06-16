@@ -67,6 +67,10 @@ _KNOWLEDGE_KEYS = (
     "chunk_size", "chunk_overlap", "top_k", "min_score",
     "auto_retrieve", "auto_top_k", "auto_min_score", "batch_size",
 )
+# observability 分节暴露的可调字段（TraceConfig 子集：enabled 是应用层开关、
+# user_id 为运行时身份、runs_index/extra_sinks 为程序化参数，均不入 config.json；
+# price_table 为嵌套字典单独处理）
+_OBSERVABILITY_KEYS = ("capture_content", "max_content_chars", "retention_days")
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 _FALSY = {"0", "false", "no", "off", "n"}
@@ -79,12 +83,14 @@ def _builtin_defaults() -> dict:
     """基线默认配置：全部从现有 dataclass 派生，默认值不在此重复定义。"""
     from milu.agent.config import AgentConfig, CompactConfig
     from milu.knowledge.config import KnowledgeConfig
+    from milu.observability import TraceConfig
     from milu.scheduler.engine import SchedulerConfig
     from milu.serving.pool import AgentPoolConfig
 
     pool_defaults = AgentPoolConfig()
     scheduler_defaults = SchedulerConfig()
     knowledge_defaults = KnowledgeConfig()
+    trace_defaults = TraceConfig()
     return {
         "agent": {
             "mode": "auto",
@@ -111,6 +117,16 @@ def _builtin_defaults() -> dict:
             # 未入库用户无成本；真正入库者已配好 embedding key 方能 kb_ingest。
             "enabled": True,
             **{k: getattr(knowledge_defaults, k) for k in _KNOWLEDGE_KEYS},
+        },
+        "observability": {
+            # enabled 是应用层开关（CLI/服务入口据此决定是否给 Agent 传 trace），
+            # 类比 knowledge.enabled；库内直接构造 Agent 默认关闭（hermetic）。
+            # 默认开：仅本地落盘（trace.jsonl + runs.jsonl），数据不出本机。
+            "enabled": True,
+            **{k: getattr(trace_defaults, k) for k in _OBSERVABILITY_KEYS},
+            # 模型价格表覆盖（每百万 token 单价；用户表优先于内置示例表），如
+            # {"deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY"}}
+            "price_table": {},
         },
         "security": {
             "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
@@ -209,6 +225,10 @@ class MiluConfig:
         return self.data.get("knowledge", {})
 
     @property
+    def observability(self) -> dict:
+        return self.data.get("observability", {})
+
+    @property
     def security(self) -> dict:
         return self.data.get("security", {})
 
@@ -248,6 +268,11 @@ class MiluConfig:
         """构造 KnowledgeConfig（knowledge.enabled 开关由调用方自行判断）。"""
         from milu.knowledge.config import KnowledgeConfig
         return KnowledgeConfig.from_mapping(self.knowledge, user_id=user_id)
+
+    def to_trace_config(self, user_id: str | None = None):
+        """构造 TraceConfig（observability.enabled 开关由调用方自行判断）。"""
+        from milu.observability import TraceConfig
+        return TraceConfig.from_mapping(self.observability, user_id=user_id)
 
     # ── dotted 读取 ──────────────────────────────────────
     def get(self, dotted: str):

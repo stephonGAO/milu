@@ -337,6 +337,22 @@
   @media (prefers-reduced-motion: reduce){
     *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
   }
+  /* ── 观测面板 ── */
+  .obs-cards{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+  .obs-card{background:var(--panel2,rgba(127,127,127,.08));border:1px solid var(--line,rgba(127,127,127,.2));border-radius:8px;padding:8px 10px}
+  .obs-card b{display:block;font-size:16px;margin-top:2px}
+  .obs-card span{font-size:11px;color:var(--dim)}
+  .obs-run{border:1px solid var(--line,rgba(127,127,127,.2));border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer;font-size:12px;line-height:1.7}
+  .obs-run:hover{border-color:var(--acc,#4f8cff)}
+  .obs-run .tid{font-family:monospace;color:var(--acc,#4f8cff)}
+  .obs-ok{color:#3bbf7a}.obs-err{color:#e2566a}.obs-int{color:#e0a800}
+  .obs-row{margin-bottom:7px;font-size:11.5px;line-height:1.5}
+  .obs-row .lbl{display:flex;justify-content:space-between;gap:6px}
+  .obs-row .lbl em{font-style:normal;color:var(--dim);white-space:nowrap}
+  .obs-track{height:8px;background:var(--panel2,rgba(127,127,127,.10));border-radius:4px;position:relative;margin-top:2px}
+  .obs-seg{position:absolute;top:0;height:100%;border-radius:4px;min-width:2px}
+  .obs-detail{font-size:11px;color:var(--dim);margin:2px 0 0;white-space:pre-wrap;word-break:break-all}
+  .obs-failopen{color:#e2566a;font-size:12px;margin:6px 0}
 </style>
 </head>
 <body>
@@ -366,6 +382,7 @@
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
   <symbol id="i-inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
 </defs></svg>
 
 <header>
@@ -387,6 +404,7 @@
       <button class="tab" data-tab="sess" role="tab" aria-selected="false"><svg class="ic"><use href="#i-sessions"/></svg><span data-i18n="tab.sess">会话</span></button>
       <button class="tab" data-tab="sched" role="tab" aria-selected="false"><svg class="ic"><use href="#i-clock"/></svg><span data-i18n="tab.sched">定时任务</span></button>
       <button class="tab" data-tab="kb" role="tab" aria-selected="false"><svg class="ic"><use href="#i-database"/></svg><span data-i18n="tab.kb">知识库</span></button>
+      <button class="tab" data-tab="obs" role="tab" aria-selected="false"><svg class="ic"><use href="#i-pulse"/></svg><span data-i18n="tab.obs">观测</span></button>
       <button class="tab" data-tab="info" role="tab" aria-selected="false"><svg class="ic"><use href="#i-info"/></svg><span data-i18n="tab.info">信息</span></button>
     </div>
     <div class="tabwrap">
@@ -481,6 +499,17 @@
         <div id="kbList"></div>
       </div>
 
+      <!-- 观测（运行追踪）-->
+      <div class="tabpane" id="tab-obs" role="tabpanel">
+        <div class="obs-cards" id="obsCards"></div>
+        <div class="actions" style="margin:10px 0 8px">
+          <button class="btn sm sec" id="obsReload" data-i18n="obs.reload">刷新</button>
+        </div>
+        <div id="obsBox"><p class="empty"><svg class="ic"><use href="#i-pulse"/></svg><span data-i18n="obs.empty">暂无运行记录，发一条消息即有</span></p></div>
+        <p class="hint" data-i18n="obs.hint">每次对话产生一条运行记录（trace）。点击运行查看瀑布图：
+          LLM 调用 / 工具 / 安全判定 / 审批等待逐段耗时、token 与判定理由。数据仅存本机 ~/.milu。</p>
+      </div>
+
       <!-- 信息 -->
       <div class="tabpane" id="tab-info" role="tabpanel">
         <div class="actions" style="margin-bottom:12px">
@@ -549,7 +578,11 @@ const I18N={
   zh:{
     "menu.toggle":"隐藏/显示侧栏","brand.sub":"Agent 服务","field.user":"用户标识","field.session":"会话标识",
     "aria.uid":"用户 ID","aria.sid":"会话 ID","stat.title":"资源池状态","lang.toggle":"切换语言 / Switch language",
-    "tab.set":"设置","tab.sess":"会话","tab.sched":"定时任务","tab.kb":"知识库","tab.info":"信息",
+    "tab.set":"设置","tab.sess":"会话","tab.sched":"定时任务","tab.kb":"知识库","tab.info":"信息","tab.obs":"观测",
+    "obs.reload":"刷新","obs.empty":"暂无运行记录，发一条消息即有","obs.back":"← 返回列表",
+    "obs.hint":"每次对话产生一条运行记录（trace）。点击运行查看瀑布图：LLM 调用 / 工具 / 安全判定 / 审批等待逐段耗时、token 与判定理由。数据仅存本机 ~/.milu。",
+    "obs.runs":"运行","obs.okrate":"成功","obs.tokens":"tokens (in→out)","obs.cost":"成本(估算)","obs.p50":"p50 耗时","obs.failopen":"判定 fail-open",
+    "obs.turns":"{0} 轮 / {1} 工具","obs.wait":"等待","obs.failopen.warn":"⚠ 发生 {0} 次安全判定 fail-open（判定失败放行）","obs.nodata":"trace 文件缺失","obs.loadfail":"观测数据加载失败",
     "set.h.model":"模型与模式","set.provider":"厂商 Provider","set.model":"模型 Model（留空用厂商默认）","set.mode":"操作模式 Mode",
     "mode.talk":"talk · 只读","mode.manual":"manual · 人工审批","mode.auto":"auto · 自主（AI 判定兜底）","mode.superwork":"superwork · 全权限",
     "set.websearch":"联网搜索 web_search","set.thinking":"思考模式 thinking","set.subagent":"显示子代理过程 subagent","set.save":"保存并切换",
@@ -598,7 +631,11 @@ const I18N={
   en:{
     "menu.toggle":"Toggle sidebar","brand.sub":"Agent Service","field.user":"User","field.session":"Session",
     "aria.uid":"User ID","aria.sid":"Session ID","stat.title":"Pool status","lang.toggle":"切换语言 / Switch language",
-    "tab.set":"Settings","tab.sess":"Sessions","tab.sched":"Schedule","tab.kb":"Knowledge","tab.info":"Info",
+    "tab.set":"Settings","tab.sess":"Sessions","tab.sched":"Schedule","tab.kb":"Knowledge","tab.info":"Info","tab.obs":"Traces",
+    "obs.reload":"Refresh","obs.empty":"No runs yet — send a message first","obs.back":"← Back to list",
+    "obs.hint":"Each chat turn produces a run record (trace). Click a run to see the waterfall: per-segment latency, tokens and safety-judge reasoning for LLM calls / tools / guardrail / approval waits. Data stays local in ~/.milu.",
+    "obs.runs":"Runs","obs.okrate":"OK","obs.tokens":"tokens (in→out)","obs.cost":"Cost (est.)","obs.p50":"p50 duration","obs.failopen":"judge fail-open",
+    "obs.turns":"{0} turns / {1} tools","obs.wait":"wait","obs.failopen.warn":"⚠ {0} guardrail fail-open(s) — judge failed, calls let through","obs.nodata":"trace file missing","obs.loadfail":"Failed to load trace data",
     "set.h.model":"Model & Mode","set.provider":"Provider","set.model":"Model (blank = provider default)","set.mode":"Mode",
     "mode.talk":"talk · read-only","mode.manual":"manual · approval","mode.auto":"auto · autonomous (AI safety)","mode.superwork":"superwork · full access",
     "set.websearch":"Web search (web_search)","set.thinking":"Thinking mode","set.subagent":"Show subagent steps","set.save":"Save & switch",
@@ -675,6 +712,91 @@ function toast(t,type){const el=$("toast");const ic=type==="success"?"check":typ
   el.className="toast "+(type||"")+" show";el.innerHTML=(ic?icon(ic):"")+"<span>"+esc(t)+"</span>";
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove("show"),2000)}
 
+// ── 观测面板（运行追踪：列表 + 瀑布图）──
+const OBS_COLOR={generation:"#4f8cff",tool:"#e0a800",guardrail:"#b36ae2",confirmation:"#e2566a",compaction:"#3bbf7a",agent:"#8a93a6"};
+function obsMs(v){return v==null?"—":(v<1000?Math.round(v)+"ms":(v/1000).toFixed(1)+"s")}
+function obsTok(i,o){return (i||0).toLocaleString()+"→"+(o||0).toLocaleString()}
+function obsCost(v,cur){if(v==null)return"—";const sym=cur==="CNY"?"¥":cur==="USD"?"$":(cur||"")+" ";return sym+(+v).toFixed(4)}
+function obsStatus(s,et){if(s==="ok")return '<span class="obs-ok">ok</span>';
+  if(s==="interrupted")return '<span class="obs-int">interrupted</span>';
+  return '<span class="obs-err">'+esc(et?("error:"+et):"error")+'</span>'}
+async function loadObs(){
+  try{
+    const s=await(await api("/api/observability/summary")).json();
+    const cost=Object.entries(s.cost||{}).map(([k,v])=>obsCost(v,k)).join(" + ")||"—";
+    $("obsCards").innerHTML=[
+      [tr("obs.runs"),s.runs],[tr("obs.okrate"),s.ok+"/"+s.runs],
+      [tr("obs.tokens"),obsTok(s.input_tokens,s.output_tokens)],[tr("obs.cost"),cost],
+      [tr("obs.p50"),obsMs(s.p50_ms)],[tr("obs.failopen"),s.fail_opens||0],
+    ].map(([k,v])=>'<div class="obs-card"><span>'+esc(String(k))+'</span><b>'+esc(String(v))+'</b></div>').join("");
+    const d=await(await api("/api/traces?limit=20")).json();
+    renderObsList(d.runs||[]);
+  }catch(e){toast(tr("obs.loadfail"),"error")}
+}
+function renderObsList(runs){
+  const box=$("obsBox");
+  if(!runs.length){box.innerHTML='<p class="empty">'+icon("pulse")+'<span>'+esc(tr("obs.empty"))+'</span></p>';return}
+  box.innerHTML=runs.map(r=>{
+    const t=new Date((r.started_at||0)*1000).toLocaleString();
+    return '<div class="obs-run" onclick="showTrace(\''+esc(r.trace_id)+'\')">'
+      +'<span class="tid">'+esc(r.trace_id.slice(0,12))+'</span> · <span class="dim">'+esc(t)+'</span><br>'
+      +esc((r.provider||"?")+"/"+(r.model||"?"))+' · '+obsStatus(r.status,r.error_type)+' · '+obsMs(r.duration_ms)
+      +' · '+obsTok(r.input_tokens,r.output_tokens)+' tok · '+obsCost(r.cost_estimate,r.cost_currency)
+      +' · '+esc(tr("obs.turns",r.turn_count||0,r.tool_calls||0))
+      +'</div>'}).join("");
+}
+function obsSpanMeta(sp){
+  const a=sp.attributes||{},k=sp.kind;
+  if(k==="generation"){const ttfc=a["gen_ai.response.time_to_first_chunk"];
+    return obsTok(a["gen_ai.usage.input_tokens"],a["gen_ai.usage.output_tokens"])+" tok"
+      +(ttfc!=null?" · TTFT "+Math.round(ttfc*1000)+"ms":"")}
+  if(k==="tool")return (sp.status==="error"?"err":"ok")+(a["milu.output_len"]!=null?" · "+a["milu.output_len"]+"B":"");
+  if(k==="guardrail"){if(a["milu.judge.fail_open"])return "fail-open";
+    return (a["milu.judge.verdicts"]||[]).map(v=>v.tool+"→"+v.decision).join("; ")}
+  if(k==="confirmation")return tr("obs.wait")+" → "+(a["milu.decision"]||"?");
+  if(k==="compaction")return (a["milu.compact.before"]||"?")+"→"+(a["milu.compact.after"]||"?");
+  return ""
+}
+function obsSpanDetail(sp){
+  const a=sp.attributes||{},k=sp.kind,parts=[];
+  if(k==="guardrail")(a["milu.judge.verdicts"]||[]).forEach(v=>parts.push(v.tool+" → "+v.decision+(v.reason?"（"+v.reason+"）":"")));
+  if(k==="tool"&&a["gen_ai.tool.call.arguments"])parts.push(a["gen_ai.tool.call.arguments"]);
+  if(k==="agent"&&a["milu.user_input"])parts.push(a["milu.user_input"]);
+  if(sp.status==="error"&&a["error.type"])parts.push("error: "+a["error.type"]);
+  return parts.join("\n")
+}
+async function showTrace(tid){
+  let d;try{d=await(await api("/api/trace/"+encodeURIComponent(tid))).json()}catch(e){toast("load failed","error");return}
+  const box=$("obsBox");
+  if(!d.run||!d.spans||!d.spans.length){box.innerHTML='<p class="empty"><span>'+esc(tr("obs.nodata"))+'</span></p>';return}
+  const r=d.run,spans=d.spans;
+  const root=spans.find(s=>s.kind==="agent"&&!s.parent_id)||spans[0];
+  const t0=root.start_time,total=Math.max(root.duration_ms||1,1);
+  // 深度（缩进）按 parent 链计算
+  const byId={};spans.forEach(s=>byId[s.span_id]=s);
+  function depth(s){let n=0,p=s.parent_id;while(p&&byId[p]){n++;p=byId[p].parent_id}return n}
+  let html='<button class="btn sm sec" onclick="loadObs()">'+esc(tr("obs.back"))+'</button>'
+    +'<div class="obs-run" style="cursor:default;margin-top:8px"><span class="tid">'+esc(r.trace_id.slice(0,16))+'</span><br>'
+    +esc((r.provider||"?")+"/"+(r.model||"?"))+' · '+obsStatus(r.status,r.error_type)+' · '+obsMs(r.duration_ms)
+    +' · '+obsTok(r.input_tokens,r.output_tokens)+' tok · '+obsCost(r.cost_estimate,r.cost_currency)+'<br>'
+    +'<span class="dim">LLM '+obsMs(r.llm_time_ms)+' / '+esc(tr("info.tools")||"tools")+' '+obsMs(r.tool_time_ms)
+    +' / judge '+obsMs(r.judge_time_ms)+' / '+esc(tr("obs.wait"))+' '+obsMs(r.wait_time_ms)+'</span></div>';
+  if(r.fail_opens)html+='<p class="obs-failopen">'+esc(tr("obs.failopen.warn",r.fail_opens))+'</p>';
+  spans.slice().sort((a,b)=>(a.start_time||0)-(b.start_time||0)).forEach(sp=>{
+    if(sp===root)return;
+    const off=Math.max(0,Math.min(100,((sp.start_time||t0)-t0)*1000/total*100));
+    const w=Math.max(0.8,Math.min(100-off,(sp.duration_ms||0)/total*100));
+    const color=OBS_COLOR[sp.kind]||"#888";
+    const detail=obsSpanDetail(sp);
+    html+='<div class="obs-row" style="margin-left:'+(Math.min(depth(sp),4)-1)*12+'px">'
+      +'<div class="lbl"><span style="color:'+color+'">'+esc(sp.name||"?")+'</span><em>'+obsMs(sp.duration_ms)+' · '+esc(obsSpanMeta(sp))+'</em></div>'
+      +'<div class="obs-track"><div class="obs-seg" style="left:'+off+'%;width:'+w+'%;background:'+color+'"></div></div>'
+      +(detail?'<div class="obs-detail">'+esc(detail)+'</div>':'')
+      +'</div>'});
+  box.innerHTML=html;
+}
+$("obsReload").onclick=loadObs;
+
 // ── 标签切换 ──
 document.querySelectorAll(".tabs .tab").forEach(b=>b.onclick=()=>{
   document.querySelectorAll(".tabs .tab").forEach(x=>{x.classList.remove("active");x.setAttribute("aria-selected","false")});
@@ -683,6 +805,7 @@ document.querySelectorAll(".tabs .tab").forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==="sess") loadSessions();
   if(b.dataset.tab==="sched"){loadTasks();loadResults()}
   if(b.dataset.tab==="kb") loadKb();
+  if(b.dataset.tab==="obs") loadObs();
 });
 
 // ── 轻量 Markdown 渲染 ──
