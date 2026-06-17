@@ -2,6 +2,32 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [0.2.0] - 2026-06-17
+
+本版本以**可观测性**为主线：让每一次 Agent 运行从黑箱变得可解释、可测量、可比较、可视化（兼容 0.1.x，无破坏性变更）。
+
+### 新增
+
+- **可观测性层（`src/milu/observability/`）**：一次 `Agent.run()` = 一棵 span 树（`invoke_agent` 根 → `chat`/`execute_tool`/`guardrail judge`/`blocked_on_user`/`compact` 子级，子代理整树嵌套）。
+  - **数据模型对齐 OTel GenAI 语义约定 v1.37+**（`gen_ai.provider.name`/`gen_ai.usage.input_tokens` 等新名），milu 私有信息走 `milu.*`；ID 遵循 W3C Trace Context；JSONL 每行带 schema 版本，将来 OTLP 导出零映射。
+  - **落盘**：span 结束即 append——有 session → 会话目录 `trace.jsonl`（与 conversation.jsonl 并排），无 session → `~/.milu/traces/{trace_id}.jsonl`（按 `retention_days` 清理）。
+  - **RunReport 运行索引**：顶层运行结束聚合 token/成本/延迟分解（LLM/工具/判定/审批等待）/工具与判定计数/fail-open/子代理数，**按用户分文件** `~/.milu/runs/{safe_user_id}.jsonl`，各自 LRU 轮转上限（`RUNS_INDEX_MAX_LINES`，默认 5000）防无限增长；旧版单文件自动按 user_id 拆分迁移。
+  - **成本估算双轨制**（`pricing.py`）：token 用真实 usage，单价查表（config `observability.price_table` 最长前缀匹配优先于内置表），查不到 `cost=None` 绝不瞎算。
+  - **可插拔 sink**（`TraceConfig.extra_sinks`）：默认 JSONL 落盘，可追加自定义 sink。
+  - **库默认关闭**（`Agent(trace=False)`，单测 hermetic）；CLI/Web 服务按 config.json `observability` 分节默认开启（仅本地落盘，数据不出本机）。
+  - **CLI 消费端 `milu trace list/show/compare/stats`**：近期运行列表、单次 span 树瀑布、多次对比表、p50/p95 聚合统计。
+  - **Web「观测」面板**：聚合卡片 + 运行列表 + 链路瀑布图（按 span 类型着色，judge 理由直接展示）。
+- 可观测性方案设计教程文档（`docs/`）。
+
+### 修复
+
+- **trace 查看器误显示整会话所有轮次**：会话级 `trace.jsonl` 累积同会话多轮 span（每轮独立 trace_id），查看单次运行须按 trace_id 过滤，否则把历史轮次一并渲染。已在 `load_trace` 与各消费端按 trace_id 过滤。
+- **模型名在 trace 中未被捕获（显示为 `?`）**：根 span 的 `gen_ai.request.model` 此前在部分路径未写入，导致运行列表/成本估算拿不到模型名。已修正。
+
+### 变更
+
+- `config/milu.json` 模板补齐 `observability` 分节（`enabled`/`capture_content`/`max_content_chars`/`retention_days`/`price_table`），与配置体系同步。
+
 ## [0.1.2] - 2026-06-11
 
 ### 变更

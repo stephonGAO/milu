@@ -31,6 +31,8 @@
   20+ 内置工具（文件、Shell、Python、网页抓取/搜索、Office/PDF 文档读取、图片视觉输入）、MCP 协议（stdio/HTTP/SSE）、子代理、技能、会话持久化、上下文自动压缩、长期记忆、RAG 知识库、定时任务，外加一个内置的多用户 Web 服务。
 - 🛡️ **真正的安全模型**<br>
   四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
+- 🔭 **内置可观测性**<br>
+  每次 `Agent.run()` 即一棵 span 树（属性命名对齐 OpenTelemetry GenAI 语义约定）：单次运行的 token / 成本 / 延迟、TTFT、LLM vs 工具 vs 安全判定 vs 审批等待的时间分解、子代理嵌套、fail-open 审计。可经 CLI `milu trace list/show/compare/stats` 查看，或在 Web「观测」面板看单次运行的链路瀑布。
 - 🪶 **薄封装，不造概念**<br>
   直接以 `openai` SDK 为统一 HTTP 客户端，事件以普通 dataclass 流式输出。没有链、没有图、没有需要学习的 DSL。
 
@@ -305,6 +307,7 @@ milu chat -p glm     指定厂商对话
 milu run "..." -q    一次性执行，可管道
 milu serve           多用户 Web 服务 + 演示前端
 milu providers       列出 9 家厂商与 Key 配置状态
+milu trace ...        查看 Agent 运行追踪（list / show / compare / stats）
 milu config ...      分层配置（CLI 参数 > 用户级 > 项目级 > 内置默认）
 milu sessions list   查看历史会话
 milu schedule ...    定时任务管理
@@ -339,7 +342,8 @@ AgentPool（多用户，可选）
        ├─ 安全层        操作模式 · AI 判定器 · 确认流
        ├─ 子代理        researcher / reader / coder（上下文隔离）
        ├─ 提示词与技能  分层 Markdown 提示词 · 技能按需加载
-       └─ 会话          JSONL 持久化 · 压缩快照恢复
+       ├─ 会话          JSONL 持久化 · 压缩快照恢复
+       └─ 可观测性      span 树追踪 · 单次运行成本/延迟 · milu trace
 ```
 </details>
 
@@ -356,7 +360,8 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 
 ## 路线图
 
-- [ ] 可观测性：OpenTelemetry tracing 钩子
+- [x] 可观测性：span 树追踪（对齐 OTel GenAI 语义约定）+ CLI `milu trace`
+- [ ] 多用户观测大屏 + OTLP 导出器
 - [ ] `python_repl` / `shell_command` 的沙箱执行后端
 - [ ] 知识库可插拔 ANN 后端（sqlite-vec），超越暴力余弦
 - [ ] 英文文档集（架构与指南，当前为中文）

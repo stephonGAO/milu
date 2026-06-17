@@ -31,6 +31,8 @@ Most agent frameworks stop at single-user demos, and treat Chinese LLM providers
   20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
 - 🛡️ **A real safety model**<br>
   Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
+- 🔭 **Observability built in**<br>
+  Every `Agent.run()` is a span tree (attribute names aligned with the OpenTelemetry GenAI semantic conventions): per-run tokens / cost / latency, TTFT, time split across LLM vs tools vs safety-judge vs approval-wait, sub-agent nesting, and fail-open audit. Inspect runs from the CLI with `milu trace list/show/compare/stats`, or the per-run waterfall in the web "Observability" panel.
 - 🪶 **Thin by design**<br>
   Built directly on the `openai` SDK as the unified HTTP client. Events stream out as plain dataclasses. No chains, no graphs, no DSL to learn.
 
@@ -305,6 +307,7 @@ milu chat -p glm     chat with a specific provider
 milu run "..." -q    one-shot execution, pipe-friendly
 milu serve           multi-user web service + demo UI
 milu providers       list 9 providers and key status
+milu trace ...        inspect agent runs (list / show / compare / stats)
 milu config ...      layered config (CLI > user > project > defaults)
 milu sessions list   browse saved sessions
 milu schedule ...    manage scheduled tasks
@@ -339,7 +342,8 @@ AgentPool (multi-user, optional)
        ├─ Safety layer     modes · AI judge · confirmation flow
        ├─ Sub-agents       researcher / reader / coder (isolated context)
        ├─ Prompts & skills layered markdown prompts · on-demand skill loading
-       └─ Session          JSONL persistence · compaction snapshots
+       ├─ Session          JSONL persistence · compaction snapshots
+       └─ Observability    span-tree tracing · per-run cost / latency · milu trace
 ```
 </details>
 
@@ -356,7 +360,8 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 
 ## Roadmap
 
-- [ ] Observability: OpenTelemetry tracing hooks
+- [x] Observability: span-tree tracing (OTel GenAI semconv-aligned) + CLI `milu trace`
+- [ ] Multi-user observability dashboard + OTLP exporter
 - [ ] Sandboxed code execution backends for `python_repl` / `shell_command`
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)
