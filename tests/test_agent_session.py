@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from milu.agent import Agent, AgentConfig
-from milu.agent.events import AgentDone, SessionLoaded
+from milu.agent.events import AgentDone
 from milu.agent.session import Session
 from milu.llm.base.message import Message, MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage

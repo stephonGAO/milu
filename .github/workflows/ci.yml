@@ -1,0 +1,46 @@
+name: CI
+
+# PR 与 push 到 main 时自动跑：ruff 静态检查 + 多 Python 版本测试。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支新推送自动取消上一次未完成的运行，省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # 规则集在 pyproject [tool.ruff] 显式声明，ruff 版本漂移不会自动启用新规则
+      - run: pip install "ruff>=0.15"
+      - run: ruff check src/ tests/
+
+  test:
+    name: Test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install (with dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      # 跳过需真实 API Key 的集成测试（mock 单测覆盖核心逻辑）
+      - name: Run unit tests
+        run: pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real_new_providers.py -q

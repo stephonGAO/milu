@@ -175,7 +175,6 @@ def build_run_report(
     gens = [s for s in spans if s.kind == "generation"]
     tools = [s for s in spans if s.kind == "tool"]
     guards = [s for s in spans if s.kind == "guardrail"]
-    waits = [s for s in spans if s.kind == "confirmation"]
     agents = [s for s in spans if s.kind == "agent"]
     top = {k: [s for s in spans if s.parent_id == root_span.span_id and s.kind == k]
            for k in ("generation", "tool", "guardrail", "confirmation")}

@@ -1,6 +1,6 @@
 """测试工具目录元工具 (catalog.py)"""
 import pytest
-from milu.tools import tool, ToolRegistry, ToolWrapper
+from milu.tools import ToolRegistry, ToolWrapper
 from milu.tools.catalog import create_catalog_tools
 
 

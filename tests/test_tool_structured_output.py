@@ -1,6 +1,6 @@
 """测试内置工具 structured_output - 结构化输出解析与验证"""
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from milu.tools.builtin.structured_output import (

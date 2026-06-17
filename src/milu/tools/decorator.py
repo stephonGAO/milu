@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 from milu.tools.schema import generate_schema_from_function

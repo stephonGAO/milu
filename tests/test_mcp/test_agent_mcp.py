@@ -3,7 +3,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from milu import Agent, AgentConfig
+from milu import Agent
 from milu.tools.decorator import ToolWrapper
 
 

@@ -3,7 +3,6 @@
 import pytest
 from milu.llm.providers import ModelRegistry
 from milu.llm.providers.base import BaseLLM, ModelCapabilities
-from milu.llm.base.message import Message
 from milu.llm.base.response import StreamChunk
 
 

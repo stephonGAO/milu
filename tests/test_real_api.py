@@ -16,7 +16,6 @@ import base64
 import json
 import os
 import sys
-import traceback
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -84,7 +83,7 @@ def excel_to_text(path: str, max_rows: int = 30) -> str:
             text_parts.append(f"[工作表: {sheet_name}]")
             for i, row in enumerate(ws.iter_rows(values_only=True)):
                 if i >= max_rows:
-                    text_parts.append(f"... (省略剩余行)")
+                    text_parts.append("... (省略剩余行)")
                     break
                 cells = [str(c) if c is not None else "" for c in row]
                 text_parts.append(" | ".join(cells))

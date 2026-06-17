@@ -29,7 +29,6 @@ import shutil
 import statistics
 import tempfile
 import time
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -258,7 +257,7 @@ async def main() -> None:
     print("\n" + "=" * 64)
     print("  压测结果汇总")
     print("=" * 64)
-    print(f"\n● Phase A（多用户并发吞吐 + 隔离）")
+    print("\n● Phase A（多用户并发吞吐 + 隔离）")
     print(f"    请求总数      : {a['total']}  (成功 {a['ok']} / 失败 {a['err']})")
     print(f"    成功率        : {a['ok'] / a['total'] * 100:.1f}%")
     print(f"    总耗时        : {a['wall']:.2f}s")
@@ -271,24 +270,24 @@ async def main() -> None:
     if a["errors"]:
         print(f"    失败样例      : {a['errors']}")
 
-    print(f"\n● Phase B（同会话并发串行化 / P0-1）")
+    print("\n● Phase B（同会话并发串行化 / P0-1）")
     print(f"    并发请求      : {b['fired']}  (成功 {b['ok']})")
     print(f"    history 用户消息: {b['history_user_msgs']}  (互异 {b['distinct']})")
     print(f"    完整无污染    : {'✅ 是' if b['intact'] else '❌ 否'}  （期望 = {b['fired']} 条且互异）")
 
-    print(f"\n● Phase C（背压 / P3）")
+    print("\n● Phase C（背压 / P3）")
     print(f"    瞬时并发      : {c['fired']}")
     print(f"    成功          : {c['ok']}")
     print(f"    被拒(PoolBusy): {c['rejected']}  (池计数 rejected_busy={c['rejected_busy_stat']})")
     print(f"    其它错误      : {c['other_err']}")
     print(f"    优雅降级      : {'✅ 是' if c['other_err'] == 0 and (c['ok'] + c['rejected'] == c['fired']) else '⚠️ 见上'}")
 
-    print(f"\n● AgentPool 不变量")
+    print("\n● AgentPool 不变量")
     print(f"    违例          : {len(inv_violations)}  （期望 0）")
     for v in inv_violations:
         print(f"      - {v}")
 
-    print(f"\n● Phase A 结束时池指标快照")
+    print("\n● Phase A 结束时池指标快照")
     for k in ("created", "reused", "hit_rate", "completed_runs", "evicted_lru",
               "evicted_idle", "in_flight", "waiting", "rejected_busy",
               "rejected_full", "run_p50_ms", "run_p95_ms", "active_entries"):

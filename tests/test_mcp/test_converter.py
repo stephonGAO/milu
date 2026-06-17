@@ -1,6 +1,6 @@
 """测试 MCP Tool → ToolWrapper 转换器"""
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 from milu.tools.mcp.converter import convert_mcp_tool, _convert_result

@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from milu.agent import Agent, AgentConfig
-from milu.agent.events import TextDelta, AgentDone
+from milu.agent import Agent
+from milu.agent.events import AgentDone
 from milu.llm.base.message import MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.serving import AgentPool, AgentPoolConfig
@@ -89,7 +89,7 @@ async def test_pool_isolates_concurrent_users_under_load(capsys):
         contaminated = [(uid, n) for uid, done, n in results if n > 0]
         failed = [uid for uid, done, _ in results if not done]
 
-        print(f"\n[Pool隔离测试] 20 个用户并发:")
+        print("\n[Pool隔离测试] 20 个用户并发:")
         print(f"  完成: {sum(1 for _, d, _ in results if d)}/20")
         print(f"  历史污染: {len(contaminated)}/20 (期望 0)")
         print(f"  创建 Agent: {pool.get_stats()['created']}")

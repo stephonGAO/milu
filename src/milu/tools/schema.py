@@ -3,19 +3,19 @@ from __future__ import annotations
 
 import inspect
 import re
-from typing import get_type_hints, get_origin, get_args, Literal, Optional
+from typing import get_type_hints, get_origin, get_args, Literal
 
 
 def python_type_to_json_schema(py_type) -> dict:
     """将 Python 类型注解转为 JSON Schema 类型"""
-    # 基础类型
-    if py_type == str:
+    # 基础类型（类型对象用 is 比较身份，而非 ==）
+    if py_type is str:
         return {"type": "string"}
-    elif py_type == int:
+    elif py_type is int:
         return {"type": "integer"}
-    elif py_type == float:
+    elif py_type is float:
         return {"type": "number"}
-    elif py_type == bool:
+    elif py_type is bool:
         return {"type": "boolean"}
 
     # 泛型类型
@@ -38,7 +38,7 @@ def python_type_to_json_schema(py_type) -> dict:
         return {"type": "array"}
 
     # dict
-    if origin is dict or py_type == dict:
+    if origin is dict or py_type is dict:
         return {"type": "object"}
 
     return {"type": "string"}

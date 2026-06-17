@@ -1,8 +1,6 @@
 """测试内置工具 web_search - 网页搜索（ddgs）"""
-import json
 from unittest.mock import AsyncMock, patch, MagicMock
 
-import httpx
 import pytest
 from milu.tools.builtin.web_search import web_search
 

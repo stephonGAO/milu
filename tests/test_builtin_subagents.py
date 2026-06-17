@@ -21,7 +21,7 @@ from milu.agent.subagent import (
 from milu.agent.events import ConfirmResponse
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.resources import builtin_prompts_dir
-from milu.serving import AgentPool, AgentPoolConfig
+from milu.serving import AgentPool
 from milu.tools.decorator import tool
 
 

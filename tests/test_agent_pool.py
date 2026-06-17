@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from milu.agent import Agent, AgentConfig
+from milu.agent import Agent
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.serving import AgentPool, AgentPoolConfig
 

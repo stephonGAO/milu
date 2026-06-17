@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from milu.agent import Agent, AgentConfig
+from milu.agent import Agent
 from milu.agent.events import AgentDone
 from milu.llm.base.response import StreamChunk, TokenUsage
 
@@ -50,7 +50,6 @@ async def test_usage_aggregated_from_trailing_chunk():
 @pytest.mark.asyncio
 async def test_usage_summed_across_tool_turns():
     """多轮（工具调用后再回复）应累加各轮 usage。"""
-    import json
     call = 0
 
     async def chat(messages, **kwargs):

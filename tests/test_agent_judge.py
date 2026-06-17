@@ -69,7 +69,7 @@ def _make_broken_judge_llm():
     """判定 LLM mock：调用即抛异常（验证 fail-open）。"""
     async def chat(messages, **kwargs):
         raise RuntimeError("judge 服务不可用")
-        yield  # noqa: 使其成为 async generator
+        yield  # 使其成为 async generator（raise 已不可达，仅用于声明生成器）
 
     llm = AsyncMock()
     llm.chat = chat

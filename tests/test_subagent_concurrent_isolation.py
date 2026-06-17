@@ -14,7 +14,6 @@ import pytest
 from milu.agent.agent import Agent
 from milu.agent.config import AgentConfig
 from milu.agent.events import (
-    AgentDone,
     AgentEvent,
     SubAgentDone,
 )

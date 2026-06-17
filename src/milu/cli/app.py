@@ -34,7 +34,6 @@ from milu.llm.providers import ModelRegistry
 
 from milu.config import load_config, set_user_value, write_project_template
 from milu.cli.config import (
-    DEFAULT_MODELS,
     DEFAULT_PROVIDER,
     env_key_name,
     resolve_settings,

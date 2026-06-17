@@ -1,12 +1,10 @@
 """测试非安全工具确认机制（MANUAL 人工审批模式，原 AUTO 行为）"""
 import pytest
 from unittest.mock import AsyncMock
-from milu.agent import Agent, AgentConfig
+from milu.agent import Agent
 from milu.agent.events import (
-    ToolCallStart,
     ToolConfirmRequired,
     ToolResult,
-    AgentDone,
 )
 from milu.llm.base.response import StreamChunk
 from milu.tools import tool

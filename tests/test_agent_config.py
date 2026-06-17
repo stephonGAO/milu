@@ -1,7 +1,6 @@
 """测试 AgentConfig 和 CompactConfig"""
 from unittest.mock import AsyncMock
 
-import pytest
 from milu.agent import Agent, AgentMode
 from milu.agent.config import AgentConfig, CompactConfig
 

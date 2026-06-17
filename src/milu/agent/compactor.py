@@ -35,7 +35,6 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from milu.agent.events import HistoryCompacted
 from milu.llm.base.message import Message, MessageRole
 from milu.tools.decorator import tool
 

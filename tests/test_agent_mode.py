@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 from milu.agent import Agent, AgentConfig
 from milu.agent.config import AgentMode
 from milu.agent.events import (
-    ToolCallStart, ToolResult, AgentDone, AgentError,
+    ToolResult, AgentDone,
 )
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.tools import tool

@@ -6,7 +6,6 @@ runs.jsonl 与 traces/ 散件均落在隔离目录。
 """
 import asyncio
 import json
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest

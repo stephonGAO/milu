@@ -1,5 +1,4 @@
 """测试 Agent 相关异常类"""
-import pytest
 from milu.exceptions import MiluError
 from milu.agent.exceptions import (
     AgentLoopError,

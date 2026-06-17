@@ -1,5 +1,5 @@
 """测试 MCPManager 多服务器编排"""
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from milu.tools.mcp.config import MCPServerConfig

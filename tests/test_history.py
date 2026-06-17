@@ -1,5 +1,4 @@
 """测试 ConversationHistory"""
-import pytest
 from milu.llm.base.message import Message, MessageRole
 from milu.agent.history import ConversationHistory
 

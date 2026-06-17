@@ -22,7 +22,6 @@ from milu.agent.session import Session
 from milu.llm.base.message import Message, MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.llm.base.vision import (
-    IMAGE_MIME_TYPES,
     build_user_content,
     encode_image_data_url,
     image_mime_type,

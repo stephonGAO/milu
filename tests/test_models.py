@@ -1,6 +1,5 @@
 """测试数据模型：Message, StreamChunk, TokenUsage, Config"""
 
-import pytest
 from milu.llm.base.message import Message, MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.llm.base.config import (

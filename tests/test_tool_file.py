@@ -1,8 +1,6 @@
 """测试内置工具 file - 统一文件系统操作（9 种 action）"""
 import json
 import os
-import re
-import time
 
 import pytest
 from milu.tools.builtin.file_tool import file_read, file_write

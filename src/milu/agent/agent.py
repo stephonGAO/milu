@@ -13,11 +13,12 @@ from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, Union
 
 if TYPE_CHECKING:
     from milu.tools.mcp.manager import MCPManager
+    from milu.skills.registry import SkillRegistry
 
 import os
 
 from milu.agent.config import AgentConfig, AgentMode
-from milu.tools.executor import ToolExecutor, ToolExecutionResult
+from milu.tools.executor import ToolExecutor
 from milu.agent.history import ConversationHistory, repair_tool_call_sequence
 from milu.agent.events import (
     AgentDone,
@@ -27,7 +28,6 @@ from milu.agent.events import (
     HistoryCompacted,
     ReasoningDelta,
     SafetyCheckStart,
-    SessionLoaded,
     SubAgentDone,
     SubAgentEvent,
     TextDelta,
@@ -37,7 +37,7 @@ from milu.agent.events import (
     ToolResult,
 )
 from milu.llm.base.message import Message, MessageRole
-from milu.llm.base.response import StreamChunk, TokenUsage
+from milu.llm.base.response import TokenUsage
 from milu.llm.providers.base import BaseLLM
 from milu.observability import (
     NOOP_TRACER,

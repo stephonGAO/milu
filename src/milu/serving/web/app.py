@@ -49,7 +49,6 @@ from milu.agent.events import (
     ConfirmResponse,
     SubAgentDone,
     SubAgentEvent,
-    ToolConfirmRequired,
 )
 from milu.cli.config import DEFAULT_MODELS, DEFAULT_PROVIDER, env_key_name
 from milu.exceptions import content_safety_hint

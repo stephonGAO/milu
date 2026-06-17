@@ -2,7 +2,7 @@
 import pytest
 from milu.tools import tool, ToolRegistry
 from milu.agent.config import AgentConfig
-from milu.tools.executor import ToolExecutor, ToolExecutionResult
+from milu.tools.executor import ToolExecutor
 
 
 @pytest.fixture

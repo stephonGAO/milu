@@ -1,9 +1,8 @@
 """Agent 端到端集成测试（需要真实 API Key）"""
-import asyncio
 import os
 import pytest
 
-from milu import Agent, AgentConfig, TextDelta, ToolCallStart, ToolResult, AgentDone
+from milu import Agent, AgentConfig, ToolCallStart, ToolResult, AgentDone
 from milu.llm.providers import ModelRegistry
 from milu.tools import tool
 

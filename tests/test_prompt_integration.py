@@ -5,7 +5,7 @@ import tempfile
 import pytest
 from unittest.mock import AsyncMock
 
-from milu.agent import Agent, AgentConfig
+from milu.agent import Agent
 from milu.agent.events import AgentDone
 from milu.agent.subagent import SubAgentConfig, _current_subagent_events, create_subagent_tools
 from milu.llm.base.response import StreamChunk, TokenUsage

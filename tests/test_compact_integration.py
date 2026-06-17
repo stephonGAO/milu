@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 from milu.agent import Agent, AgentConfig
 from milu.agent.events import (
-    AgentDone, AgentError, HistoryCompacted, TextDelta,
+    HistoryCompacted, TextDelta,
 )
 from milu.agent.compactor import Compactor
 from milu.agent.config import CompactConfig

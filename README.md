@@ -7,6 +7,7 @@
 Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler
 
 [![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
+[![CI](https://github.com/stephonGAO/milu/actions/workflows/ci.yml/badge.svg)](https://github.com/stephonGAO/milu/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)

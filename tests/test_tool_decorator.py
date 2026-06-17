@@ -1,5 +1,4 @@
 """测试 @tool 装饰器和 schema 生成"""
-import pytest
 from milu.tools import tool
 from milu.tools.decorator import ToolWrapper
 

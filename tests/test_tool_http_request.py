@@ -1,5 +1,4 @@
 """测试内置工具 http_request - HTTP GET/POST 请求"""
-import json
 from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest

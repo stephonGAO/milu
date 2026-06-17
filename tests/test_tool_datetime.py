@@ -1,6 +1,5 @@
 """测试内置工具 datetime_tool - 日期时间查询与转换"""
 import json
-from datetime import datetime
 
 import pytest
 from milu.tools.builtin.datetime_tool import datetime_tool, get_current_time

@@ -61,6 +61,7 @@ ddg = [
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
+    "ruff>=0.15",
 ]
 
 [project.urls]
@@ -96,3 +97,21 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100          # 仅 formatter 用；E501 未启用，不强制行宽（含大量中文长行）
+
+[tool.ruff.lint]
+# 首次接入聚焦「真实问题」：pyflakes(F) + 关键 pycodestyle(E4/E7/E9)——
+# 未用导入/变量、未定义名、坏 f-string、语法/缩进类错误。暂不引入会大面积
+# 改写的风格规则（行宽 E501、import 排序 I 等），降低噪声与历史污染。
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E402",  # 模块级导入不在文件顶部——milu 大量「延迟/条件导入」（可选依赖守卫、
+             # 规避循环导入、按需加载）属有意设计，不强制上移
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]   # 包导出（re-export）+ provider 经导入自注册的副作用
+"tests/**" = ["F841"]      # 测试中偶有未用的中间变量/夹具占位，不影响断言

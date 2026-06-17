@@ -15,12 +15,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from milu.agent import Agent, AgentConfig
+from milu.agent import Agent
 from milu.agent.events import (
-    AgentDone, AgentError, SubAgentDone, SubAgentEvent, TextDelta, ToolResult,
+    SubAgentDone, SubAgentEvent,
 )
 from milu.agent.subagent import SubAgentConfig, create_subagent_tools
-from milu.llm.base.message import Message, MessageRole
+from milu.llm.base.message import MessageRole
 from milu.llm.base.response import StreamChunk, TokenUsage
 from milu.tools import tool
 
@@ -237,7 +237,7 @@ async def test_session_jsonl_concurrent_writes_corruption(tmp_path: Path, capsys
 
     # 读回检查
     raw = sess.conversation_path.read_text(encoding="utf-8")
-    lines = [l for l in raw.splitlines() if l.strip()]
+    lines = [ln for ln in raw.splitlines() if ln.strip()]
 
     valid = 0
     corrupt = 0

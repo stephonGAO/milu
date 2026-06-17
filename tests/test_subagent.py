@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from milu.agent import Agent, AgentConfig
 from milu.agent.events import (
-    AgentDone, AgentError, TextDelta, ToolCallStart, ToolResult,
+    AgentDone, TextDelta, ToolCallStart, ToolResult,
     SubAgentEvent, SubAgentDone,
 )
 from milu.agent.subagent import (
