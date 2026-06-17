@@ -42,5 +42,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       # 跳过需真实 API Key 的集成测试（mock 单测覆盖核心逻辑）
+      # 用 python -m pytest（而非裸 pytest）：-m 会把 CWD 加入 sys.path，使 8 个
+      # provider 测试的 `from tests.conftest import ...` 能解析（与本地命令一致）
       - name: Run unit tests
-        run: pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real_new_providers.py -q
+        run: python -m pytest tests/ --ignore=tests/test_real_api.py --ignore=tests/test_real_new_providers.py -q
