@@ -460,6 +460,28 @@ class AgentPool:
             "runs_sampled": len(durations),
         }
 
+    def list_active_sessions(self) -> list[dict[str, Any]]:
+        """当前池内的活跃 (user_id, session_id) 实例快照（监控/大屏用）。
+
+        只读瞬时态，不加锁（单线程事件循环内遍历安全）：返回每个在池实例的
+        归属用户/会话、空闲秒数、当前占用协程数、是否已连 MCP、运行模式。
+        按空闲时长升序（最近活跃在前）。
+        """
+        now = time.monotonic()
+        out: list[dict[str, Any]] = []
+        for entry in self._entries.values():
+            mode = getattr(entry.agent, "mode", None)
+            out.append({
+                "user_id": entry.user_id,
+                "session_id": entry.session_id,
+                "idle_seconds": round(max(0.0, now - entry.last_used), 1),
+                "active_count": entry.active_count,
+                "mcp_connected": getattr(entry.agent, "_mcp_manager", None) is not None,
+                "mode": mode.value if hasattr(mode, "value") else (str(mode) if mode else None),
+            })
+        out.sort(key=lambda e: e["idle_seconds"])
+        return out
+
     @asynccontextmanager
     async def acquire(
         self,

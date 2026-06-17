@@ -121,6 +121,12 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **定时任务结果提醒**：服务端 `notify=False`（无桌面弹窗），前端全局轮询 `/api/schedule/results`（15s），新结果插入聊天区系统行 + toast、任务面板自动刷新（首轮只记游标不回放历史）；run_at 输入用 `datetime-local` 控件防格式错
 - **知识库管理端点**（`/api/knowledge*`，按 X-User-Id 隔离库）：`GET /api/knowledge`（生效设置 + 统计 + 来源清单）、`POST /api/knowledge/settings`（切换 enabled/auto_retrieve → 写 per-(user,session) 偏好 `kb_enabled`/`kb_auto_retrieve` + `pool.remove` 驱逐重建，knowledge 为 Agent 构造期参数必须重建）、`POST /api/knowledge/ingest`（文本 text+source 或文件 filename+content_base64，复用 kb_ingest 工具完整链路——经 ContextVar 注入临时 KnowledgeRuntime，文件落临时目录入库后清理，避免引入 python-multipart 依赖）、`POST /api/knowledge/action`（delete 按来源 / clear 清空）。生效配置 `_kb_effective` = config.json `knowledge` 分节 + 偏好覆盖
 - 前端五面板：设置（厂商下拉含 Key 状态/模型/模式/开关）、会话、定时任务（创建表单 + 启停/删除/立即运行 + 结果轮询）、**知识库（启用/自动检索开关 + 文件多选上传/文本入库 + 来源列表/删除/清空 + 统计）**、信息（工具/技能/记忆/统计）；主区流式渲染（文本/思考/工具/子代理 + 轻量 Markdown）+ 聊天附件（📎/粘贴截图/拖拽）+ 危险工具确认弹窗
+- **观测大屏（数据中心，`src/milu/serving/web/dashboard.py` + `static/dashboard.html`，路由 `/dashboard`）**：与上面**单用户对话 SPA 正交的管理员/运维视角**——**跨所有用户**俯瞰运行指标、资源池、Agent 链路、安全审计、定时任务与每用户数据画像。三块设计：
+  - **鉴权（跨用户读全局数据必须门控）**：`check_admin` 校验 `MILU_ADMIN_TOKEN`（header `X-Admin-Token` / `Authorization: Bearer` / 查询参数 `token`，`secrets.compare_digest` 常量时间比较）；**未设置令牌时默认仅 localhost 可访问**（回环地址判定）。敏感正文（对话/记忆原文）默认不进聚合，仅在显式下钻（trace span 树 / 会话加载）时按需返回——「默认元数据、下钻看正文」
+  - **实时枢纽 `DashboardHub`**：进程级事件枢纽（环形缓冲 + 订阅队列，满则丢最旧保活）。`agent_factory` 给每个 Agent 的 `TraceConfig.extra_sinks` 注入一个 `CallbackSink`（`make_span_sink`），span 完成即 `span_to_event` 压成精简事件推入枢纽；调度 `on_result` 也推入。`/api/dashboard/stream`(SSE) 订阅枢纽广播给大屏。**Agent 核心零改动**，纯增强式埋点（复用既有 `extra_sinks` 机制）
+  - **跨用户聚合**：聚合口径下沉到 `observability/analytics.py`（`summarize_runs`/`group_stats`/`timeseries`/`percentile`，**CLI `trace stats` 与大屏共用一套口径**，杜绝两处漂移）；叠加资源池实时态（新增 `AgentPool.list_active_sessions()` 遍历 `_entries` 出活跃会话快照）+ 会话/记忆/知识库/定时任务的每用户 rollup（`_enumerate_user_ids` 归并各用户级数据目录文件名 = `safe_user_id`；短 TTL 缓存 `_cached` 避免轮询打爆磁盘扫描）
+  - **端点**（全部经 `check_admin`）：`GET /api/dashboard/{overview,pool,users,runs,trace/{id},analytics,audit,scheduler}` + `GET /api/dashboard/stream`(SSE)。trace 端点经 `all_users` 索引定位 `trace_path` 跨用户读 span 树
+  - **前端**：纯 vanilla 暗色科技皮肤（深空蓝底 + 霓虹辉光 + 等宽数字）、**手写轻量 SVG 图表**（面积折线/半圆仪表盘/环形/横向柱状/链路瀑布，零依赖、随 wheel 分发，不引 CDN/图表库）；顶部 9 宫格 KPI + 运行量时序 + 资源池仪表 + 安全审计环形 + 模型成本柱状 + 用户画像表 + 实时事件流 + 活跃会话 + 定时任务 + 近期运行（点击下钻 span 瀑布浮层）。轮询(5~15s) + SSE 实时事件流双通道；`milu serve` 启动横幅打印 `/dashboard` 地址与令牌提示
 - 示例 `examples/multi_user_chat.py` / `examples/scheduler_server.py` 保留作教学（本服务正是其能力的内置化整合）
 
 ### 7. CLI 层 (`src/milu/cli/`)
@@ -154,7 +160,8 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **落盘**（`sink.py`）：span 结束即 append——有 session → `{session_dir}/{id}/trace.jsonl`（与 conversation.jsonl 并排）；无 session → `~/.milu/traces/{trace_id}.jsonl`（`retention_days` 过期清理）。顶层运行结束聚合 `RunReport`（`report.py`）追加运行索引。**索引按用户分文件 `~/.milu/runs/{safe_user_id}.jsonl`**（与 memory/scheduler/knowledge 同款 `{safe_user_id}` 约定，user_id 为 None→default.jsonl；Web 只读自己那份不扫他人，CLI `all_users` 聚合全部）：每份各自 LRU 轮转上限 `RUNS_INDEX_MAX_LINES`（默认 5000，append 后超限即原子重写丢最旧行）——这是唯一全局永久追加的 JSONL，防其无限增长越读越慢；旧版单文件 `~/.milu/runs.jsonl` 首次访问按 user_id 自动拆分迁移（源改名 `.migrated`）。RunReport：token 合计按 generation span 求和**含子代理**，时间分解只算根直接子级避免重复计。Sink 可插拔（`extra_sinks`，Web 实时推送/OTLP 导出器均为一个 sink）
 - **成本估算**（`pricing.py`，学 Langfuse 双轨制）：token 用真实 usage，单价查表——config `observability.price_table`（最长前缀匹配）优先于内置示例表，**查不到 cost=None 绝不瞎算**
 - **应用层开关**：config.json `observability` 分节（`enabled` 默认 **true**，仅本地落盘数据不出本机；`capture_content` full/truncated/none 默认 truncated 截 2000 字）——与 knowledge 同款"库默认关、应用层默认开"约定，CLI `build_agent` / Web `agent_factory` 读配置传 `TraceConfig.from_mapping`
-- **消费端**：CLI `milu trace list/show/compare/stats`（`cli/trace_cmd.py`，树状渲染/对比表/p50/p95 聚合，CJK 宽度对齐用 `_pad`）；Web 三端点 `GET /api/traces`、`/api/trace/{id}`（前缀匹配，按 X-User-Id 过滤防跨用户读取）、`/api/observability/summary` + 前端第六面板「观测」（聚合卡片 + 运行列表 + 瀑布图，纯 CSS 色块按 kind 着色，judge 理由直接展示）
+- **跨运行聚合下沉 `analytics.py`**：`summarize_runs`/`group_stats`/`timeseries`/`percentile` 为纯函数（只吃 RunReport 行、无读盘无副作用），**CLI `trace stats` 与观测大屏共用同一套口径**，避免两处指标漂移
+- **消费端**：① CLI `milu trace list/show/compare/stats`（`cli/trace_cmd.py`，树状渲染/对比表/p50/p95 聚合，CJK 宽度对齐用 `_pad`）；② Web 单用户「观测」面板三端点 `GET /api/traces`、`/api/trace/{id}`（前缀匹配，按 X-User-Id 过滤防跨用户读取）、`/api/observability/summary`（聚合卡片 + 运行列表 + 瀑布图，纯 CSS 色块按 kind 着色，judge 理由直接展示）；③ **跨用户观测大屏**（`/dashboard`，见 §6.5）——管理员视角，经 `MILU_ADMIN_TOKEN` 门控，复用 analytics 口径 + `DashboardHub` 实时 span 推送
 
 ## 关键设计约束（多用户并发 / 无状态化）
 

@@ -264,53 +264,27 @@ def _strip_ansi(s: str) -> str:
 
 # ── stats ─────────────────────────────────────────────────
 
-def _percentile(sorted_vals: list[float], q: float) -> float:
-    if not sorted_vals:
-        return 0.0
-    idx = min(len(sorted_vals) - 1, max(0, round(q * (len(sorted_vals) - 1))))
-    return sorted_vals[idx]
-
-
 def _trace_stats(args) -> int:
+    from milu.observability.analytics import group_stats
+
     rows = load_run_index(limit=0, all_users=True)
     if not rows:
         print(c("dim", t("暂无运行记录")))
         return 0
     by = getattr(args, "by", None) or "model"
-
-    def group_key(r):
-        if by == "provider":
-            return r.get("provider") or "?"
-        if by == "day":
-            return _fmt_time(r.get("started_at"))[:5]
-        return f"{r.get('provider', '?')}/{r.get('model') or '?'}"
-
-    groups: dict[str, list[dict]] = {}
-    for r in rows:
-        groups.setdefault(group_key(r), []).append(r)
-
+    # 与大屏共用同一套聚合口径（group_stats 内部 summarize_runs）
     print(f"{DIVIDER}\n  " + t("运行统计（共 {n} 次，按 {by} 分组）", n=len(rows), by=by)
           + f"\n{DIVIDER}")
-    for key, rs in sorted(groups.items()):
-        durs = sorted(r.get("duration_ms") or 0 for r in rs)
-        ok = sum(1 for r in rs if r.get("status") == "ok")
-        tok_in = sum(r.get("input_tokens", 0) for r in rs)
-        tok_out = sum(r.get("output_tokens", 0) for r in rs)
-        costs: dict[str, float] = {}
-        for r in rs:
-            if r.get("cost_estimate") is not None:
-                cur = r.get("cost_currency") or "?"
-                costs[cur] = costs.get(cur, 0.0) + r["cost_estimate"]
-        cost_str = " + ".join(_fmt_cost(v, k) for k, v in costs.items()) or "—"
-        fail_opens = sum(r.get("fail_opens", 0) for r in rs)
+    for g in group_stats(rows, by):
+        cost_str = " + ".join(_fmt_cost(v, k) for k, v in g["cost"].items()) or "—"
         line = (
-            f"  {_pad(c('cyan', key), 38)} "
-            + t("{n} 次", n=len(rs)) + f"  ok {ok}/{len(rs)}  "
-            f"p50 {_fmt_dur(_percentile(durs, 0.5))}  p95 {_fmt_dur(_percentile(durs, 0.95))}  "
-            f"{_fmt_tokens(tok_in, tok_out)} tok  {cost_str}"
+            f"  {_pad(c('cyan', g['key']), 38)} "
+            + t("{n} 次", n=g["runs"]) + f"  ok {g['ok']}/{g['runs']}  "
+            f"p50 {_fmt_dur(g['p50_ms'])}  p95 {_fmt_dur(g['p95_ms'])}  "
+            f"{_fmt_tokens(g['input_tokens'], g['output_tokens'])} tok  {cost_str}"
         )
-        if fail_opens:
-            line += c("red", f"  fail-open×{fail_opens}")
+        if g["fail_opens"]:
+            line += c("red", f"  fail-open×{g['fail_opens']}")
         print(line)
     return 0
 
