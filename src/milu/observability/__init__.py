@@ -39,6 +39,13 @@ from milu.observability.report import (
     load_trace,
 )
 from milu.observability.pricing import BUILTIN_PRICE_TABLE, estimate_cost, resolve_price
+from milu.observability.analytics import (
+    group_runs,
+    group_stats,
+    percentile,
+    summarize_runs,
+    timeseries,
+)
 
 __all__ = [
     "Span", "SCHEMA_VERSION", "NOOP_SPAN", "new_trace_id", "new_span_id", "clip_content",
@@ -48,4 +55,5 @@ __all__ = [
     "RunReport", "build_run_report", "append_run_index", "load_run_index",
     "load_trace", "cleanup_old_traces",
     "BUILTIN_PRICE_TABLE", "estimate_cost", "resolve_price",
+    "summarize_runs", "group_runs", "group_stats", "timeseries", "percentile",
 ]

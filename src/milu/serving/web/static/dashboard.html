@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="data:,"/>
+<title>MILU · 数据中心</title>
+<style>
+  :root{
+    --bg:#070b16; --bg2:#0a1020; --panel:rgba(15,22,40,.72); --panel2:rgba(20,28,50,.6);
+    --line:rgba(120,160,255,.14); --line2:rgba(120,160,255,.28);
+    --ink:#e6ecff; --dim:#8794b8; --dim2:#5b678a;
+    --cyan:#22d3ee; --brand:#818cf8; --green:#34d399; --amber:#fbbf24;
+    --red:#f87171; --mag:#c084fc; --blue:#4f8cff;
+    --glow:0 0 18px rgba(99,102,241,.28);
+    --k-generation:#4f8cff; --k-tool:#e0a800; --k-guardrail:#b36ae2;
+    --k-confirmation:#e2566a; --k-compaction:#3bbf7a; --k-agent:#8a93a6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 80% -10%, rgba(99,102,241,.16), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(34,211,238,.10), transparent 55%),
+      linear-gradient(180deg,var(--bg),var(--bg2));
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;
+    font-size:13px; overflow-x:hidden;
+  }
+  body::before{ /* 科技网格 */
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),
+                     linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:46px 46px; mask-image:radial-gradient(circle at 50% 30%,#000 30%,transparent 90%);
+    opacity:.5;
+  }
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+  header{
+    position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;
+    padding:12px 22px;backdrop-filter:blur(10px);
+    background:linear-gradient(180deg,rgba(7,11,22,.92),rgba(7,11,22,.5));
+    border-bottom:1px solid var(--line);
+  }
+  .logo{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.5px}
+  .logo .dot{width:11px;height:11px;border-radius:50%;background:var(--cyan);
+    box-shadow:0 0 14px var(--cyan);animation:pulse 2s infinite}
+  .logo b{font-size:17px;background:linear-gradient(90deg,#a5b4fc,#22d3ee);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .logo span{color:var(--dim2);font-weight:600;font-size:12px;letter-spacing:2px}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.8)}}
+  header .spacer{flex:1}
+  .hstat{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:12px}
+  .hstat .live{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green);animation:pulse 1.6s infinite}
+  .hstat .live.off{background:var(--red);box-shadow:0 0 10px var(--red);animation:none}
+  .clock{font-size:15px;font-weight:700;color:#cdd7ff;letter-spacing:1px}
+  .seg{display:flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden}
+  .seg button{background:transparent;color:var(--dim);border:0;padding:5px 11px;cursor:pointer;font-size:12px}
+  .seg button.on{background:rgba(99,102,241,.28);color:#dfe5ff}
+
+  .wrap{position:relative;z-index:1;padding:16px 22px 40px}
+  /* KPI 横条 */
+  .kpis{display:grid;grid-template-columns:repeat(9,1fr);gap:12px;margin-bottom:16px}
+  .kpi{position:relative;padding:13px 14px;border-radius:14px;border:1px solid var(--line);
+    background:linear-gradient(160deg,var(--panel),var(--panel2));overflow:hidden}
+  .kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--brand);box-shadow:var(--glow)}
+  .kpi .lab{color:var(--dim);font-size:11px;letter-spacing:.5px;margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi .val{font-size:24px;font-weight:800;line-height:1;letter-spacing:.5px}
+  .kpi .sub{margin-top:5px;font-size:11px;color:var(--dim2)}
+  .kpi.c-cyan::after{background:var(--cyan);box-shadow:0 0 18px rgba(34,211,238,.3)}
+  .kpi.c-green::after{background:var(--green);box-shadow:0 0 18px rgba(52,211,153,.3)}
+  .kpi.c-amber::after{background:var(--amber);box-shadow:0 0 18px rgba(251,191,36,.3)}
+  .kpi.c-red::after{background:var(--red);box-shadow:0 0 18px rgba(248,113,113,.3)}
+  .kpi.c-mag::after{background:var(--mag);box-shadow:0 0 18px rgba(192,132,252,.3)}
+
+  /* 主网格 */
+  .grid{display:grid;grid-template-columns:2fr 1.15fr;gap:16px}
+  .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .panel{border:1px solid var(--line);border-radius:16px;background:linear-gradient(160deg,var(--panel),var(--panel2));
+    padding:14px 16px;min-width:0}
+  .panel h3{margin:0 0 12px;font-size:13px;font-weight:700;color:#cfd8ff;letter-spacing:.5px;
+    display:flex;align-items:center;gap:8px}
+  .panel h3 .ic{width:6px;height:14px;border-radius:3px;background:linear-gradient(var(--cyan),var(--brand))}
+  .panel h3 .right{margin-left:auto;font-weight:500;color:var(--dim2);font-size:11px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+  /* 实时事件流 */
+  .feed{height:420px;overflow:auto;display:flex;flex-direction:column;gap:5px;font-size:12px}
+  .fitem{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:9px;
+    background:rgba(255,255,255,.018);border:1px solid transparent;animation:slidein .3s ease}
+  .fitem.flash{border-color:var(--line2);background:rgba(99,102,241,.10)}
+  @keyframes slidein{from{opacity:0;transform:translateX(8px)}to{opacity:1}}
+  .fitem .t{color:var(--dim2);font-size:11px;min-width:54px}
+  .fitem .tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;min-width:74px;text-align:center;color:#0a0e1a}
+  .fitem .who{color:var(--cyan);min-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fitem .desc{color:var(--ink);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+  .fitem .dur{color:var(--dim);font-size:11px}
+  .fitem.err .desc{color:var(--red)}
+
+  /* 仪表/环形 */
+  .gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+  .gauge svg{width:100%;height:96px}
+  .gauge .gv{font-size:18px;font-weight:800;margin-top:-6px}
+  .gauge .gl{font-size:11px;color:var(--dim)}
+  .legend{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;font-size:11px;color:var(--dim)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+  /* 柱状 */
+  .bars{display:flex;flex-direction:column;gap:9px}
+  .bar{display:grid;grid-template-columns:120px 1fr auto;gap:9px;align-items:center;font-size:12px}
+  .bar .bl{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bar .bt{height:14px;border-radius:7px;background:rgba(255,255,255,.05);overflow:hidden;position:relative}
+  .bar .bf{height:100%;border-radius:7px;background:linear-gradient(90deg,var(--brand),var(--cyan));box-shadow:0 0 10px rgba(34,211,238,.25);transition:width .5s}
+  .bar .bv{color:#cdd7ff;min-width:74px;text-align:right;font-variant-numeric:tabular-nums}
+
+  /* 表格 */
+  .tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .tbl th{position:sticky;top:0;background:rgba(10,16,32,.95);color:var(--dim);font-weight:600;
+    text-align:left;padding:8px 8px;border-bottom:1px solid var(--line);font-size:11px;letter-spacing:.4px}
+  .tbl td{padding:8px 8px;border-bottom:1px solid rgba(120,160,255,.06);white-space:nowrap}
+  .tbl tr:hover td{background:rgba(99,102,241,.06)}
+  .tblwrap{max-height:340px;overflow:auto}
+  .uon{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);margin-right:6px}
+  .uoff{display:inline-block;width:7px;height:7px;border-radius:50%;background:#39435f;margin-right:6px}
+  .uid{color:#cdd7ff;font-weight:600}
+
+  .chip{display:inline-block;padding:2px 8px;border-radius:7px;font-size:11px;border:1px solid var(--line2);color:var(--dim)}
+  .chip.ok{color:var(--green);border-color:rgba(52,211,153,.4)}
+  .chip.err{color:var(--red);border-color:rgba(248,113,113,.4)}
+  .chip.warn{color:var(--amber);border-color:rgba(251,191,36,.4)}
+  .mut{color:var(--dim2)}
+  .empty{color:var(--dim2);text-align:center;padding:26px 0;font-size:12px}
+
+  /* 定时任务/会话条目 */
+  .litem{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:10px;
+    background:rgba(255,255,255,.02);border:1px solid var(--line);margin-bottom:7px}
+  .litem .nm{font-weight:600;color:#dbe2ff}
+  .litem .meta{color:var(--dim2);font-size:11px}
+  .litem .spacer{flex:1}
+
+  /* 浮层 / 瀑布 */
+  #overlay{position:fixed;inset:0;z-index:60;background:rgba(4,7,15,.74);backdrop-filter:blur(4px);
+    display:none;align-items:center;justify-content:center;padding:30px}
+  #overlay.on{display:flex}
+  .modal{width:min(1080px,94vw);max-height:86vh;overflow:auto;border-radius:18px;
+    border:1px solid var(--line2);background:linear-gradient(160deg,#0c1322,#0a0f1d);padding:20px 22px;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .modal .x{float:right;cursor:pointer;color:var(--dim);font-size:20px;line-height:1}
+  .wf{display:flex;flex-direction:column;gap:4px;margin-top:12px}
+  .wfrow{display:grid;grid-template-columns:230px 1fr;gap:10px;align-items:center;font-size:12px}
+  .wfrow .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wftrack{position:relative;height:20px;background:rgba(255,255,255,.04);border-radius:5px;overflow:hidden}
+  .wfbar{position:absolute;top:0;bottom:0;border-radius:5px;min-width:2px;opacity:.92}
+  .wfmeta{font-size:11px;color:var(--dim);margin-left:4px}
+  .tdecomp{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:12px;color:var(--dim)}
+  .gate{max-width:460px;margin:14vh auto;text-align:center;color:var(--dim)}
+  .gate h2{color:var(--ink)}
+  a.link{color:var(--cyan);cursor:pointer;text-decoration:none}
+
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:rgba(120,160,255,.18);border-radius:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  @media(max-width:1180px){.kpis{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span class="dot"></span><b>MILU</b><span>数据中心 · OBSERVABILITY</span></div>
+  <div class="spacer"></div>
+  <div class="hstat"><span id="liveDot" class="live off"></span><span id="liveTxt">连接中…</span></div>
+  <div class="seg" id="rangeSeg">
+    <button data-r="24h" class="on">24h</button>
+    <button data-r="7d">7d</button>
+    <button data-r="30d">30d</button>
+  </div>
+  <div class="clock num" id="clock">--:--:--</div>
+</header>
+
+<div class="wrap" id="app">
+  <div class="kpis" id="kpis"></div>
+  <div class="grid">
+    <div class="col">
+      <div class="panel">
+        <h3><span class="ic"></span>运行量 / Token 走势 <span class="right" id="seriesNote"></span></h3>
+        <div id="seriesChart"></div>
+      </div>
+      <div class="row2">
+        <div class="panel">
+          <h3><span class="ic"></span>资源池</h3>
+          <div class="gauges" id="gauges"></div>
+        </div>
+        <div class="panel">
+          <h3><span class="ic"></span>安全审计</h3>
+          <div id="audit"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"></span>模型 · Token / 成本</h3>
+        <div class="bars" id="models"></div>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"></span>用户画像 <span class="right" id="usersNote"></span></h3>
+        <div class="tblwrap"><table class="tbl" id="usersTbl"></table></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <h3><span class="ic"></span>实时事件流 <span class="right" id="feedNote">SSE</span></h3>
+        <div class="feed" id="feed"></div>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"></span>活跃会话 <span class="right" id="activeNote"></span></h3>
+        <div id="active" style="max-height:200px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"></span>定时任务 <span class="right" id="schedNote"></span></h3>
+        <div id="sched" style="max-height:200px;overflow:auto"></div>
+      </div>
+      <div class="panel">
+        <h3><span class="ic"></span>近期运行 <span class="right">点击查看链路</span></h3>
+        <div id="runs" style="max-height:240px;overflow:auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="overlay" onclick="if(event.target.id==='overlay')closeOverlay()">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const KIND_COLOR = {generation:"#4f8cff",tool:"#e0a800",guardrail:"#b36ae2",
+  confirmation:"#e2566a",compaction:"#3bbf7a",agent:"#8a93a6"};
+const KIND_LABEL = {generation:"LLM",tool:"工具",guardrail:"安全判定",
+  confirmation:"人工确认",compaction:"压缩",agent:"Agent",schedule:"定时任务"};
+let RANGE = "24h";
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function api(path){
+  const sep = path.includes("?") ? "&" : "?";
+  const url = TOKEN ? path + sep + "token=" + encodeURIComponent(TOKEN) : path;
+  return fetch(url, {headers: TOKEN ? {"X-Admin-Token":TOKEN} : {}}).then(r=>{
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  });
+}
+function fmtNum(n){
+  n = +n||0;
+  if(n>=1e9) return (n/1e9).toFixed(2)+"B";
+  if(n>=1e6) return (n/1e6).toFixed(2)+"M";
+  if(n>=1e3) return (n/1e3).toFixed(1)+"k";
+  return String(n);
+}
+function fmtMs(ms){ ms=+ms||0; return ms<1000?Math.round(ms)+"ms":(ms/1000).toFixed(1)+"s"; }
+function fmtCost(c){
+  if(!c||!Object.keys(c).length) return "—";
+  const sym={CNY:"¥",USD:"$"};
+  return Object.entries(c).map(([k,v])=>(sym[k]||k+" ")+(+v).toFixed(3)).join(" ");
+}
+function fmtTime(ts){ if(!ts) return "—"; const d=new Date(ts*1000);
+  return d.toLocaleTimeString("zh-CN",{hour12:false}); }
+function ago(ts){ if(!ts) return "—"; const s=Date.now()/1000-ts;
+  if(s<60) return Math.round(s)+"秒前"; if(s<3600) return Math.round(s/60)+"分前";
+  if(s<86400) return Math.round(s/3600)+"时前"; return Math.round(s/86400)+"天前"; }
+
+/* ── SVG 图表（手写，零依赖）─────────────────────── */
+function areaChart(series){
+  const W=620,H=170,pad=8;
+  if(!series||!series.length) return `<div class="empty">暂无数据</div>`;
+  const runs=series.map(b=>b.runs), toks=series.map(b=>(b.input_tokens||0)+(b.output_tokens||0));
+  const maxR=Math.max(1,...runs), maxT=Math.max(1,...toks);
+  const n=series.length, dx=(W-pad*2)/Math.max(1,n-1);
+  const X=i=>pad+i*dx;
+  const pts=(arr,max)=>arr.map((v,i)=>[X(i), H-pad-(v/max)*(H-pad*2-16)]);
+  const line=p=>p.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+" "+q[1].toFixed(1)).join(" ");
+  const tP=pts(toks,maxT), rP=pts(runs,maxR);
+  const areaT=line(tP)+` L${X(n-1)} ${H-pad} L${X(0)} ${H-pad} Z`;
+  // x 轴标注（最多 6 个）
+  const step=Math.max(1,Math.ceil(n/6));
+  let ticks="";
+  for(let i=0;i<n;i+=step){ ticks+=`<text x="${X(i)}" y="${H-1}" fill="#5b678a" font-size="9" text-anchor="middle">${esc(series[i].label)}</text>`; }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:200px">
+    <defs>
+      <linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#22d3ee" stop-opacity=".34"/>
+        <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaT}" fill="url(#ga)"/>
+    <path d="${line(tP)}" fill="none" stroke="#22d3ee" stroke-width="2"/>
+    <path d="${line(rP)}" fill="none" stroke="#818cf8" stroke-width="2" stroke-dasharray="0"/>
+    ${rP.map(q=>`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.2" fill="#818cf8"/>`).join("")}
+    ${ticks}
+  </svg>
+  <div class="legend"><span><i style="background:#818cf8"></i>运行数（峰值 ${maxR}）</span>
+   <span><i style="background:#22d3ee"></i>Token（峰值 ${fmtNum(maxT)}）</span></div>`;
+}
+function gauge(value,max,label,color){
+  const r=34,cx=44,cy=44,C=Math.PI*r; // 半圆
+  const frac=max>0?Math.min(1,value/max):0;
+  const a0=Math.PI, a1=Math.PI+Math.PI*frac;
+  const pt=a=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
+  const [x0,y0]=pt(a0),[x1,y1]=pt(a1);
+  const big=frac>.5?1:0;
+  const bg=`M${cx-r} ${cy} A${r} ${r} 0 1 1 ${cx+r} ${cy}`;
+  const fg=`M${x0} ${y0} A${r} ${r} 0 ${big} 1 ${x1} ${y1}`;
+  return `<div class="gauge"><svg viewBox="0 0 88 52">
+    <path d="${bg}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="8" stroke-linecap="round"/>
+    <path d="${fg}" fill="none" stroke="${color}" stroke-width="8" stroke-linecap="round" style="filter:drop-shadow(0 0 5px ${color})"/>
+  </svg><div class="gv num" style="color:${color}">${value}<span style="font-size:11px;color:var(--dim)">/${max}</span></div>
+  <div class="gl">${esc(label)}</div></div>`;
+}
+function ringDonut(segs,centerTop,centerBot){
+  const r=30,cx=44,cy=44,C=2*Math.PI*r;
+  const total=segs.reduce((a,s)=>a+s.value,0)||1;
+  let off=0,arcs="";
+  segs.forEach(s=>{
+    const len=C*s.value/total;
+    arcs+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="9"
+      stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"
+      transform="rotate(-90 ${cx} ${cy})"/>`;
+    off+=len;
+  });
+  return `<svg viewBox="0 0 88 88" style="width:96px;height:96px">
+    ${arcs}
+    <text x="44" y="42" text-anchor="middle" fill="#e6ecff" font-size="17" font-weight="800">${esc(centerTop)}</text>
+    <text x="44" y="56" text-anchor="middle" fill="#8794b8" font-size="9">${esc(centerBot)}</text>
+  </svg>`;
+}
+
+/* ── 渲染 ─────────────────────────────────────────── */
+function kpi(cls,lab,val,sub){
+  return `<div class="kpi ${cls}"><div class="lab">${esc(lab)}</div>
+    <div class="val num">${val}</div><div class="sub">${sub||""}</div></div>`;
+}
+function renderKPIs(o){
+  const p=o.pool||{}, sa=o.summary_all||{}, st=o.summary_today||{};
+  const rate=sa.runs?Math.round(sa.ok/sa.runs*100):100;
+  const hit=p.hit_rate!=null?(p.hit_rate*100).toFixed(0)+"%":"—";
+  const tokToday=(st.input_tokens||0)+(st.output_tokens||0);
+  $("kpis").innerHTML=[
+    kpi("c-cyan","在线实例", (p.active_entries||0), `上限 ${p.max_agents||"—"} · 用户 ${o.users_count||0}`),
+    kpi("","并发运行", `${p.in_flight||0}`, `空闲 ${p.available_slots!=null?p.available_slots:"—"} / ${p.max_concurrent_runs||"—"}`),
+    kpi("c-mag","缓存命中", hit, `复用 ${fmtNum(p.reused||0)}`),
+    kpi("","今日运行", fmtNum(st.runs||0), `累计 ${fmtNum(sa.runs||0)}`),
+    kpi(rate>=95?"c-green":(rate>=80?"c-amber":"c-red"),"成功率", rate+"%", `失败 ${sa.error||0} · 中断 ${sa.interrupted||0}`),
+    kpi("c-cyan","今日 Token", fmtNum(tokToday), `累计 ${fmtNum((sa.input_tokens||0)+(sa.output_tokens||0))}`),
+    kpi("c-amber","成本(累计)", fmtCost(sa.cost), `今日 ${fmtCost(st.cost)}`),
+    kpi("","p95 延迟", fmtMs(sa.p95_ms), `p50 ${fmtMs(sa.p50_ms)}`),
+    kpi((sa.fail_opens||0)>0?"c-red":"","fail-open", (sa.fail_opens||0), `deny ${sa.judge_denies||0} · confirm ${sa.judge_confirms||0}`),
+  ].join("");
+}
+function renderGauges(p){
+  $("gauges").innerHTML=[
+    gauge(p.active_entries||0, p.max_agents||1, "实例", "#22d3ee"),
+    gauge(p.in_flight||0, p.max_concurrent_runs||1, "并发", "#818cf8"),
+    gauge(p.mcp_connected_agents||0, p.active_entries||1, "MCP", "#3bbf7a"),
+  ].join("")
+   + `<div class="legend" style="grid-column:1/-1;justify-content:center">
+       <span>等待 ${p.waiting||0}</span><span>淘汰LRU ${p.evicted_lru||0}</span>
+       <span>空闲清理 ${p.evicted_idle||0}</span><span>拒绝 ${(p.rejected_busy||0)+(p.rejected_full||0)}</span>
+       <span>run p50 ${fmtMs(p.run_p50_ms)} / p95 ${fmtMs(p.run_p95_ms)}</span></div>`;
+}
+function renderAudit(a){
+  const s=a.summary||{};
+  const segs=[
+    {value:Math.max(0,(s.tool_calls||0)-(s.judge_denies||0)-(s.judge_confirms||0)),color:"#34d399"},
+    {value:s.judge_confirms||0,color:"#fbbf24"},
+    {value:s.judge_denies||0,color:"#f87171"},
+  ];
+  const modes=(a.by_mode||[]).map(m=>`<span class="chip">${esc(m.key)} · ${m.runs}</span>`).join(" ");
+  $("audit").innerHTML=`
+    <div style="display:flex;align-items:center;gap:16px">
+      ${ringDonut(segs, (s.tool_calls||0), "工具调用")}
+      <div style="flex:1">
+        <div class="legend" style="margin:0">
+          <span><i style="background:#34d399"></i>放行 ${Math.max(0,(s.tool_calls||0)-(s.judge_denies||0)-(s.judge_confirms||0))}</span>
+          <span><i style="background:#fbbf24"></i>需确认 ${s.judge_confirms||0}</span>
+          <span><i style="background:#f87171"></i>拒绝 ${s.judge_denies||0}</span>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--dim)">工具错误 <b style="color:#f87171">${s.tool_errors||0}</b>
+          / 调用 ${s.tool_calls||0} · fail-open <b style="color:${(s.fail_opens||0)?'#f87171':'#34d399'}">${s.fail_opens||0}</b></div>
+        <div style="margin-top:8px">${modes||'<span class="mut">无模式数据</span>'}</div>
+      </div>
+    </div>`;
+}
+function renderModels(list){
+  list=(list||[]).slice().sort((a,b)=>((b.input_tokens+b.output_tokens)-(a.input_tokens+a.output_tokens))).slice(0,8);
+  if(!list.length){ $("models").innerHTML=`<div class="empty">暂无模型数据</div>`; return; }
+  const max=Math.max(1,...list.map(m=>m.input_tokens+m.output_tokens));
+  $("models").innerHTML=list.map(m=>{
+    const tok=m.input_tokens+m.output_tokens, w=(tok/max*100).toFixed(1);
+    return `<div class="bar"><div class="bl" title="${esc(m.key)}">${esc(m.key)}</div>
+      <div class="bt"><div class="bf" style="width:${w}%"></div></div>
+      <div class="bv">${fmtNum(tok)} · ${m.runs}次 · ${fmtCost(m.cost)}</div></div>`;
+  }).join("");
+}
+function renderUsers(users){
+  $("usersNote").textContent=`${users.length} 个用户`;
+  if(!users.length){ $("usersTbl").innerHTML=`<tr><td><div class="empty">暂无用户数据</div></td></tr>`; return; }
+  const head=`<thead><tr><th>用户</th><th>运行</th><th>成功率</th><th>Token</th><th>成本</th>
+    <th>会话/消息</th><th>记忆</th><th>知识库</th><th>任务</th><th>最近活跃</th></tr></thead>`;
+  const rows=users.map(u=>{
+    const rate=u.runs?Math.round(u.ok/u.runs*100):100;
+    const kb=u.knowledge||{};
+    return `<tr><td><span class="${u.online?'uon':'uoff'}"></span><span class="uid">${esc(u.user_id)}</span></td>
+      <td class="num">${u.runs}</td>
+      <td class="num" style="color:${rate>=95?'#34d399':(rate>=80?'#fbbf24':'#f87171')}">${rate}%${u.fail_opens?' ⚠':''}</td>
+      <td class="num">${fmtNum(u.input_tokens+u.output_tokens)}</td>
+      <td class="num">${fmtCost(u.cost)}</td>
+      <td class="num">${u.sessions}/${fmtNum(u.messages)}</td>
+      <td class="num">${u.memory}</td>
+      <td class="num">${kb.chunks||0}块/${kb.sources||0}源</td>
+      <td class="num">${u.tasks_enabled}/${u.tasks}</td>
+      <td class="mut">${ago(u.last_active)}</td></tr>`;
+  }).join("");
+  $("usersTbl").innerHTML=head+"<tbody>"+rows+"</tbody>";
+}
+function renderActive(list){
+  $("activeNote").textContent=`${list.length} 个`;
+  if(!list.length){ $("active").innerHTML=`<div class="empty">当前无活跃会话</div>`; return; }
+  $("active").innerHTML=list.map(s=>`<div class="litem">
+    <span class="${s.active_count>0?'uon':'uoff'}"></span>
+    <div><div class="nm">${esc(s.user_id)}</div><div class="meta">${esc(s.session_id)}</div></div>
+    <div class="spacer"></div>
+    <span class="chip">${esc(s.mode||'?')}</span>
+    ${s.mcp_connected?'<span class="chip ok">MCP</span>':''}
+    <span class="meta">空闲 ${Math.round(s.idle_seconds)}s</span></div>`).join("");
+}
+function renderSched(d){
+  const tasks=d.tasks||[], rr=d.recent_results||[];
+  $("schedNote").textContent=`${tasks.filter(t=>t.enabled).length}/${tasks.length} 启用`;
+  let html="";
+  if(tasks.length){
+    html+=tasks.slice(0,6).map(t=>`<div class="litem">
+      <span class="${t.enabled?'uon':'uoff'}"></span>
+      <div><div class="nm">${esc(t.name)} <span class="meta">· ${esc(t.user_id)}</span></div>
+        <div class="meta">${esc(t.trigger_type)} · 执行 ${t.run_count||0} 次 · 下次 ${t.next_run?esc(t.next_run.slice(5,16)):'—'}</div></div>
+      <div class="spacer"></div>
+      ${t.enabled?'<span class="chip ok">on</span>':'<span class="chip">off</span>'}</div>`).join("");
+  } else html+=`<div class="empty">暂无定时任务</div>`;
+  if(rr.length){
+    html+=`<div class="meta" style="margin:8px 2px 4px">最近结果</div>`+
+      rr.slice(0,4).map(r=>`<div class="litem"><div><div class="nm">${esc(r.task)}</div>
+        <div class="meta">${esc((r.result||'').slice(0,60))}</div></div></div>`).join("");
+  }
+  $("sched").innerHTML=html;
+}
+function renderRuns(runs){
+  if(!runs.length){ $("runs").innerHTML=`<div class="empty">暂无运行记录</div>`; return; }
+  $("runs").innerHTML=runs.slice(0,18).map(r=>{
+    const cls=r.status==="ok"?"ok":(r.status==="interrupted"?"warn":"err");
+    return `<div class="litem" style="cursor:pointer" onclick="showTrace('${esc(r.trace_id)}')">
+      <span class="chip ${cls}">${esc(r.status)}</span>
+      <div style="min-width:0"><div class="nm">${esc(r.provider||'?')}/${esc(r.model||'?')}
+        <span class="meta">· ${esc(r.user_id||'default')}</span></div>
+        <div class="meta">${fmtTime(r.started_at)} · ${fmtMs(r.duration_ms)} · ${fmtNum((r.input_tokens||0)+(r.output_tokens||0))}tok · ${r.turn_count||0}轮/${r.tool_calls||0}工具${r.fail_opens?' · ⚠fail-open':''}</div></div>
+      <div class="spacer"></div><span class="meta">›</span></div>`;
+  }).join("");
+}
+
+/* ── 实时事件流（SSE）────────────────────────────── */
+const FEED_MAX=120;
+function addFeed(ev){
+  const wrap=$("feed");
+  const div=document.createElement("div");
+  const isErr=ev.status==="error"||ev.fail_open||(ev.verdicts||[]).some(v=>v.decision==="deny");
+  div.className="fitem flash"+(isErr?" err":"");
+  const color=KIND_COLOR[ev.kind]||"#8a93a6";
+  let desc="";
+  if(ev.type==="schedule"){ desc=`定时任务「${esc(ev.task)}」完成`; }
+  else if(ev.kind==="generation") desc=`${esc(ev.model||'LLM')} · ${fmtNum(ev.input_tokens)}→${fmtNum(ev.output_tokens)} tok`;
+  else if(ev.kind==="tool") desc=`调用 ${esc(ev.tool||ev.name||'tool')}`;
+  else if(ev.kind==="guardrail") desc=ev.fail_open?"判定失败 fail-open 放行":("判定 "+(ev.verdicts||[]).map(v=>v.tool+"→"+v.decision).join(", "));
+  else if(ev.kind==="confirmation") desc=`人工确认 → ${esc(ev.decision||'?')}`;
+  else if(ev.kind==="agent") desc=`运行结束 ${esc(ev.provider||'')}/${esc(ev.model||'')} · ${ev.turns||0}轮`;
+  else desc=esc(ev.name||ev.kind||"");
+  const tagColor= ev.type==="schedule" ? "#3bbf7a" : color;
+  div.innerHTML=`<span class="t num">${fmtTime(ev.ts)}</span>
+    <span class="tag" style="background:${tagColor}">${esc(KIND_LABEL[ev.type==='schedule'?'schedule':ev.kind]||ev.kind||'·')}</span>
+    <span class="who">${esc(ev.user_id||'—')}</span>
+    <span class="desc" ${ev.trace_id?`onclick="showTrace('${esc(ev.trace_id)}')"`:''}>${desc}</span>
+    <span class="dur num">${ev.duration_ms!=null?fmtMs(ev.duration_ms):''}</span>`;
+  wrap.insertBefore(div, wrap.firstChild);
+  setTimeout(()=>div.classList.remove("flash"),600);
+  while(wrap.childElementCount>FEED_MAX) wrap.removeChild(wrap.lastChild);
+}
+let es=null;
+function connectSSE(){
+  const url="/api/dashboard/stream"+(TOKEN?"?token="+encodeURIComponent(TOKEN):"");
+  es=new EventSource(url);
+  es.addEventListener("feed",e=>{ try{ addFeed(JSON.parse(e.data)); }catch(_){}} );
+  es.onopen=()=>setLive(true);
+  es.onerror=()=>{ setLive(false); }; // EventSource 自动重连
+}
+function setLive(on){
+  $("liveDot").className="live"+(on?"":" off");
+  $("liveTxt").textContent=on?"实时连接":"重连中…";
+}
+
+/* ── 链路瀑布浮层 ─────────────────────────────────── */
+async function showTrace(tid){
+  if(!tid) return;
+  $("overlay").classList.add("on");
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载链路…</div>`;
+  try{
+    const d=await api("/api/dashboard/trace/"+encodeURIComponent(tid));
+    if(!d.run){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">未找到该运行</div>`; return; }
+    renderTrace(d.run, d.spans||[]);
+  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载失败：${esc(e.message)}</div>`; }
+}
+function closeOverlay(){ $("overlay").classList.remove("on"); }
+function renderTrace(run, spans){
+  const roots=spans.filter(s=>!s.parent_id || !spans.some(x=>x.span_id===s.parent_id));
+  const t0=Math.min(...spans.map(s=>s.start_time||0));
+  const total=Math.max(...roots.map(s=>s.duration_ms||0))||1;
+  const byParent={}; spans.forEach(s=>{ (byParent[s.parent_id]=byParent[s.parent_id]||[]).push(s); });
+  let rows="";
+  function walk(s,depth){
+    const a=s.attributes||{};
+    const off=((s.start_time||0)-t0)*1000;   // 相对根起点的毫秒偏移
+    const w=Math.max(0.4,(s.duration_ms||0)/total*100);
+    const leftPct=Math.min(98,Math.max(0,off/total*100));
+    const color=KIND_COLOR[s.kind]||"#8a93a6";
+    let meta="";
+    if(s.kind==="generation") meta=`${fmtNum(a["gen_ai.usage.input_tokens"])}→${fmtNum(a["gen_ai.usage.output_tokens"])} tok`;
+    else if(s.kind==="tool") meta=(s.status==="error"?"err":"ok")+(a["milu.output_len"]!=null?` · ${a["milu.output_len"]}B`:"");
+    else if(s.kind==="guardrail") meta=a["milu.judge.fail_open"]?"fail-open":((a["milu.judge.verdicts"]||[]).map(v=>v.tool+"→"+v.decision).join(", "));
+    else if(s.kind==="confirmation") meta=a["milu.decision"]||"";
+    else if(s.kind==="agent") meta=`${a["gen_ai.provider.name"]||""}/${a["gen_ai.request.model"]||""} · ${a["milu.turn_count"]||0}轮`;
+    rows+=`<div class="wfrow"><div class="nm" style="padding-left:${depth*14}px;color:${color}">${esc(s.name)}</div>
+      <div><div class="wftrack"><div class="wfbar" style="left:${leftPct.toFixed(1)}%;width:${w.toFixed(1)}%;background:${color}"></div></div></div></div>
+      <div class="wfrow"><div></div><div class="wfmeta">${fmtMs(s.duration_ms)} · ${esc(meta)}</div></div>`;
+    (byParent[s.span_id]||[]).sort((x,y)=>(x.start_time||0)-(y.start_time||0)).forEach(c=>walk(c,depth+1));
+  }
+  roots.sort((x,y)=>(x.start_time||0)-(y.start_time||0)).forEach(r=>walk(r,0));
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
+    <h3 style="margin:0 0 4px;color:#cfd8ff">运行链路 · ${esc(run.provider||'?')}/${esc(run.model||'?')}</h3>
+    <div class="mut" style="font-size:12px">trace ${esc(run.trace_id)} · 用户 ${esc(run.user_id||'default')} · ${fmtTime(run.started_at)} ·
+      <span class="chip ${run.status==='ok'?'ok':'err'}">${esc(run.status)}</span> · ${fmtMs(run.duration_ms)} · ${fmtCost(run.cost_estimate!=null?{[run.cost_currency||'?']:run.cost_estimate}:null)}</div>
+    <div class="wf">${rows||'<div class="empty">无 span</div>'}</div>
+    <div class="tdecomp">
+      <span>LLM ${fmtMs(run.llm_time_ms)}</span><span>工具 ${fmtMs(run.tool_time_ms)}</span>
+      <span>安全判定 ${fmtMs(run.judge_time_ms)}</span><span>审批等待 ${fmtMs(run.wait_time_ms)}</span>
+      <span>子代理 ${run.subagent_runs||0}</span><span>压缩 ${run.compactions||0}</span>
+      ${run.fail_opens?`<span style="color:#f87171">⚠ fail-open ×${run.fail_opens}</span>`:""}
+    </div>`;
+}
+
+/* ── 轮询调度 ─────────────────────────────────────── */
+async function pollOverview(){
+  try{ const o=await api("/api/dashboard/overview");
+    renderKPIs(o); renderGauges(o.pool||{}); renderActive(o.active_sessions||[]);
+    if(!es) connectSSE();
+  }catch(e){ if(String(e.message)==="401"||String(e.message)==="403") return showGate(e.message); }
+}
+async function pollAnalytics(){
+  try{ const a=await api("/api/dashboard/analytics?range="+RANGE);
+    $("seriesNote").textContent=RANGE+" · "+(a.bucket==="day"?"按天":"按小时");
+    $("seriesChart").innerHTML=areaChart(a.series); renderModels(a.by_model);
+  }catch(_){}
+}
+async function pollUsers(){ try{ const d=await api("/api/dashboard/users"); renderUsers(d.users||[]); }catch(_){} }
+async function pollAudit(){ try{ const a=await api("/api/dashboard/audit"); renderAudit(a); }catch(_){} }
+async function pollSched(){ try{ const d=await api("/api/dashboard/scheduler"); renderSched(d); }catch(_){} }
+async function pollRuns(){ try{ const d=await api("/api/dashboard/runs?limit=20"); renderRuns(d.runs||[]); }catch(_){} }
+
+function showGate(code){
+  if(es){ es.close(); es=null; }
+  $("app").innerHTML=`<div class="gate"><h2>需要管理员令牌</h2>
+    <p>该观测大屏跨用户读取全局数据（错误码 ${esc(code)}）。请在地址后附加 <code>?token=你的MILU_ADMIN_TOKEN</code> 访问，
+    或在仅本机访问时确认服务端未设置该令牌。</p></div>`;
+}
+
+function tickClock(){ $("clock").textContent=new Date().toLocaleTimeString("zh-CN",{hour12:false}); }
+
+$("rangeSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  RANGE=b.dataset.r;
+  [...$("rangeSeg").children].forEach(x=>x.classList.toggle("on",x===b));
+  pollAnalytics();
+});
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
+
+/* 启动 */
+tickClock(); setInterval(tickClock,1000);
+pollOverview(); pollAnalytics(); pollUsers(); pollAudit(); pollSched(); pollRuns();
+setInterval(pollOverview,5000);
+setInterval(pollAnalytics,15000);
+setInterval(pollUsers,8000);
+setInterval(pollAudit,15000);
+setInterval(pollSched,15000);
+setInterval(pollRuns,7000);
+</script>
+</body>
+</html>

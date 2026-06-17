@@ -524,6 +524,12 @@ def _cmd_serve(args) -> int:
     print(c("bold", c("cyan", t("  milu Web 服务"))))
     print(DIVIDER)
     print(t("  访问地址: {url}", url=c('cyan', f'http://{host}:{port}')))
+    _admin_tok = os.environ.get("MILU_ADMIN_TOKEN")
+    _dash_url = f'http://{host}:{port}/dashboard'
+    if _admin_tok:
+        _dash_url += '?token=<MILU_ADMIN_TOKEN>'
+    print(t("  观测大屏: {url}", url=c('cyan', _dash_url))
+          + ("" if _admin_tok else c('dim', t("（未设 MILU_ADMIN_TOKEN，仅本机可访问）"))))
     print(t("  默认厂商: {p}  模型: {m}", p=c('yellow', settings.provider), m=c('dim', settings.model)))
     print(t("  操作模式: {mode}  调度: {sch}  MCP: {mcp}",
             mode=c('yellow', settings.mode),

@@ -58,6 +58,11 @@ from milu.llm.base.vision import IMAGE_EXTENSIONS, MAX_IMAGE_BYTES
 from milu.llm.providers import ModelRegistry
 from milu.resources import default_session_dir, user_data_dir
 from milu.serving import AgentPool
+from milu.serving.web.dashboard import (
+    DashboardHub,
+    make_span_sink,
+    register_dashboard_routes,
+)
 from milu.tools.builtin import BUILTIN_TOOLS, create_structured_output_tool
 
 logger = logging.getLogger("milu.serving.web")
@@ -337,6 +342,10 @@ def _make_agent_factory(state, shared_mcp):
         if ob.get("enabled"):
             from milu.observability import TraceConfig
             trace = TraceConfig.from_mapping(ob, user_id=user_id)
+            # 观测大屏实时事件流：每完成一个 span 即推进枢纽（CallbackSink）
+            hub = getattr(state, "dashboard_hub", None)
+            if hub is not None:
+                trace.extra_sinks.append(make_span_sink(hub, user_id))
         return Agent(
             llm=llm,
             tools=[*BUILTIN_TOOLS, create_structured_output_tool()],
@@ -399,6 +408,9 @@ def create_app(
         st.llm_cache = {}              # (provider,model,...) -> BaseLLM
         st.confirmations = {}          # (user,session) -> asyncio.Future
         st.queues = {}                 # (user,session) -> asyncio.Queue（仅请求期间存在）
+        # 观测大屏实时枢纽：须在 agent_factory 构造前就绪（factory 闭包按需读取，
+        # 给每个 Agent 注入推送 span 的 CallbackSink）
+        st.dashboard_hub = DashboardHub()
 
         # 预热默认 LLM（也作为 llm_factory 占位返回值；真实 LLM 由 agent_factory 解析）
         default_llm = _get_llm(st, options.provider, options.model,
@@ -457,6 +469,14 @@ def create_app(
                     "result": result[:200],
                 })
                 st.recent_results[:] = st.recent_results[-100:]
+                # 同步推进观测大屏实时事件流
+                hub = getattr(st, "dashboard_hub", None)
+                if hub is not None:
+                    hub.publish({
+                        "type": "schedule", "user_id": task.user_id,
+                        "task": task.name, "result": result[:200],
+                        "ts": time.time(),
+                    })
 
             st.engine = ScheduleEngine(
                 st.store,
@@ -1175,6 +1195,9 @@ def create_app(
         results = [json.loads(ln) for ln in lines[-limit:] if ln.strip()]
         results.reverse()
         return {"results": results}
+
+    # ── 观测大屏（跨用户全局监控，独立鉴权）──────────────
+    register_dashboard_routes(app)
 
     return app
 
