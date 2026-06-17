@@ -155,6 +155,28 @@
   .gate h2{color:var(--ink)}
   a.link{color:var(--cyan);cursor:pointer;text-decoration:none}
 
+  .iconbtn{background:transparent;border:1px solid var(--line2);color:var(--dim);border-radius:9px;
+    padding:4px 10px;cursor:pointer;font-size:14px;line-height:1.4}
+  .iconbtn:hover{color:#dfe5ff;border-color:var(--brand)}
+  .iconbtn.on{background:rgba(251,191,36,.22);color:#fbbf24;border-color:rgba(251,191,36,.5)}
+  .urow td{transition:background .15s}
+  /* 用户下钻浮层内的小节 */
+  .dsec{margin-top:16px}
+  .dsec h4{margin:0 0 8px;font-size:12px;color:#cfd8ff;letter-spacing:.5px;
+    border-left:3px solid var(--brand);padding-left:8px}
+  .mkpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:4px}
+  .mkpi{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+  .mkpi .l{font-size:10px;color:var(--dim)}.mkpi .v{font-size:16px;font-weight:700;margin-top:2px}
+  .memitem{padding:6px 9px;border-radius:8px;background:rgba(255,255,255,.025);margin-bottom:5px;font-size:12px}
+  .memitem .cat{font-size:10px;color:var(--mag);margin-right:6px}
+  /* 对话浏览 */
+  .conv{display:flex;flex-direction:column;gap:9px;margin-top:10px}
+  .msg{max-width:82%;padding:8px 12px;border-radius:12px;font-size:12.5px;white-space:pre-wrap;word-break:break-word}
+  .msg.user{align-self:flex-end;background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff;border-bottom-right-radius:4px}
+  .msg.assistant{align-self:flex-start;background:rgba(255,255,255,.05);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .msg.tool{align-self:flex-start;background:rgba(224,168,0,.08);border:1px solid rgba(224,168,0,.25);color:var(--dim);font-size:11.5px;max-width:92%}
+  .msg .rl{font-size:10px;color:var(--dim2);margin-bottom:3px}
+  .msg .toolc{display:inline-block;font-size:10px;color:#e0a800;border:1px solid rgba(224,168,0,.3);border-radius:5px;padding:1px 6px;margin:3px 4px 0 0}
   ::-webkit-scrollbar{width:9px;height:9px}
   ::-webkit-scrollbar-thumb{background:rgba(120,160,255,.18);border-radius:6px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -172,6 +194,8 @@
     <button data-r="7d">7d</button>
     <button data-r="30d">30d</button>
   </div>
+  <button class="iconbtn" id="refreshBtn" title="立即刷新">⟳</button>
+  <button class="iconbtn" id="pauseBtn" title="暂停 / 恢复自动刷新">⏸</button>
   <div class="clock num" id="clock">--:--:--</div>
 </header>
 
@@ -407,7 +431,7 @@ function renderUsers(users){
   const rows=users.map(u=>{
     const rate=u.runs?Math.round(u.ok/u.runs*100):100;
     const kb=u.knowledge||{};
-    return `<tr><td><span class="${u.online?'uon':'uoff'}"></span><span class="uid">${esc(u.user_id)}</span></td>
+    return `<tr class="urow" data-uid="${esc(u.user_id)}" style="cursor:pointer"><td><span class="${u.online?'uon':'uoff'}"></span><span class="uid">${esc(u.user_id)}</span></td>
       <td class="num">${u.runs}</td>
       <td class="num" style="color:${rate>=95?'#34d399':(rate>=80?'#fbbf24':'#f87171')}">${rate}%${u.fail_opens?' ⚠':''}</td>
       <td class="num">${fmtNum(u.input_tokens+u.output_tokens)}</td>
@@ -423,7 +447,7 @@ function renderUsers(users){
 function renderActive(list){
   $("activeNote").textContent=`${list.length} 个`;
   if(!list.length){ $("active").innerHTML=`<div class="empty">当前无活跃会话</div>`; return; }
-  $("active").innerHTML=list.map(s=>`<div class="litem">
+  $("active").innerHTML=list.map(s=>`<div class="litem" style="cursor:pointer" onclick="openSession('${esc(s.session_id)}')">
     <span class="${s.active_count>0?'uon':'uoff'}"></span>
     <div><div class="nm">${esc(s.user_id)}</div><div class="meta">${esc(s.session_id)}</div></div>
     <div class="spacer"></div>
@@ -551,11 +575,83 @@ function renderTrace(run, spans){
     </div>`;
 }
 
+/* ── 用户下钻浮层 ─────────────────────────────────── */
+async function openUser(uid){
+  if(!uid) return;
+  $("overlay").classList.add("on");
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载用户 ${esc(uid)} …</div>`;
+  try{
+    const d=await api("/api/dashboard/user/"+encodeURIComponent(uid));
+    renderUserDetail(d);
+  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载失败：${esc(e.message)}</div>`; }
+}
+function renderUserDetail(d){
+  const s=d.summary||{}, kb=d.knowledge||{}, kbs=kb.stats||{};
+  const rate=s.runs?Math.round(s.ok/s.runs*100):100;
+  const tok=(s.input_tokens||0)+(s.output_tokens||0);
+  const mkpi=(l,v)=>`<div class="mkpi"><div class="l">${l}</div><div class="v num">${v}</div></div>`;
+  const uid=esc(d.user_id);
+  const runs=(d.runs||[]).map(r=>{
+    const cls=r.status==="ok"?"ok":(r.status==="interrupted"?"warn":"err");
+    return `<div class="litem" style="cursor:pointer" onclick="showTrace('${esc(r.trace_id)}')">
+      <span class="chip ${cls}">${esc(r.status)}</span>
+      <div style="min-width:0"><div class="nm">${esc(r.provider||'?')}/${esc(r.model||'?')}</div>
+        <div class="meta">${fmtTime(r.started_at)} · ${fmtMs(r.duration_ms)} · ${fmtNum((r.input_tokens||0)+(r.output_tokens||0))}tok</div></div>
+      <div class="spacer"></div><span class="meta">›</span></div>`;
+  }).join("") || `<div class="empty">无运行</div>`;
+  const sessions=(d.sessions||[]).map(se=>`<div class="litem" style="cursor:pointer" onclick="openSession('${esc(se.session_id)}','${uid}')">
+    <div style="min-width:0"><div class="nm">${esc(se.session_id)}</div><div class="meta">${se.message_count||0} 条消息 · ${ago(se.updated_at)}</div></div>
+    <div class="spacer"></div><span class="meta">查看对话 ›</span></div>`).join("") || `<div class="empty">无会话</div>`;
+  const mem=(d.memory||[]).map(it=>`<div class="memitem"><span class="cat">${esc(it.category||'')}</span>${esc(it.content||'')}</div>`).join("") || `<div class="empty">无记忆</div>`;
+  const srcs=(kb.sources||[]).map(x=>`<span class="chip">${esc(x.name)} · ${x.chunks}块</span>`).join(" ") || `<span class="mut">无来源</span>`;
+  const tasks=(d.tasks||[]).map(t=>`<div class="litem"><span class="${t.enabled?'uon':'uoff'}"></span>
+    <div><div class="nm">${esc(t.name)}</div><div class="meta">${esc(t.trigger_type)} · 执行 ${t.run_count||0} 次</div></div></div>`).join("") || `<div class="empty">无定时任务</div>`;
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
+    <h3 style="margin:0 0 8px;color:#cfd8ff">用户 · ${uid} ${d.online?'<span class="chip ok">在线</span>':''}</h3>
+    <div class="mkpis">
+      ${mkpi('运行', s.runs||0)}${mkpi('成功率', rate+'%')}${mkpi('Token', fmtNum(tok))}
+      ${mkpi('成本', fmtCost(s.cost))}${mkpi('p95', fmtMs(s.p95_ms))}
+    </div>
+    <div class="dsec"><h4>近期运行（点击看链路）</h4><div style="max-height:200px;overflow:auto">${runs}</div></div>
+    <div class="dsec"><h4>会话（点击看对话）</h4><div style="max-height:200px;overflow:auto">${sessions}</div></div>
+    <div class="dsec"><h4>长期记忆（${(d.memory||[]).length} 条）</h4><div style="max-height:160px;overflow:auto">${mem}</div></div>
+    <div class="dsec"><h4>知识库（${kbs.count||0} 块 / ${(kb.sources||[]).length} 源 · ${esc(kbs.model||'—')}）</h4>${srcs}</div>
+    <div class="dsec"><h4>定时任务（${(d.tasks||[]).length}）</h4>${tasks}</div>`;
+}
+
+/* ── 对话浏览浮层（监测对话）───────────────────────── */
+async function openSession(sid, backUid){
+  if(!sid) return;
+  $("overlay").classList.add("on");
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载对话 …</div>`;
+  try{
+    const d=await api("/api/dashboard/session/"+encodeURIComponent(sid));
+    renderConversation(sid, d.messages||[], backUid);
+  }catch(e){
+    const m=String(e.message)==="404"?"会话不存在":("加载失败："+esc(e.message));
+    $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${m}</div>`;
+  }
+}
+function renderConversation(sid, msgs, backUid){
+  const back=backUid?`<a class="link" onclick="openUser('${esc(backUid)}')">← 返回用户</a>  `:"";
+  const body=msgs.length?msgs.map(m=>{
+    if(m.role==="tool")
+      return `<div class="msg tool"><div class="rl">工具结果${m.name?' · '+esc(m.name):''}</div>${esc(m.content||'')}</div>`;
+    const tools=(m.tools||[]).map(t=>`<span class="toolc">⚙ ${esc(t)}</span>`).join("");
+    const rl=m.role==="user"?"用户":"助手";
+    const txt=esc(m.content||"")||(tools?"":'<span class="mut">（空）</span>');
+    return `<div class="msg ${m.role==='user'?'user':'assistant'}"><div class="rl">${rl}</div>${txt}${tools}</div>`;
+  }).join(""):`<div class="empty">无消息</div>`;
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
+    <h3 style="margin:0 0 4px;color:#cfd8ff">${back}对话 · ${esc(sid)}</h3>
+    <div class="mut" style="font-size:11px">${msgs.length} 条消息（最多展示最近 300 条）</div>
+    <div class="conv">${body}</div>`;
+}
+
 /* ── 轮询调度 ─────────────────────────────────────── */
 async function pollOverview(){
   try{ const o=await api("/api/dashboard/overview");
     renderKPIs(o); renderGauges(o.pool||{}); renderActive(o.active_sessions||[]);
-    if(!es) connectSSE();
   }catch(e){ if(String(e.message)==="401"||String(e.message)==="403") return showGate(e.message); }
 }
 async function pollAnalytics(){
@@ -584,17 +680,42 @@ $("rangeSeg").addEventListener("click",e=>{
   [...$("rangeSeg").children].forEach(x=>x.classList.toggle("on",x===b));
   pollAnalytics();
 });
+// 用户画像表行点击 → 下钻该用户（事件委派，避免 user_id 中特殊字符破坏 onclick）
+$("usersTbl").addEventListener("click",e=>{
+  const tr=e.target.closest("tr.urow"); if(tr && tr.dataset.uid) openUser(tr.dataset.uid);
+});
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeOverlay(); });
+
+/* ── 自动刷新生命周期（支持暂停 / 手动刷新）─────────── */
+let timers=[], paused=false;
+function refreshNow(){ pollOverview(); pollAnalytics(); pollUsers(); pollAudit(); pollSched(); pollRuns(); }
+function startPolling(){
+  refreshNow();
+  timers=[
+    setInterval(pollOverview,5000), setInterval(pollAnalytics,15000),
+    setInterval(pollUsers,8000), setInterval(pollAudit,15000),
+    setInterval(pollSched,15000), setInterval(pollRuns,7000),
+  ];
+  if(!es) connectSSE();
+}
+function stopPolling(){ timers.forEach(clearInterval); timers=[]; if(es){ es.close(); es=null; } }
+function togglePause(){
+  paused=!paused;
+  $("pauseBtn").classList.toggle("on",paused);
+  $("pauseBtn").textContent = paused ? "▶" : "⏸";
+  if(paused){ stopPolling(); $("liveDot").className="live off"; $("liveTxt").textContent="已暂停"; }
+  else startPolling();
+}
+$("pauseBtn").addEventListener("click",togglePause);
+$("refreshBtn").addEventListener("click",()=>{
+  refreshNow();
+  const b=$("refreshBtn"); b.style.transition="transform .5s"; b.style.transform="rotate(360deg)";
+  setTimeout(()=>{ b.style.transition=""; b.style.transform=""; },520);
+});
 
 /* 启动 */
 tickClock(); setInterval(tickClock,1000);
-pollOverview(); pollAnalytics(); pollUsers(); pollAudit(); pollSched(); pollRuns();
-setInterval(pollOverview,5000);
-setInterval(pollAnalytics,15000);
-setInterval(pollUsers,8000);
-setInterval(pollAudit,15000);
-setInterval(pollSched,15000);
-setInterval(pollRuns,7000);
+startPolling();
 </script>
 </body>
 </html>

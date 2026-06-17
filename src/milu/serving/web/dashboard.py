@@ -21,6 +21,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from collections import deque
@@ -224,17 +225,20 @@ def _enumerate_user_ids() -> set[str]:
     return users
 
 
-def _memory_count(uid: str) -> int:
+def _memory_items(uid: str) -> list[dict]:
     from milu.tools.builtin.memory_tool import memory_file_path
     p = memory_file_path(uid)
     if not p.exists():
-        return 0
+        return []
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return 0
-    items = data if isinstance(data, list) else data.get("items", [])
-    return len(items)
+        return []
+    return data if isinstance(data, list) else data.get("items", [])
+
+
+def _memory_count(uid: str) -> int:
+    return len(_memory_items(uid))
 
 
 def _kb_rollup(uid: str) -> dict:
@@ -250,17 +254,110 @@ def _kb_rollup(uid: str) -> dict:
         return {"chunks": 0, "sources": 0, "model": ""}
 
 
-def _session_rollup(uid: str) -> dict:
+def _kb_detail(uid: str) -> dict:
+    """知识库明细（统计 + 来源清单），供用户下钻浮层。"""
+    try:
+        from milu.knowledge import KnowledgeStore, knowledge_dir
+        d = knowledge_dir(uid)
+        if not d.is_dir():
+            return {"stats": {}, "sources": []}
+        store = KnowledgeStore(d)
+        return {"stats": store.stats(),
+                "sources": [{"name": s, "chunks": n} for s, n in store.list_sources()]}
+    except Exception:
+        return {"stats": {}, "sources": []}
+
+
+def _user_sessions(uid: str) -> list[dict]:
+    """该用户的会话元数据清单（按 updated_at 降序，Session.list_sessions 已排序）。"""
     from milu.agent.session import Session
     from milu.resources import default_session_dir
     from milu.serving import AgentPool
     prefix = AgentPool._derive_session_id(uid, "")
-    sessions = [s for s in Session.list_sessions(default_session_dir())
-                if str(s.get("session_id", "")).startswith(prefix)]
+    return [s for s in Session.list_sessions(default_session_dir())
+            if str(s.get("session_id", "")).startswith(prefix)]
+
+
+def _session_rollup(uid: str) -> dict:
+    sessions = _user_sessions(uid)
     return {
         "count": len(sessions),
         "messages": sum(int(s.get("message_count", 0) or 0) for s in sessions),
         "updated_at": max((s.get("updated_at", 0) or 0 for s in sessions), default=0),
+    }
+
+
+def _content_text(content) -> str:
+    """从消息 content 提取纯文本（str 原样；多模态 list 取 text 块拼接）。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text") or "")
+            elif isinstance(block, dict) and block.get("type") == "image_path":
+                parts.append("[图片]")
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
+def _session_messages(session_id: str, limit: int = 300) -> list[dict] | None:
+    """读取某会话的对话消息（管理员下钻看正文用）。
+
+    session_id 是确定性派生 id（`{user}__{session}`，文件系统安全字符集）；
+    严格校验只含 `[A-Za-z0-9_.-]` 杜绝路径穿越，再经 Session.load_messages 读取。
+    返回 None 表示会话不存在或 id 非法（路由转 404）。
+    """
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_.-]+", session_id):
+        return None
+    from milu.agent.session import Session
+    from milu.resources import default_session_dir
+    base = default_session_dir()
+    if not (base / session_id).is_dir():
+        return None
+    try:
+        sess = Session.load_session(session_id, base)
+        msgs = sess.load_messages()
+    except Exception:
+        return []
+    out: list[dict] = []
+    for m in msgs[-limit:]:
+        role = m.role.value if hasattr(m.role, "value") else str(m.role)
+        if role == "system":
+            continue
+        item: dict = {"role": role, "content": _content_text(m.content)}
+        if role == "assistant" and getattr(m, "tool_calls", None):
+            tools = [((tc.get("function") or {}).get("name") or "")
+                     for tc in m.tool_calls if isinstance(tc, dict)]
+            item["tools"] = [t for t in tools if t]
+        if role == "tool":
+            item["name"] = getattr(m, "name", None)
+            item["content"] = item["content"][:2000]
+        out.append(item)
+    return out
+
+
+def _user_detail(state, uid: str) -> dict:
+    """单用户下钻：运行/会话/记忆/知识库/定时任务 + 在线态。"""
+    from milu.observability import load_run_index, summarize_runs
+    runs = load_run_index(limit=0, user_id=uid)
+    pool = getattr(state, "pool", None)
+    active_all = pool.list_active_sessions() if pool else []
+    store = getattr(state, "store", None)
+    tasks = store.list_user(uid) if store else []
+    return {
+        "user_id": uid,
+        "online": any(e["user_id"] == uid for e in active_all),
+        "summary": summarize_runs(runs),
+        "runs": runs[:30],
+        "sessions": _user_sessions(uid),
+        "memory": _memory_items(uid),
+        "knowledge": _kb_detail(uid),
+        "tasks": [asdict(t) for t in tasks],
+        "active_sessions": [e for e in active_all if e["user_id"] == uid],
     }
 
 
@@ -393,6 +490,20 @@ def register_dashboard_routes(app) -> None:
         check_admin(request)
         st = request.app.state
         return {"users": _cached(st, "users", 4.0, lambda: _build_users(st))}
+
+    @app.get("/api/dashboard/user/{uid}")
+    async def dash_user(request: Request, uid: str):
+        check_admin(request)
+        return _user_detail(request.app.state, uid)
+
+    @app.get("/api/dashboard/session/{session_id}")
+    async def dash_session(request: Request, session_id: str):
+        """单会话对话消息（管理员下钻看正文；路径穿越已在 _session_messages 拦截）。"""
+        check_admin(request)
+        msgs = _session_messages(session_id)
+        if msgs is None:
+            raise HTTPException(404, "会话不存在或会话 id 非法")
+        return {"session_id": session_id, "messages": msgs}
 
     @app.get("/api/dashboard/runs")
     async def dash_runs(request: Request, limit: int = 50, user: str = "",

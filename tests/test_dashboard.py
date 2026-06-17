@@ -260,6 +260,50 @@ def test_memory_count(tmp_path, monkeypatch):
     assert dash._memory_count("nobody") == 0
 
 
+# ── 用户下钻 / 对话浏览（P4）──────────────────────────────
+
+def test_content_text():
+    assert dash._content_text("hi") == "hi"
+    assert dash._content_text([{"type": "text", "text": "a"},
+                               {"type": "image_path", "path": "x.png"}]) == "a\n[图片]"
+    assert dash._content_text(None) == ""
+
+
+def test_memory_items(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILU_HOME", str(tmp_path))
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "u.json").write_text(
+        json.dumps({"items": [{"content": "fact", "category": "fact"}]}), encoding="utf-8")
+    items = dash._memory_items("u")
+    assert len(items) == 1 and items[0]["content"] == "fact"
+    assert dash._memory_count("u") == 1
+
+
+def test_session_messages_path_traversal_guarded(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILU_HOME", str(tmp_path))
+    # 非法字符（路径穿越）→ None，绝不读盘
+    assert dash._session_messages("../../etc/passwd") is None
+    assert dash._session_messages("a/b") is None
+    assert dash._session_messages("has space") is None
+    assert dash._session_messages("") is None
+    # 合法 id 但目录不存在 → None
+    assert dash._session_messages("u__missing") is None
+
+
+def test_session_messages_reads_conversation(tmp_path, monkeypatch):
+    monkeypatch.setenv("MILU_HOME", str(tmp_path))
+    from milu.agent.session import Session
+    from milu.llm.base.message import Message, MessageRole
+    base = tmp_path / "sessions"
+    sess = Session("u__s1", base, model="qwen-plus")
+    sess.log_message(Message(role=MessageRole.USER, content="你好"))
+    sess.log_message(Message(role=MessageRole.ASSISTANT, content="你好，有什么可以帮你"))
+    msgs = dash._session_messages("u__s1")
+    assert msgs is not None and len(msgs) == 2
+    assert msgs[0]["role"] == "user" and msgs[0]["content"] == "你好"
+    assert msgs[1]["role"] == "assistant"
+
+
 # ── 路由注册（构造期，不触发 lifespan）────────────────────
 
 def test_dashboard_routes_registered():
@@ -270,3 +314,5 @@ def test_dashboard_routes_registered():
     assert "/api/dashboard/overview" in paths
     assert "/api/dashboard/stream" in paths
     assert "/api/dashboard/trace/{trace_id}" in paths
+    assert "/api/dashboard/user/{uid}" in paths
+    assert "/api/dashboard/session/{session_id}" in paths
