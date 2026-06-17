@@ -11,6 +11,13 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator, Awaitable, Callable, Union
 
+# asyncio.timeout() 仅 Python 3.11+ 提供；3.10 用 async-timeout backport
+# （API 与所抛的 asyncio.TimeoutError 完全一致，仅在 <3.11 安装该依赖）
+if sys.version_info >= (3, 11):
+    from asyncio import timeout as _asyncio_timeout
+else:
+    from async_timeout import timeout as _asyncio_timeout
+
 if TYPE_CHECKING:
     from milu.tools.mcp.manager import MCPManager
     from milu.skills.registry import SkillRegistry
@@ -969,7 +976,7 @@ class Agent:
                 finish_reason_seen: str | None = None
 
                 try:
-                    async with asyncio.timeout(self._config.timeout):
+                    async with _asyncio_timeout(self._config.timeout):
                         async for chunk in self._llm.chat(messages, **llm_kwargs):
                             # 追踪：首个有效 chunk 记 TTFT；finish_reason 取最后一个非空
                             if not ttfc_recorded and (

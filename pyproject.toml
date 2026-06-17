@@ -48,6 +48,8 @@ dependencies = [
     "sse-starlette>=2.0.0",
     # MCP 协议（连接外部 MCP 服务器）：与 serve 依赖大量重叠，净增很小，故进核心
     "mcp>=1.0.0",
+    # asyncio.timeout() 的 Python 3.10 backport（3.11+ 用标准库，故仅 <3.11 安装）
+    "async-timeout>=4.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
