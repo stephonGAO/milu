@@ -2,6 +2,25 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [0.3.0] - 2026-06-18
+
+本版本以**跨用户观测大屏（数据中心）**为主线，并完成 CLI 与 Web 全链路中英双语（兼容 0.2.x，无破坏性变更）。
+
+### 新增
+
+- **跨用户观测大屏 `/dashboard`**（`src/milu/serving/web/dashboard.py` + `static/dashboard.html`）：与单用户对话 SPA 正交的**管理员/运维视角**，跨所有用户俯瞰运行指标、资源池、Agent 链路、安全审计、定时任务与每用户数据画像。
+  - **鉴权门控**：`check_admin` 校验 `MILU_ADMIN_TOKEN`（header `X-Admin-Token` / `Authorization: Bearer` / 查询参数 `token`，常量时间比较）；**未设置令牌时默认仅 localhost 可访问**。敏感正文（对话/记忆）默认不进聚合，仅显式下钻时按需返回。
+  - **实时事件枢纽 `DashboardHub`**：进程级环形缓冲 + 订阅队列，给每个 Agent 的 `TraceConfig.extra_sinks` 注入 `CallbackSink`，span 完成即压成精简事件经 `/api/dashboard/stream`(SSE) 广播；调度结果同枢纽。**Agent 核心零改动**，纯增强式埋点。
+  - **跨用户聚合**：复用 `observability/analytics.py` 一套口径（CLI `trace stats` 与大屏共用，杜绝漂移），叠加资源池实时态（新增 `AgentPool.list_active_sessions()`）+ 会话/记忆/知识库/定时任务的每用户 rollup（短 TTL 缓存防轮询打爆磁盘）。
+  - **下钻**：用户画像表 → 单用户详情（近期运行/会话/记忆/知识库/定时任务）→ 对话浏览；近期运行/事件流 → 链路 span 瀑布浮层。
+  - **前端**：纯 vanilla 暗色科技皮肤 + 手写轻量 SVG 图表（面积折线/半圆仪表/环形/柱状/瀑布，零依赖、随 wheel 分发，不引 CDN/图表库）；轮询 + SSE 双通道；支持暂停/手动刷新；`milu serve` 启动横幅打印 `/dashboard` 地址与令牌提示。
+- **监控大屏中英双语**：复用主前端 i18n 方案（`data-i18n` 属性 + `tr()` 词典），与对话页共用 `localStorage` 键 `milu_lang`——两个页面语言选择一致，顶栏 **EN / 中** 一键切换。
+- **CI / 工程化**：GitHub Actions CI + ruff linting；测试矩阵加入 macOS。
+
+### 修复
+
+- **Python 3.10 兼容性**：backport `asyncio.timeout`（3.11+ 用标准库，<3.11 用 `async-timeout`），并修正其余 3.10 不兼容写法；CI 改用 `python -m pytest` 确保 tests 包可解析。
+
 ## [0.2.0] - 2026-06-17
 
 本版本以**可观测性**为主线：让每一次 Agent 运行从黑箱变得可解释、可测量、可比较、可视化（兼容 0.1.x，无破坏性变更）。

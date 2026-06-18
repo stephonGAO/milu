@@ -4,7 +4,7 @@
 
 **Production-ready multi-user AI agents — with Chinese LLMs as first-class citizens.**
 
-Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler
+Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler · Observability dashboard
 
 [![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
 [![CI](https://github.com/stephonGAO/milu/actions/workflows/ci.yml/badge.svg)](https://github.com/stephonGAO/milu/actions/workflows/ci.yml)
@@ -15,6 +15,12 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 **English** | [简体中文](README.zh-CN.md)
 
 <img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/demo-hero.gif" alt="milu demo" width="820">
+
+<sub>Multi-user web UI · <code>milu serve</code> — streaming chat with tools, skills & sub-agents</sub>
+
+<img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/dashboard.png" alt="milu observability dashboard" width="820">
+
+<sub>Built-in cross-user observability dashboard · <code>milu serve</code> → <code>/dashboard</code></sub>
 
 </div>
 
@@ -33,7 +39,7 @@ Most agent frameworks stop at single-user demos, and treat Chinese LLM providers
 - 🛡️ **A real safety model**<br>
   Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
 - 🔭 **Observability built in**<br>
-  Every `Agent.run()` is a span tree (attribute names aligned with the OpenTelemetry GenAI semantic conventions): per-run tokens / cost / latency, TTFT, time split across LLM vs tools vs safety-judge vs approval-wait, sub-agent nesting, and fail-open audit. Inspect runs from the CLI with `milu trace list/show/compare/stats`, or the per-run waterfall in the web "Observability" panel.
+  Every `Agent.run()` is a span tree (attribute names aligned with the OpenTelemetry GenAI semantic conventions): per-run tokens / cost / latency, TTFT, time split across LLM vs tools vs safety-judge vs approval-wait, sub-agent nesting, and fail-open audit. Inspect runs from the CLI (`milu trace list/show/compare/stats`), the per-run waterfall in the web "Observability" panel, or the **cross-user dashboard** at `/dashboard` (shown above) — pool & concurrency gauges, run / token trends, a safety-audit ring, per-model cost, per-user profiles and a live event stream across all users, admin-gated by `MILU_ADMIN_TOKEN`.
 - 🪶 **Thin by design**<br>
   Built directly on the `openai` SDK as the unified HTTP client. Events stream out as plain dataclasses. No chains, no graphs, no DSL to learn.
 
@@ -100,6 +106,12 @@ docker compose up -d
 milu                # first run guides you through provider + API key setup
 ```
 
+**Multi-user web service** — one command:
+
+```bash
+milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
+```
+
 **Code** — a full-featured agent in 3 lines:
 
 ```python
@@ -111,12 +123,6 @@ async for event in agent.run("What time is it? Use a tool to check."):
 ```
 
 `Agent(llm)` is the complete package by default: built-in system prompt, 20+ tools, skills, three sub-agents, session persistence and context compaction — pass explicit arguments only to override.
-
-**Multi-user web service** — one command:
-
-```bash
-milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
-```
 
 ---
 
@@ -131,6 +137,7 @@ milu serve          # multi-user chat + full-featured demo UI at http://127.0.0.
 | Tool-safety modes + AI judge | ✅ | — | — | sandbox only | — |
 | RAG knowledge base, in-library | ✅ | assemble yourself | partial | — | ✅ |
 | Scheduled tasks (multi-user) | ✅ | — | — | — | — |
+| Observability: tracing + dashboard | ✅ span-tree + `/dashboard` | LangSmith (paid) | platform (paid) | OTel hooks | — |
 | CLI + web service out of the box | ✅ | — | partial | — | demo UI |
 
 > ✅ = built-in; "—" = not built-in (often available via an external platform or a few lines of your own code). Reflects each library as of June 2026 — these move fast, so corrections are welcome via issue/PR.
@@ -296,6 +303,20 @@ milu chat
 Cron-style scheduling per user, executed inside `milu chat` / `milu serve` (or a standalone `milu scheduler start` daemon) with a single-instance lock and automatic takeover. Results are delivered to an outbox file, server push, or desktop notification.
 </details>
 
+<details>
+<summary><b>9 · Built-in web service (multi-user chat UI)</b></summary>
+
+```bash
+milu serve                 # multi-user chat + full-featured demo UI at http://127.0.0.1:8000
+```
+
+`milu serve` ships a full multi-user web UI in one command: streaming chat (text / reasoning / tool calls / sub-agents), provider & mode switching, session management, scheduled tasks, and a knowledge-base panel — plus chat attachments (images / docs) and a risky-tool confirmation dialog. Pure vanilla front-end, no build step. Fully bilingual — toggle **EN / 中文** in the top bar.
+
+<div align="center">
+<img src="https://raw.githubusercontent.com/stephonGAO/milu/main/assets/webui.png" alt="milu web UI" width="860">
+</div>
+</details>
+
 ## CLI
 
 <!-- demo-cli.gif (optional) goes here. After recording (see assets/RECORDING.md), uncomment the line below and delete this note. -->
@@ -362,7 +383,8 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 ## Roadmap
 
 - [x] Observability: span-tree tracing (OTel GenAI semconv-aligned) + CLI `milu trace`
-- [ ] Multi-user observability dashboard + OTLP exporter
+- [x] Multi-user observability dashboard (cross-user data-center view at `/dashboard`)
+- [ ] OTLP exporter for the tracing layer
 - [ ] Sandboxed code execution backends for `python_repl` / `shell_command`
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)

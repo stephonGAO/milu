@@ -4,7 +4,7 @@
 
 **生产级多用户 Agent 框架 —— 国产大模型一等公民。**
 
-多用户并发池 · 一套接口接入 9 家大模型（国产一等公民） · 内置工具与 MCP · 子代理 · 技能 · RAG 知识库 · 定时任务
+多用户并发池 · 一套接口接入 9 家大模型（国产一等公民） · 内置工具与 MCP · 子代理 · 技能 · RAG 知识库 · 定时任务 · 观测大屏
 
 [![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
 [![CI](https://github.com/stephonGAO/milu/actions/workflows/ci.yml/badge.svg)](https://github.com/stephonGAO/milu/actions/workflows/ci.yml)
@@ -15,6 +15,12 @@
 [English](README.md) | **简体中文**
 
 <img src="assets/demo-hero.zh.gif" alt="milu 演示" width="820">
+
+<sub>多用户 Web 前端 · <code>milu serve</code> —— 流式对话，工具、技能、子代理开箱即用</sub>
+
+<img src="assets/dashboard.zh.png" alt="milu 观测大屏" width="820">
+
+<sub>内置跨用户观测大屏 · <code>milu serve</code> → <code>/dashboard</code></sub>
 
 </div>
 
@@ -33,7 +39,7 @@
 - 🛡️ **真正的安全模型**<br>
   四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
 - 🔭 **内置可观测性**<br>
-  每次 `Agent.run()` 即一棵 span 树（属性命名对齐 OpenTelemetry GenAI 语义约定）：单次运行的 token / 成本 / 延迟、TTFT、LLM vs 工具 vs 安全判定 vs 审批等待的时间分解、子代理嵌套、fail-open 审计。可经 CLI `milu trace list/show/compare/stats` 查看，或在 Web「观测」面板看单次运行的链路瀑布。
+  每次 `Agent.run()` 即一棵 span 树（属性命名对齐 OpenTelemetry GenAI 语义约定）：单次运行的 token / 成本 / 延迟、TTFT、LLM vs 工具 vs 安全判定 vs 审批等待的时间分解、子代理嵌套、fail-open 审计。可经 CLI（`milu trace list/show/compare/stats`）、Web「观测」面板看单次运行的链路瀑布，或经 `/dashboard` 的**跨用户观测大屏**（见上图）——资源池与并发仪表、运行 / Token 走势、安全审计环形、模型成本、用户画像与跨所有用户的实时事件流，经 `MILU_ADMIN_TOKEN` 鉴权。
 - 🪶 **薄封装，不造概念**<br>
   直接以 `openai` SDK 为统一 HTTP 客户端，事件以普通 dataclass 流式输出。没有链、没有图、没有需要学习的 DSL。
 
@@ -100,6 +106,12 @@ docker compose up -d
 milu                # 首次运行自动进入引导：选厂商 → 填 API Key → 开聊
 ```
 
+**多用户 Web 服务** —— 一条命令：
+
+```bash
+milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1:8000
+```
+
 **代码** —— 3 行得到一个全功能 Agent：
 
 ```python
@@ -111,12 +123,6 @@ async for event in agent.run("现在几点了？用工具查一下"):
 ```
 
 `Agent(llm)` 默认即完整体：内置系统提示词、20+ 工具、技能、三个子代理、会话持久化与上下文压缩——只在需要覆盖时才传参数。
-
-**多用户 Web 服务** —— 一条命令：
-
-```bash
-milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1:8000
-```
 
 ---
 
@@ -131,6 +137,7 @@ milu serve          # 多用户对话 + 全功能演示前端，http://127.0.0.1
 | 工具安全模式 + AI 判定 | ✅ | — | — | 仅沙箱 | — |
 | RAG 知识库（库内置） | ✅ | 自行组装 | 部分 | — | ✅ |
 | 定时任务（多用户） | ✅ | — | — | — | — |
+| 可观测性：链路追踪 + 大屏 | ✅ span 树 + `/dashboard` | LangSmith（收费） | 平台（收费） | OTel 接入 | — |
 | CLI + Web 服务开箱即用 | ✅ | — | 部分 | — | 演示 UI |
 
 > ✅ = 库内直接提供；「—」= 未内置（通常可经外部平台或少量自研代码补齐）。数据截至 2026 年 6 月，竞品迭代很快，欢迎经 issue/PR 指正。
@@ -296,6 +303,20 @@ milu chat
 按用户隔离的 cron 任务，在 `milu chat` / `milu serve` 内嵌执行（或独立守护进程 `milu scheduler start`），单实例锁 + 自动接管。结果投递到 outbox 文件、服务端推送或桌面通知。
 </details>
 
+<details>
+<summary><b>9 · 内置 Web 服务（多用户对话前端）</b></summary>
+
+```bash
+milu serve                 # 多用户对话 + 全功能演示前端，http://127.0.0.1:8000
+```
+
+`milu serve` 一条命令起一个完整的多用户 Web 前端：流式对话（文本 / 思考 / 工具调用 / 子代理）、厂商与模式切换、会话管理、定时任务、知识库面板——还有聊天附件（图片 / 文档）与危险工具确认弹窗。纯 vanilla 前端、无构建链。全程中英双语——顶栏 **EN / 中文** 一键切换。
+
+<div align="center">
+<img src="assets/webui.zh.png" alt="milu Web 前端" width="860">
+</div>
+</details>
+
 ## 命令行
 
 <!-- demo-cli.gif（可选）占位：录制后（脚本见 assets/RECORDING.md）取消下一行注释，并删除本说明行。 -->
@@ -362,7 +383,8 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 ## 路线图
 
 - [x] 可观测性：span 树追踪（对齐 OTel GenAI 语义约定）+ CLI `milu trace`
-- [ ] 多用户观测大屏 + OTLP 导出器
+- [x] 多用户观测大屏（跨用户数据中心视角，`/dashboard`）
+- [ ] 追踪层 OTLP 导出器
 - [ ] `python_repl` / `shell_command` 的沙箱执行后端
 - [ ] 知识库可插拔 ANN 后端（sqlite-vec），超越暴力余弦
 - [ ] 英文文档集（架构与指南，当前为中文）
