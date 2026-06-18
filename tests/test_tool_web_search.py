@@ -1,8 +1,15 @@
 """测试内置工具 web_search - 网页搜索（ddgs）"""
 from unittest.mock import AsyncMock, patch, MagicMock
 
+import sys
+
 import pytest
 from milu.tools.builtin.web_search import web_search
+# 取真正的子模块对象：milu.tools.builtin.web_search 作为 builtin 包属性会被同名的
+# web_search 函数遮蔽——patch("…web_search.X") 与 import…as 在 Python 3.10 的 mock
+# 上都会解析到「函数」而非「模块」，patch 失效。sys.modules 不受属性遮蔽影响，
+# 拿到模块后用 patch.object(_ws_mod, …) 跨版本稳定。
+_ws_mod = sys.modules["milu.tools.builtin.web_search"]
 
 
 def _make_ddgs_mock(results: list[dict]):
@@ -42,7 +49,7 @@ class TestWebSearch:
             {"title": "Wikipedia", "body": "Python created by Guido.", "href": "https://en.wikipedia.org/wiki/Python"},
         ]
 
-        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+        with patch.object(_ws_mod, "DDGS", _make_ddgs_mock(items), create=True):
             result = await web_search(query="Python programming")
             assert "Python" in result
             assert "https://python.org" in result
@@ -50,7 +57,7 @@ class TestWebSearch:
     @pytest.mark.asyncio
     async def test_search_no_results(self):
         """搜索无结果"""
-        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock([]), create=True):
+        with patch.object(_ws_mod, "DDGS", _make_ddgs_mock([]), create=True):
             result = await web_search(query="xyznonexistentquery123")
             assert "未找到" in result
 
@@ -61,7 +68,7 @@ class TestWebSearch:
         mock_instance.text = MagicMock(side_effect=Exception("Connection refused"))
         mock_cls = MagicMock(return_value=mock_instance)
 
-        with patch("milu.tools.builtin.web_search.DDGS", mock_cls, create=True):
+        with patch.object(_ws_mod, "DDGS", mock_cls, create=True):
             result = await web_search(query="test")
             assert "错误" in result
 
@@ -73,7 +80,7 @@ class TestWebSearch:
             for i in range(3)
         ]
 
-        with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+        with patch.object(_ws_mod, "DDGS", _make_ddgs_mock(items), create=True):
             result = await web_search(query="test", num_results=3)
             assert result.count("https://example.com/") == 3
 
@@ -82,7 +89,7 @@ class TestWebSearch:
         """ddgs 为可选依赖（milu[ddg]）：未安装时返回友好提示，不抛 ImportError"""
         import sys
         # DDGS 缓存置 None + 屏蔽 ddgs 模块（sys.modules 值为 None → import 即抛 ImportError）
-        with patch("milu.tools.builtin.web_search.DDGS", None, create=True):
+        with patch.object(_ws_mod, "DDGS", None, create=True):
             with patch.dict(sys.modules, {"ddgs": None}):
                 result = await web_search(query="test")
         assert "ddgs" in result
@@ -109,7 +116,7 @@ class TestWebSearch:
         }
 
         with patch.dict("os.environ", {"SEARCH_API_URL": "https://api.custom.com/search", "SEARCH_API_KEY": "mykey"}):
-            with patch("milu.tools.builtin.web_search.httpx.AsyncClient") as mock_client_cls:
+            with patch("httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(return_value=mock_response)
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -148,7 +155,7 @@ class TestSearchProviders:
 
         env = {"WEB_SEARCH_PROVIDER": "tavily", "TAVILY_API_KEY": "tk"}
         with patch.dict("os.environ", env, clear=False):
-            with patch("milu.tools.builtin.web_search.httpx.AsyncClient", client_cls):
+            with patch("httpx.AsyncClient", client_cls):
                 result = await web_search(query="测试")
 
         assert "Tavily 结果" in result
@@ -169,7 +176,7 @@ class TestSearchProviders:
 
         env = {"WEB_SEARCH_PROVIDER": "bocha", "BOCHA_API_KEY": "bk"}
         with patch.dict("os.environ", env, clear=False):
-            with patch("milu.tools.builtin.web_search.httpx.AsyncClient", client_cls):
+            with patch("httpx.AsyncClient", client_cls):
                 result = await web_search(query="测试")
 
         assert "博查结果" in result
@@ -198,6 +205,6 @@ class TestSearchProviders:
         with patch.dict("os.environ", {}, clear=False):
             import os
             os.environ.pop("WEB_SEARCH_PROVIDER", None)
-            with patch("milu.tools.builtin.web_search.DDGS", _make_ddgs_mock(items), create=True):
+            with patch.object(_ws_mod, "DDGS", _make_ddgs_mock(items), create=True):
                 result = await web_search(query="测试")
         assert "DDG 结果" in result

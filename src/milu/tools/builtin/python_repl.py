@@ -33,12 +33,17 @@ _EXEC_TIMEOUT = 30
 if sys.platform == "win32" and not getattr(sys.flags, "utf8_mode", False):
     os.environ["PYTHONUTF8"] = "1"
 
-    _orig_getencoding = locale.getencoding
-
-    def _utf8_getencoding() -> str:
+    def _utf8_encoding(*_args, **_kwargs) -> str:
         return "utf-8"
 
-    locale.getencoding = _utf8_getencoding
+    # 父进程 subprocess 解码管道用的编码函数：Python 3.11+ 是 locale.getencoding，
+    # 3.10 及更早是 locale.getpreferredencoding。按存在性 patch——直接访问
+    # locale.getencoding 在 3.10 上会 AttributeError，导致 import milu 崩溃
+    # （Windows + Python 3.10 用户）。
+    if hasattr(locale, "getencoding"):
+        locale.getencoding = _utf8_encoding
+    else:
+        locale.getpreferredencoding = _utf8_encoding
 
     # 同步修复当前进程的 stdout/stderr
     for _stream in (sys.stdout, sys.stderr):

@@ -242,8 +242,12 @@ class TestStructuredOutputAutoFix:
         fixed_json = json.dumps({"name": "test", "score": 95, "tags": []})
         mock_llm = _make_mock_llm(fixed_json)
 
-        # mock 掉默认 LLM 的创建
-        with patch("milu.tools.builtin.structured_output._get_default_fix_llm", return_value=mock_llm):
+        # mock 掉默认 LLM 的创建。用 sys.modules 取真正的子模块对象再 patch.object——
+        # milu.tools.builtin.structured_output 被同名函数遮蔽，patch 字符串路径与
+        # import…as 在 3.10 mock 上都会解析到函数而非模块。
+        import sys
+        _so_mod = sys.modules["milu.tools.builtin.structured_output"]
+        with patch.object(_so_mod, "_get_default_fix_llm", return_value=mock_llm):
             result = await structured_output(bad_raw, SAMPLE_SCHEMA, auto_fix=True)
             assert result["success"] is True
             assert result["attempts"] == 2  # 没有 LLM，不尝试修复
