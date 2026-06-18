@@ -186,16 +186,17 @@
 </head>
 <body>
 <header>
-  <div class="logo"><span class="dot"></span><b>MILU</b><span>数据中心 · OBSERVABILITY</span></div>
+  <div class="logo"><span class="dot"></span><b>MILU</b><span data-i18n="hdr.center">数据中心 · OBSERVABILITY</span></div>
   <div class="spacer"></div>
-  <div class="hstat"><span id="liveDot" class="live off"></span><span id="liveTxt">连接中…</span></div>
+  <div class="hstat"><span id="liveDot" class="live off"></span><span id="liveTxt" data-i18n="live.connecting">连接中…</span></div>
   <div class="seg" id="rangeSeg">
     <button data-r="24h" class="on">24h</button>
     <button data-r="7d">7d</button>
     <button data-r="30d">30d</button>
   </div>
-  <button class="iconbtn" id="refreshBtn" title="立即刷新">⟳</button>
-  <button class="iconbtn" id="pauseBtn" title="暂停 / 恢复自动刷新">⏸</button>
+  <button class="iconbtn" id="refreshBtn" data-i18n-title="hdr.refresh" title="立即刷新">⟳</button>
+  <button class="iconbtn" id="pauseBtn" data-i18n-title="hdr.pause" title="暂停 / 恢复自动刷新">⏸</button>
+  <button class="iconbtn" id="langBtn" data-i18n-title="lang.toggle" title="切换语言 / Switch language" onclick="toggleLang()">EN</button>
   <div class="clock num" id="clock">--:--:--</div>
 </header>
 
@@ -204,44 +205,44 @@
   <div class="grid">
     <div class="col">
       <div class="panel">
-        <h3><span class="ic"></span>运行量 / Token 走势 <span class="right" id="seriesNote"></span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.series">运行量 / Token 走势</span> <span class="right" id="seriesNote"></span></h3>
         <div id="seriesChart"></div>
       </div>
       <div class="row2">
         <div class="panel">
-          <h3><span class="ic"></span>资源池</h3>
+          <h3><span class="ic"></span><span data-i18n="p.pool">资源池</span></h3>
           <div class="gauges" id="gauges"></div>
         </div>
         <div class="panel">
-          <h3><span class="ic"></span>安全审计</h3>
+          <h3><span class="ic"></span><span data-i18n="p.audit">安全审计</span></h3>
           <div id="audit"></div>
         </div>
       </div>
       <div class="panel">
-        <h3><span class="ic"></span>模型 · Token / 成本</h3>
+        <h3><span class="ic"></span><span data-i18n="p.models">模型 · Token / 成本</span></h3>
         <div class="bars" id="models"></div>
       </div>
       <div class="panel">
-        <h3><span class="ic"></span>用户画像 <span class="right" id="usersNote"></span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.users">用户画像</span> <span class="right" id="usersNote"></span></h3>
         <div class="tblwrap"><table class="tbl" id="usersTbl"></table></div>
       </div>
     </div>
 
     <div class="col">
       <div class="panel">
-        <h3><span class="ic"></span>实时事件流 <span class="right" id="feedNote">SSE</span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.feed">实时事件流</span> <span class="right" id="feedNote">SSE</span></h3>
         <div class="feed" id="feed"></div>
       </div>
       <div class="panel">
-        <h3><span class="ic"></span>活跃会话 <span class="right" id="activeNote"></span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.active">活跃会话</span> <span class="right" id="activeNote"></span></h3>
         <div id="active" style="max-height:200px;overflow:auto"></div>
       </div>
       <div class="panel">
-        <h3><span class="ic"></span>定时任务 <span class="right" id="schedNote"></span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.sched">定时任务</span> <span class="right" id="schedNote"></span></h3>
         <div id="sched" style="max-height:200px;overflow:auto"></div>
       </div>
       <div class="panel">
-        <h3><span class="ic"></span>近期运行 <span class="right">点击查看链路</span></h3>
+        <h3><span class="ic"></span><span data-i18n="p.runs">近期运行</span> <span class="right" data-i18n="p.runs.right">点击查看链路</span></h3>
         <div id="runs" style="max-height:240px;overflow:auto"></div>
       </div>
     </div>
@@ -257,9 +258,106 @@
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const KIND_COLOR = {generation:"#4f8cff",tool:"#e0a800",guardrail:"#b36ae2",
   confirmation:"#e2566a",compaction:"#3bbf7a",agent:"#8a93a6"};
-const KIND_LABEL = {generation:"LLM",tool:"工具",guardrail:"安全判定",
-  confirmation:"人工确认",compaction:"压缩",agent:"Agent",schedule:"定时任务"};
 let RANGE = "24h";
+
+// ── 中英双语 i18n（与主前端 index.html 共用 localStorage 键 milu_lang）──
+const I18N={
+  zh:{
+    "title":"MILU · 数据中心","hdr.center":"数据中心 · OBSERVABILITY",
+    "lang.toggle":"切换语言 / Switch language","hdr.refresh":"立即刷新","hdr.pause":"暂停 / 恢复自动刷新",
+    "live.connecting":"连接中…","live.connected":"实时连接","live.reconnect":"重连中…","live.paused":"已暂停",
+    "p.series":"运行量 / Token 走势","p.pool":"资源池","p.audit":"安全审计","p.models":"模型 · Token / 成本",
+    "p.users":"用户画像","p.feed":"实时事件流","p.active":"活跃会话","p.sched":"定时任务","p.runs":"近期运行","p.runs.right":"点击查看链路",
+    "kind.generation":"LLM","kind.tool":"工具","kind.guardrail":"安全判定","kind.confirmation":"人工确认",
+    "kind.compaction":"压缩","kind.agent":"Agent","kind.schedule":"定时任务",
+    "ago.sec":"{0}秒前","ago.min":"{0}分前","ago.hour":"{0}时前","ago.day":"{0}天前",
+    "chart.nodata":"暂无数据","chart.runs":"运行数（峰值 {0}）","chart.tokens":"Token（峰值 {0}）",
+    "kpi.instances":"在线实例","kpi.instances.sub":"上限 {0} · 用户 {1}","kpi.concurrency":"并发运行","kpi.concurrency.sub":"空闲 {0} / {1}",
+    "kpi.cache":"缓存命中","kpi.cache.sub":"复用 {0}","kpi.runs.today":"今日运行","kpi.runs.today.sub":"累计 {0}",
+    "kpi.okrate":"成功率","kpi.okrate.sub":"失败 {0} · 中断 {1}","kpi.tokens.today":"今日 Token","kpi.tokens.today.sub":"累计 {0}",
+    "kpi.cost":"成本(累计)","kpi.cost.sub":"今日 {0}","kpi.p95":"p95 延迟","kpi.p95.sub":"p50 {0}",
+    "kpi.failopen":"fail-open","kpi.failopen.sub":"deny {0} · confirm {1}",
+    "g.instance":"实例","g.concurrency":"并发","g.mcp":"MCP","g.waiting":"等待 {0}","g.evictlru":"淘汰LRU {0}",
+    "g.evictidle":"空闲清理 {0}","g.rejected":"拒绝 {0}","g.runlat":"run p50 {0} / p95 {1}",
+    "audit.toolcalls":"工具调用","audit.allow":"放行 {0}","audit.confirm":"需确认 {0}","audit.deny":"拒绝 {0}",
+    "audit.toolerr":"工具错误","audit.ofcalls":"/ 调用 {0} · fail-open","audit.nomode":"无模式数据",
+    "models.nodata":"暂无模型数据","models.runs":"{0}次",
+    "users.count":"{0} 个用户","users.nodata":"暂无用户数据","users.kbcell":"{0}块/{1}源",
+    "uh.user":"用户","uh.runs":"运行","uh.okrate":"成功率","uh.token":"Token","uh.cost":"成本",
+    "uh.sessmsg":"会话/消息","uh.memory":"记忆","uh.kb":"知识库","uh.tasks":"任务","uh.lastactive":"最近活跃",
+    "active.count":"{0} 个","active.none":"当前无活跃会话","active.idle":"空闲 {0}s",
+    "sched.count":"{0}/{1} 启用","sched.taskmeta":"{0} · 执行 {1} 次 · 下次 {2}","sched.none":"暂无定时任务","sched.recent":"最近结果",
+    "runs.none":"暂无运行记录","runs.turnstools":"{0}轮/{1}工具","runs.failopen":" · ⚠fail-open",
+    "feed.scheddone":"定时任务「{0}」完成","feed.judgefailopen":"判定失败 fail-open 放行","feed.judge":"判定 {0}",
+    "feed.confirm":"人工确认 → {0}","feed.agentdone":"运行结束 {0}/{1} · {2}轮","feed.gentok":"{0} · {1}→{2} tok","feed.toolcall":"调用 {0}",
+    "tr.loading":"加载链路…","tr.notfound":"未找到该运行","tr.loadfail":"加载失败：{0}","tr.title":"运行链路 · {0}/{1}",
+    "tr.user":"用户","tr.nospan":"无 span","tr.turns":"{0}轮",
+    "tr.llm":"LLM","tr.tool":"工具","tr.judge":"安全判定","tr.wait":"审批等待","tr.subagent":"子代理","tr.compact":"压缩","tr.failopen":"⚠ fail-open ×{0}",
+    "ud.loading":"加载用户 {0} …","ud.run":"运行","ud.okrate":"成功率","ud.token":"Token","ud.cost":"成本","ud.p95":"p95",
+    "ud.recentruns":"近期运行（点击看链路）","ud.norun":"无运行","ud.sessions":"会话（点击看对话）","ud.sessmeta":"{0} 条消息 · {1}",
+    "ud.viewconv":"查看对话 ›","ud.nosession":"无会话","ud.memory":"长期记忆（{0} 条）","ud.nomemory":"无记忆",
+    "ud.kb":"知识库（{0} 块 / {1} 源 · {2}）","ud.nosource":"无来源","ud.chunks":"{0}块","ud.tasks":"定时任务（{0}）","ud.taskmeta":"{0} · 执行 {1} 次","ud.notask":"无定时任务",
+    "ud.title":"用户 · {0}","ud.online":"在线",
+    "cv.loading":"加载对话 …","cv.notfound":"会话不存在","cv.loadfail":"加载失败：{0}","cv.back":"← 返回用户",
+    "cv.toolresult":"工具结果","cv.user":"用户","cv.assistant":"助手","cv.empty":"（空）","cv.title":"对话 · {0}","cv.count":"{0} 条消息（最多展示最近 300 条）","cv.nomsg":"无消息",
+    "gate.title":"需要管理员令牌","gate.desc":"该观测大屏跨用户读取全局数据（错误码 {0}）。请在地址后附加 <code>?token=你的MILU_ADMIN_TOKEN</code> 访问，或在仅本机访问时确认服务端未设置该令牌。",
+    "an.note":"{0} · {1}","an.byday":"按天","an.byhour":"按小时",
+  },
+  en:{
+    "title":"MILU · Data Center","hdr.center":"DATA CENTER · OBSERVABILITY",
+    "lang.toggle":"切换语言 / Switch language","hdr.refresh":"Refresh now","hdr.pause":"Pause / resume auto-refresh",
+    "live.connecting":"Connecting…","live.connected":"Live","live.reconnect":"Reconnecting…","live.paused":"Paused",
+    "p.series":"Runs / Token trend","p.pool":"Agent pool","p.audit":"Safety audit","p.models":"Models · Token / Cost",
+    "p.users":"Users","p.feed":"Live event stream","p.active":"Active sessions","p.sched":"Scheduled tasks","p.runs":"Recent runs","p.runs.right":"Click to view trace",
+    "kind.generation":"LLM","kind.tool":"Tool","kind.guardrail":"Guardrail","kind.confirmation":"Confirm",
+    "kind.compaction":"Compact","kind.agent":"Agent","kind.schedule":"Schedule",
+    "ago.sec":"{0}s ago","ago.min":"{0}m ago","ago.hour":"{0}h ago","ago.day":"{0}d ago",
+    "chart.nodata":"No data","chart.runs":"Runs (peak {0})","chart.tokens":"Token (peak {0})",
+    "kpi.instances":"Live instances","kpi.instances.sub":"max {0} · users {1}","kpi.concurrency":"Concurrent runs","kpi.concurrency.sub":"idle {0} / {1}",
+    "kpi.cache":"Cache hit","kpi.cache.sub":"reused {0}","kpi.runs.today":"Runs today","kpi.runs.today.sub":"total {0}",
+    "kpi.okrate":"Success rate","kpi.okrate.sub":"error {0} · interrupted {1}","kpi.tokens.today":"Tokens today","kpi.tokens.today.sub":"total {0}",
+    "kpi.cost":"Cost (total)","kpi.cost.sub":"today {0}","kpi.p95":"p95 latency","kpi.p95.sub":"p50 {0}",
+    "kpi.failopen":"fail-open","kpi.failopen.sub":"deny {0} · confirm {1}",
+    "g.instance":"Instances","g.concurrency":"Concurrency","g.mcp":"MCP","g.waiting":"waiting {0}","g.evictlru":"LRU-evicted {0}",
+    "g.evictidle":"idle-evicted {0}","g.rejected":"rejected {0}","g.runlat":"run p50 {0} / p95 {1}",
+    "audit.toolcalls":"Tool calls","audit.allow":"allowed {0}","audit.confirm":"confirm {0}","audit.deny":"denied {0}",
+    "audit.toolerr":"Tool errors","audit.ofcalls":"/ calls {0} · fail-open","audit.nomode":"No mode data",
+    "models.nodata":"No model data","models.runs":"{0} runs",
+    "users.count":"{0} users","users.nodata":"No user data","users.kbcell":"{0} chunks/{1} src",
+    "uh.user":"User","uh.runs":"Runs","uh.okrate":"Success","uh.token":"Token","uh.cost":"Cost",
+    "uh.sessmsg":"Sess/Msgs","uh.memory":"Memory","uh.kb":"KB","uh.tasks":"Tasks","uh.lastactive":"Last active",
+    "active.count":"{0}","active.none":"No active sessions","active.idle":"idle {0}s",
+    "sched.count":"{0}/{1} enabled","sched.taskmeta":"{0} · ran {1}× · next {2}","sched.none":"No scheduled tasks","sched.recent":"Recent results",
+    "runs.none":"No run records","runs.turnstools":"{0} turns/{1} tools","runs.failopen":" · ⚠fail-open",
+    "feed.scheddone":"Scheduled task “{0}” done","feed.judgefailopen":"judge failed → fail-open allowed","feed.judge":"judge {0}",
+    "feed.confirm":"confirmation → {0}","feed.agentdone":"run ended {0}/{1} · {2} turns","feed.gentok":"{0} · {1}→{2} tok","feed.toolcall":"call {0}",
+    "tr.loading":"Loading trace…","tr.notfound":"Run not found","tr.loadfail":"Load failed: {0}","tr.title":"Run trace · {0}/{1}",
+    "tr.user":"user","tr.nospan":"No span","tr.turns":"{0} turns",
+    "tr.llm":"LLM","tr.tool":"Tools","tr.judge":"Guardrail","tr.wait":"Approval wait","tr.subagent":"Subagents","tr.compact":"Compactions","tr.failopen":"⚠ fail-open ×{0}",
+    "ud.loading":"Loading user {0} …","ud.run":"Runs","ud.okrate":"Success","ud.token":"Token","ud.cost":"Cost","ud.p95":"p95",
+    "ud.recentruns":"Recent runs (click for trace)","ud.norun":"No runs","ud.sessions":"Sessions (click to view chat)","ud.sessmeta":"{0} messages · {1}",
+    "ud.viewconv":"View chat ›","ud.nosession":"No sessions","ud.memory":"Long-term memory ({0})","ud.nomemory":"No memory",
+    "ud.kb":"Knowledge ({0} chunks / {1} src · {2})","ud.nosource":"No source","ud.chunks":"{0} chunks","ud.tasks":"Scheduled tasks ({0})","ud.taskmeta":"{0} · ran {1}×","ud.notask":"No scheduled tasks",
+    "ud.title":"User · {0}","ud.online":"online",
+    "cv.loading":"Loading chat …","cv.notfound":"Session not found","cv.loadfail":"Load failed: {0}","cv.back":"← Back to user",
+    "cv.toolresult":"Tool result","cv.user":"User","cv.assistant":"Assistant","cv.empty":"(empty)","cv.title":"Chat · {0}","cv.count":"{0} messages (showing latest 300)","cv.nomsg":"No messages",
+    "gate.title":"Admin token required","gate.desc":"This dashboard reads global cross-user data (error {0}). Append <code>?token=YOUR_MILU_ADMIN_TOKEN</code> to the URL, or confirm the server has no token set when accessing from localhost only.",
+    "an.note":"{0} · {1}","an.byday":"by day","an.byhour":"by hour",
+  }
+};
+let LANG=localStorage.getItem("milu_lang")||"zh";
+function tr(k,...a){let s=(I18N[LANG]&&I18N[LANG][k]);if(s==null)s=(I18N.zh[k]!=null?I18N.zh[k]:k);a.forEach((v,i)=>{s=String(s).split("{"+i+"}").join(v)});return s}
+function kindLabel(k){return tr("kind."+k)!=("kind."+k)?tr("kind."+k):(k||"·")}
+function locale(){return LANG==="zh"?"zh-CN":"en-US"}
+function applyI18n(){
+  document.documentElement.lang=LANG==="zh"?"zh-CN":"en";
+  document.title=tr("title");
+  document.querySelectorAll("[data-i18n]").forEach(el=>{el.textContent=tr(el.dataset.i18n)});
+  document.querySelectorAll("[data-i18n-title]").forEach(el=>{el.title=tr(el.dataset.i18nTitle)});
+  const lb=$("langBtn");if(lb)lb.textContent=LANG==="zh"?"EN":"中";
+}
+function setLang(l){LANG=l;localStorage.setItem("milu_lang",l);applyI18n();refreshNow();}
+function toggleLang(){setLang(LANG==="zh"?"en":"zh");}
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -286,15 +384,15 @@ function fmtCost(c){
   return Object.entries(c).map(([k,v])=>(sym[k]||k+" ")+(+v).toFixed(3)).join(" ");
 }
 function fmtTime(ts){ if(!ts) return "—"; const d=new Date(ts*1000);
-  return d.toLocaleTimeString("zh-CN",{hour12:false}); }
+  return d.toLocaleTimeString(locale(),{hour12:false}); }
 function ago(ts){ if(!ts) return "—"; const s=Date.now()/1000-ts;
-  if(s<60) return Math.round(s)+"秒前"; if(s<3600) return Math.round(s/60)+"分前";
-  if(s<86400) return Math.round(s/3600)+"时前"; return Math.round(s/86400)+"天前"; }
+  if(s<60) return tr("ago.sec",Math.round(s)); if(s<3600) return tr("ago.min",Math.round(s/60));
+  if(s<86400) return tr("ago.hour",Math.round(s/3600)); return tr("ago.day",Math.round(s/86400)); }
 
 /* ── SVG 图表（手写，零依赖）─────────────────────── */
 function areaChart(series){
   const W=620,H=170,pad=8;
-  if(!series||!series.length) return `<div class="empty">暂无数据</div>`;
+  if(!series||!series.length) return `<div class="empty">${tr("chart.nodata")}</div>`;
   const runs=series.map(b=>b.runs), toks=series.map(b=>(b.input_tokens||0)+(b.output_tokens||0));
   const maxR=Math.max(1,...runs), maxT=Math.max(1,...toks);
   const n=series.length, dx=(W-pad*2)/Math.max(1,n-1);
@@ -320,8 +418,8 @@ function areaChart(series){
     ${rP.map(q=>`<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="2.2" fill="#818cf8"/>`).join("")}
     ${ticks}
   </svg>
-  <div class="legend"><span><i style="background:#818cf8"></i>运行数（峰值 ${maxR}）</span>
-   <span><i style="background:#22d3ee"></i>Token（峰值 ${fmtNum(maxT)}）</span></div>`;
+  <div class="legend"><span><i style="background:#818cf8"></i>${tr("chart.runs",maxR)}</span>
+   <span><i style="background:#22d3ee"></i>${tr("chart.tokens",fmtNum(maxT))}</span></div>`;
 }
 function gauge(value,max,label,color){
   const r=34,cx=44,cy=44,C=Math.PI*r; // 半圆
@@ -367,27 +465,27 @@ function renderKPIs(o){
   const hit=p.hit_rate!=null?(p.hit_rate*100).toFixed(0)+"%":"—";
   const tokToday=(st.input_tokens||0)+(st.output_tokens||0);
   $("kpis").innerHTML=[
-    kpi("c-cyan","在线实例", (p.active_entries||0), `上限 ${p.max_agents||"—"} · 用户 ${o.users_count||0}`),
-    kpi("","并发运行", `${p.in_flight||0}`, `空闲 ${p.available_slots!=null?p.available_slots:"—"} / ${p.max_concurrent_runs||"—"}`),
-    kpi("c-mag","缓存命中", hit, `复用 ${fmtNum(p.reused||0)}`),
-    kpi("","今日运行", fmtNum(st.runs||0), `累计 ${fmtNum(sa.runs||0)}`),
-    kpi(rate>=95?"c-green":(rate>=80?"c-amber":"c-red"),"成功率", rate+"%", `失败 ${sa.error||0} · 中断 ${sa.interrupted||0}`),
-    kpi("c-cyan","今日 Token", fmtNum(tokToday), `累计 ${fmtNum((sa.input_tokens||0)+(sa.output_tokens||0))}`),
-    kpi("c-amber","成本(累计)", fmtCost(sa.cost), `今日 ${fmtCost(st.cost)}`),
-    kpi("","p95 延迟", fmtMs(sa.p95_ms), `p50 ${fmtMs(sa.p50_ms)}`),
-    kpi((sa.fail_opens||0)>0?"c-red":"","fail-open", (sa.fail_opens||0), `deny ${sa.judge_denies||0} · confirm ${sa.judge_confirms||0}`),
+    kpi("c-cyan",tr("kpi.instances"), (p.active_entries||0), tr("kpi.instances.sub", p.max_agents||"—", o.users_count||0)),
+    kpi("",tr("kpi.concurrency"), `${p.in_flight||0}`, tr("kpi.concurrency.sub", p.available_slots!=null?p.available_slots:"—", p.max_concurrent_runs||"—")),
+    kpi("c-mag",tr("kpi.cache"), hit, tr("kpi.cache.sub", fmtNum(p.reused||0))),
+    kpi("",tr("kpi.runs.today"), fmtNum(st.runs||0), tr("kpi.runs.today.sub", fmtNum(sa.runs||0))),
+    kpi(rate>=95?"c-green":(rate>=80?"c-amber":"c-red"),tr("kpi.okrate"), rate+"%", tr("kpi.okrate.sub", sa.error||0, sa.interrupted||0)),
+    kpi("c-cyan",tr("kpi.tokens.today"), fmtNum(tokToday), tr("kpi.tokens.today.sub", fmtNum((sa.input_tokens||0)+(sa.output_tokens||0)))),
+    kpi("c-amber",tr("kpi.cost"), fmtCost(sa.cost), tr("kpi.cost.sub", fmtCost(st.cost))),
+    kpi("",tr("kpi.p95"), fmtMs(sa.p95_ms), tr("kpi.p95.sub", fmtMs(sa.p50_ms))),
+    kpi((sa.fail_opens||0)>0?"c-red":"",tr("kpi.failopen"), (sa.fail_opens||0), tr("kpi.failopen.sub", sa.judge_denies||0, sa.judge_confirms||0)),
   ].join("");
 }
 function renderGauges(p){
   $("gauges").innerHTML=[
-    gauge(p.active_entries||0, p.max_agents||1, "实例", "#22d3ee"),
-    gauge(p.in_flight||0, p.max_concurrent_runs||1, "并发", "#818cf8"),
-    gauge(p.mcp_connected_agents||0, p.active_entries||1, "MCP", "#3bbf7a"),
+    gauge(p.active_entries||0, p.max_agents||1, tr("g.instance"), "#22d3ee"),
+    gauge(p.in_flight||0, p.max_concurrent_runs||1, tr("g.concurrency"), "#818cf8"),
+    gauge(p.mcp_connected_agents||0, p.active_entries||1, tr("g.mcp"), "#3bbf7a"),
   ].join("")
    + `<div class="legend" style="grid-column:1/-1;justify-content:center">
-       <span>等待 ${p.waiting||0}</span><span>淘汰LRU ${p.evicted_lru||0}</span>
-       <span>空闲清理 ${p.evicted_idle||0}</span><span>拒绝 ${(p.rejected_busy||0)+(p.rejected_full||0)}</span>
-       <span>run p50 ${fmtMs(p.run_p50_ms)} / p95 ${fmtMs(p.run_p95_ms)}</span></div>`;
+       <span>${tr("g.waiting",p.waiting||0)}</span><span>${tr("g.evictlru",p.evicted_lru||0)}</span>
+       <span>${tr("g.evictidle",p.evicted_idle||0)}</span><span>${tr("g.rejected",(p.rejected_busy||0)+(p.rejected_full||0))}</span>
+       <span>${tr("g.runlat",fmtMs(p.run_p50_ms),fmtMs(p.run_p95_ms))}</span></div>`;
 }
 function renderAudit(a){
   const s=a.summary||{};
@@ -399,35 +497,35 @@ function renderAudit(a){
   const modes=(a.by_mode||[]).map(m=>`<span class="chip">${esc(m.key)} · ${m.runs}</span>`).join(" ");
   $("audit").innerHTML=`
     <div style="display:flex;align-items:center;gap:16px">
-      ${ringDonut(segs, (s.tool_calls||0), "工具调用")}
+      ${ringDonut(segs, (s.tool_calls||0), tr("audit.toolcalls"))}
       <div style="flex:1">
         <div class="legend" style="margin:0">
-          <span><i style="background:#34d399"></i>放行 ${Math.max(0,(s.tool_calls||0)-(s.judge_denies||0)-(s.judge_confirms||0))}</span>
-          <span><i style="background:#fbbf24"></i>需确认 ${s.judge_confirms||0}</span>
-          <span><i style="background:#f87171"></i>拒绝 ${s.judge_denies||0}</span>
+          <span><i style="background:#34d399"></i>${tr("audit.allow",Math.max(0,(s.tool_calls||0)-(s.judge_denies||0)-(s.judge_confirms||0)))}</span>
+          <span><i style="background:#fbbf24"></i>${tr("audit.confirm",s.judge_confirms||0)}</span>
+          <span><i style="background:#f87171"></i>${tr("audit.deny",s.judge_denies||0)}</span>
         </div>
-        <div style="margin-top:10px;font-size:12px;color:var(--dim)">工具错误 <b style="color:#f87171">${s.tool_errors||0}</b>
-          / 调用 ${s.tool_calls||0} · fail-open <b style="color:${(s.fail_opens||0)?'#f87171':'#34d399'}">${s.fail_opens||0}</b></div>
-        <div style="margin-top:8px">${modes||'<span class="mut">无模式数据</span>'}</div>
+        <div style="margin-top:10px;font-size:12px;color:var(--dim)">${tr("audit.toolerr")} <b style="color:#f87171">${s.tool_errors||0}</b>
+          ${tr("audit.ofcalls",s.tool_calls||0)} <b style="color:${(s.fail_opens||0)?'#f87171':'#34d399'}">${s.fail_opens||0}</b></div>
+        <div style="margin-top:8px">${modes||`<span class="mut">${tr("audit.nomode")}</span>`}</div>
       </div>
     </div>`;
 }
 function renderModels(list){
   list=(list||[]).slice().sort((a,b)=>((b.input_tokens+b.output_tokens)-(a.input_tokens+a.output_tokens))).slice(0,8);
-  if(!list.length){ $("models").innerHTML=`<div class="empty">暂无模型数据</div>`; return; }
+  if(!list.length){ $("models").innerHTML=`<div class="empty">${tr("models.nodata")}</div>`; return; }
   const max=Math.max(1,...list.map(m=>m.input_tokens+m.output_tokens));
   $("models").innerHTML=list.map(m=>{
     const tok=m.input_tokens+m.output_tokens, w=(tok/max*100).toFixed(1);
     return `<div class="bar"><div class="bl" title="${esc(m.key)}">${esc(m.key)}</div>
       <div class="bt"><div class="bf" style="width:${w}%"></div></div>
-      <div class="bv">${fmtNum(tok)} · ${m.runs}次 · ${fmtCost(m.cost)}</div></div>`;
+      <div class="bv">${fmtNum(tok)} · ${tr("models.runs",m.runs)} · ${fmtCost(m.cost)}</div></div>`;
   }).join("");
 }
 function renderUsers(users){
-  $("usersNote").textContent=`${users.length} 个用户`;
-  if(!users.length){ $("usersTbl").innerHTML=`<tr><td><div class="empty">暂无用户数据</div></td></tr>`; return; }
-  const head=`<thead><tr><th>用户</th><th>运行</th><th>成功率</th><th>Token</th><th>成本</th>
-    <th>会话/消息</th><th>记忆</th><th>知识库</th><th>任务</th><th>最近活跃</th></tr></thead>`;
+  $("usersNote").textContent=tr("users.count",users.length);
+  if(!users.length){ $("usersTbl").innerHTML=`<tr><td><div class="empty">${tr("users.nodata")}</div></td></tr>`; return; }
+  const head=`<thead><tr><th>${tr("uh.user")}</th><th>${tr("uh.runs")}</th><th>${tr("uh.okrate")}</th><th>${tr("uh.token")}</th><th>${tr("uh.cost")}</th>
+    <th>${tr("uh.sessmsg")}</th><th>${tr("uh.memory")}</th><th>${tr("uh.kb")}</th><th>${tr("uh.tasks")}</th><th>${tr("uh.lastactive")}</th></tr></thead>`;
   const rows=users.map(u=>{
     const rate=u.runs?Math.round(u.ok/u.runs*100):100;
     const kb=u.knowledge||{};
@@ -438,51 +536,51 @@ function renderUsers(users){
       <td class="num">${fmtCost(u.cost)}</td>
       <td class="num">${u.sessions}/${fmtNum(u.messages)}</td>
       <td class="num">${u.memory}</td>
-      <td class="num">${kb.chunks||0}块/${kb.sources||0}源</td>
+      <td class="num">${tr("users.kbcell",kb.chunks||0,kb.sources||0)}</td>
       <td class="num">${u.tasks_enabled}/${u.tasks}</td>
       <td class="mut">${ago(u.last_active)}</td></tr>`;
   }).join("");
   $("usersTbl").innerHTML=head+"<tbody>"+rows+"</tbody>";
 }
 function renderActive(list){
-  $("activeNote").textContent=`${list.length} 个`;
-  if(!list.length){ $("active").innerHTML=`<div class="empty">当前无活跃会话</div>`; return; }
+  $("activeNote").textContent=tr("active.count",list.length);
+  if(!list.length){ $("active").innerHTML=`<div class="empty">${tr("active.none")}</div>`; return; }
   $("active").innerHTML=list.map(s=>`<div class="litem" style="cursor:pointer" onclick="openSession('${esc(s.session_id)}')">
     <span class="${s.active_count>0?'uon':'uoff'}"></span>
     <div><div class="nm">${esc(s.user_id)}</div><div class="meta">${esc(s.session_id)}</div></div>
     <div class="spacer"></div>
     <span class="chip">${esc(s.mode||'?')}</span>
     ${s.mcp_connected?'<span class="chip ok">MCP</span>':''}
-    <span class="meta">空闲 ${Math.round(s.idle_seconds)}s</span></div>`).join("");
+    <span class="meta">${tr("active.idle",Math.round(s.idle_seconds))}</span></div>`).join("");
 }
 function renderSched(d){
   const tasks=d.tasks||[], rr=d.recent_results||[];
-  $("schedNote").textContent=`${tasks.filter(t=>t.enabled).length}/${tasks.length} 启用`;
+  $("schedNote").textContent=tr("sched.count",tasks.filter(t=>t.enabled).length,tasks.length);
   let html="";
   if(tasks.length){
     html+=tasks.slice(0,6).map(t=>`<div class="litem">
       <span class="${t.enabled?'uon':'uoff'}"></span>
       <div><div class="nm">${esc(t.name)} <span class="meta">· ${esc(t.user_id)}</span></div>
-        <div class="meta">${esc(t.trigger_type)} · 执行 ${t.run_count||0} 次 · 下次 ${t.next_run?esc(t.next_run.slice(5,16)):'—'}</div></div>
+        <div class="meta">${tr("sched.taskmeta",esc(t.trigger_type),t.run_count||0,t.next_run?esc(t.next_run.slice(5,16)):'—')}</div></div>
       <div class="spacer"></div>
       ${t.enabled?'<span class="chip ok">on</span>':'<span class="chip">off</span>'}</div>`).join("");
-  } else html+=`<div class="empty">暂无定时任务</div>`;
+  } else html+=`<div class="empty">${tr("sched.none")}</div>`;
   if(rr.length){
-    html+=`<div class="meta" style="margin:8px 2px 4px">最近结果</div>`+
+    html+=`<div class="meta" style="margin:8px 2px 4px">${tr("sched.recent")}</div>`+
       rr.slice(0,4).map(r=>`<div class="litem"><div><div class="nm">${esc(r.task)}</div>
         <div class="meta">${esc((r.result||'').slice(0,60))}</div></div></div>`).join("");
   }
   $("sched").innerHTML=html;
 }
 function renderRuns(runs){
-  if(!runs.length){ $("runs").innerHTML=`<div class="empty">暂无运行记录</div>`; return; }
+  if(!runs.length){ $("runs").innerHTML=`<div class="empty">${tr("runs.none")}</div>`; return; }
   $("runs").innerHTML=runs.slice(0,18).map(r=>{
     const cls=r.status==="ok"?"ok":(r.status==="interrupted"?"warn":"err");
     return `<div class="litem" style="cursor:pointer" onclick="showTrace('${esc(r.trace_id)}')">
       <span class="chip ${cls}">${esc(r.status)}</span>
       <div style="min-width:0"><div class="nm">${esc(r.provider||'?')}/${esc(r.model||'?')}
         <span class="meta">· ${esc(r.user_id||'default')}</span></div>
-        <div class="meta">${fmtTime(r.started_at)} · ${fmtMs(r.duration_ms)} · ${fmtNum((r.input_tokens||0)+(r.output_tokens||0))}tok · ${r.turn_count||0}轮/${r.tool_calls||0}工具${r.fail_opens?' · ⚠fail-open':''}</div></div>
+        <div class="meta">${fmtTime(r.started_at)} · ${fmtMs(r.duration_ms)} · ${fmtNum((r.input_tokens||0)+(r.output_tokens||0))}tok · ${tr("runs.turnstools",r.turn_count||0,r.tool_calls||0)}${r.fail_opens?tr("runs.failopen"):''}</div></div>
       <div class="spacer"></div><span class="meta">›</span></div>`;
   }).join("");
 }
@@ -496,16 +594,16 @@ function addFeed(ev){
   div.className="fitem flash"+(isErr?" err":"");
   const color=KIND_COLOR[ev.kind]||"#8a93a6";
   let desc="";
-  if(ev.type==="schedule"){ desc=`定时任务「${esc(ev.task)}」完成`; }
-  else if(ev.kind==="generation") desc=`${esc(ev.model||'LLM')} · ${fmtNum(ev.input_tokens)}→${fmtNum(ev.output_tokens)} tok`;
-  else if(ev.kind==="tool") desc=`调用 ${esc(ev.tool||ev.name||'tool')}`;
-  else if(ev.kind==="guardrail") desc=ev.fail_open?"判定失败 fail-open 放行":("判定 "+(ev.verdicts||[]).map(v=>v.tool+"→"+v.decision).join(", "));
-  else if(ev.kind==="confirmation") desc=`人工确认 → ${esc(ev.decision||'?')}`;
-  else if(ev.kind==="agent") desc=`运行结束 ${esc(ev.provider||'')}/${esc(ev.model||'')} · ${ev.turns||0}轮`;
+  if(ev.type==="schedule"){ desc=tr("feed.scheddone",esc(ev.task)); }
+  else if(ev.kind==="generation") desc=tr("feed.gentok",esc(ev.model||'LLM'),fmtNum(ev.input_tokens),fmtNum(ev.output_tokens));
+  else if(ev.kind==="tool") desc=tr("feed.toolcall",esc(ev.tool||ev.name||'tool'));
+  else if(ev.kind==="guardrail") desc=ev.fail_open?tr("feed.judgefailopen"):tr("feed.judge",(ev.verdicts||[]).map(v=>v.tool+"→"+v.decision).join(", "));
+  else if(ev.kind==="confirmation") desc=tr("feed.confirm",esc(ev.decision||'?'));
+  else if(ev.kind==="agent") desc=tr("feed.agentdone",esc(ev.provider||''),esc(ev.model||''),ev.turns||0);
   else desc=esc(ev.name||ev.kind||"");
   const tagColor= ev.type==="schedule" ? "#3bbf7a" : color;
   div.innerHTML=`<span class="t num">${fmtTime(ev.ts)}</span>
-    <span class="tag" style="background:${tagColor}">${esc(KIND_LABEL[ev.type==='schedule'?'schedule':ev.kind]||ev.kind||'·')}</span>
+    <span class="tag" style="background:${tagColor}">${esc(kindLabel(ev.type==='schedule'?'schedule':ev.kind))}</span>
     <span class="who">${esc(ev.user_id||'—')}</span>
     <span class="desc" ${ev.trace_id?`onclick="showTrace('${esc(ev.trace_id)}')"`:''}>${desc}</span>
     <span class="dur num">${ev.duration_ms!=null?fmtMs(ev.duration_ms):''}</span>`;
@@ -523,19 +621,19 @@ function connectSSE(){
 }
 function setLive(on){
   $("liveDot").className="live"+(on?"":" off");
-  $("liveTxt").textContent=on?"实时连接":"重连中…";
+  $("liveTxt").textContent=on?tr("live.connected"):tr("live.reconnect");
 }
 
 /* ── 链路瀑布浮层 ─────────────────────────────────── */
 async function showTrace(tid){
   if(!tid) return;
   $("overlay").classList.add("on");
-  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载链路…</div>`;
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("tr.loading")}</div>`;
   try{
     const d=await api("/api/dashboard/trace/"+encodeURIComponent(tid));
-    if(!d.run){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">未找到该运行</div>`; return; }
+    if(!d.run){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("tr.notfound")}</div>`; return; }
     renderTrace(d.run, d.spans||[]);
-  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载失败：${esc(e.message)}</div>`; }
+  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("tr.loadfail",esc(e.message))}</div>`; }
 }
 function closeOverlay(){ $("overlay").classList.remove("on"); }
 function renderTrace(run, spans){
@@ -555,7 +653,7 @@ function renderTrace(run, spans){
     else if(s.kind==="tool") meta=(s.status==="error"?"err":"ok")+(a["milu.output_len"]!=null?` · ${a["milu.output_len"]}B`:"");
     else if(s.kind==="guardrail") meta=a["milu.judge.fail_open"]?"fail-open":((a["milu.judge.verdicts"]||[]).map(v=>v.tool+"→"+v.decision).join(", "));
     else if(s.kind==="confirmation") meta=a["milu.decision"]||"";
-    else if(s.kind==="agent") meta=`${a["gen_ai.provider.name"]||""}/${a["gen_ai.request.model"]||""} · ${a["milu.turn_count"]||0}轮`;
+    else if(s.kind==="agent") meta=`${a["gen_ai.provider.name"]||""}/${a["gen_ai.request.model"]||""} · ${tr("tr.turns",a["milu.turn_count"]||0)}`;
     rows+=`<div class="wfrow"><div class="nm" style="padding-left:${depth*14}px;color:${color}">${esc(s.name)}</div>
       <div><div class="wftrack"><div class="wfbar" style="left:${leftPct.toFixed(1)}%;width:${w.toFixed(1)}%;background:${color}"></div></div></div></div>
       <div class="wfrow"><div></div><div class="wfmeta">${fmtMs(s.duration_ms)} · ${esc(meta)}</div></div>`;
@@ -563,15 +661,15 @@ function renderTrace(run, spans){
   }
   roots.sort((x,y)=>(x.start_time||0)-(y.start_time||0)).forEach(r=>walk(r,0));
   $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
-    <h3 style="margin:0 0 4px;color:#cfd8ff">运行链路 · ${esc(run.provider||'?')}/${esc(run.model||'?')}</h3>
-    <div class="mut" style="font-size:12px">trace ${esc(run.trace_id)} · 用户 ${esc(run.user_id||'default')} · ${fmtTime(run.started_at)} ·
+    <h3 style="margin:0 0 4px;color:#cfd8ff">${tr("tr.title",esc(run.provider||'?'),esc(run.model||'?'))}</h3>
+    <div class="mut" style="font-size:12px">trace ${esc(run.trace_id)} · ${tr("tr.user")} ${esc(run.user_id||'default')} · ${fmtTime(run.started_at)} ·
       <span class="chip ${run.status==='ok'?'ok':'err'}">${esc(run.status)}</span> · ${fmtMs(run.duration_ms)} · ${fmtCost(run.cost_estimate!=null?{[run.cost_currency||'?']:run.cost_estimate}:null)}</div>
-    <div class="wf">${rows||'<div class="empty">无 span</div>'}</div>
+    <div class="wf">${rows||`<div class="empty">${tr("tr.nospan")}</div>`}</div>
     <div class="tdecomp">
-      <span>LLM ${fmtMs(run.llm_time_ms)}</span><span>工具 ${fmtMs(run.tool_time_ms)}</span>
-      <span>安全判定 ${fmtMs(run.judge_time_ms)}</span><span>审批等待 ${fmtMs(run.wait_time_ms)}</span>
-      <span>子代理 ${run.subagent_runs||0}</span><span>压缩 ${run.compactions||0}</span>
-      ${run.fail_opens?`<span style="color:#f87171">⚠ fail-open ×${run.fail_opens}</span>`:""}
+      <span>${tr("tr.llm")} ${fmtMs(run.llm_time_ms)}</span><span>${tr("tr.tool")} ${fmtMs(run.tool_time_ms)}</span>
+      <span>${tr("tr.judge")} ${fmtMs(run.judge_time_ms)}</span><span>${tr("tr.wait")} ${fmtMs(run.wait_time_ms)}</span>
+      <span>${tr("tr.subagent")} ${run.subagent_runs||0}</span><span>${tr("tr.compact")} ${run.compactions||0}</span>
+      ${run.fail_opens?`<span style="color:#f87171">${tr("tr.failopen",run.fail_opens)}</span>`:""}
     </div>`;
 }
 
@@ -579,11 +677,11 @@ function renderTrace(run, spans){
 async function openUser(uid){
   if(!uid) return;
   $("overlay").classList.add("on");
-  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载用户 ${esc(uid)} …</div>`;
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("ud.loading",esc(uid))}</div>`;
   try{
     const d=await api("/api/dashboard/user/"+encodeURIComponent(uid));
     renderUserDetail(d);
-  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载失败：${esc(e.message)}</div>`; }
+  }catch(e){ $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("tr.loadfail",esc(e.message))}</div>`; }
 }
 function renderUserDetail(d){
   const s=d.summary||{}, kb=d.knowledge||{}, kbs=kb.stats||{};
@@ -598,53 +696,53 @@ function renderUserDetail(d){
       <div style="min-width:0"><div class="nm">${esc(r.provider||'?')}/${esc(r.model||'?')}</div>
         <div class="meta">${fmtTime(r.started_at)} · ${fmtMs(r.duration_ms)} · ${fmtNum((r.input_tokens||0)+(r.output_tokens||0))}tok</div></div>
       <div class="spacer"></div><span class="meta">›</span></div>`;
-  }).join("") || `<div class="empty">无运行</div>`;
+  }).join("") || `<div class="empty">${tr("ud.norun")}</div>`;
   const sessions=(d.sessions||[]).map(se=>`<div class="litem" style="cursor:pointer" onclick="openSession('${esc(se.session_id)}','${uid}')">
-    <div style="min-width:0"><div class="nm">${esc(se.session_id)}</div><div class="meta">${se.message_count||0} 条消息 · ${ago(se.updated_at)}</div></div>
-    <div class="spacer"></div><span class="meta">查看对话 ›</span></div>`).join("") || `<div class="empty">无会话</div>`;
-  const mem=(d.memory||[]).map(it=>`<div class="memitem"><span class="cat">${esc(it.category||'')}</span>${esc(it.content||'')}</div>`).join("") || `<div class="empty">无记忆</div>`;
-  const srcs=(kb.sources||[]).map(x=>`<span class="chip">${esc(x.name)} · ${x.chunks}块</span>`).join(" ") || `<span class="mut">无来源</span>`;
+    <div style="min-width:0"><div class="nm">${esc(se.session_id)}</div><div class="meta">${tr("ud.sessmeta",se.message_count||0,ago(se.updated_at))}</div></div>
+    <div class="spacer"></div><span class="meta">${tr("ud.viewconv")}</span></div>`).join("") || `<div class="empty">${tr("ud.nosession")}</div>`;
+  const mem=(d.memory||[]).map(it=>`<div class="memitem"><span class="cat">${esc(it.category||'')}</span>${esc(it.content||'')}</div>`).join("") || `<div class="empty">${tr("ud.nomemory")}</div>`;
+  const srcs=(kb.sources||[]).map(x=>`<span class="chip">${esc(x.name)} · ${tr("ud.chunks",x.chunks)}</span>`).join(" ") || `<span class="mut">${tr("ud.nosource")}</span>`;
   const tasks=(d.tasks||[]).map(t=>`<div class="litem"><span class="${t.enabled?'uon':'uoff'}"></span>
-    <div><div class="nm">${esc(t.name)}</div><div class="meta">${esc(t.trigger_type)} · 执行 ${t.run_count||0} 次</div></div></div>`).join("") || `<div class="empty">无定时任务</div>`;
+    <div><div class="nm">${esc(t.name)}</div><div class="meta">${tr("ud.taskmeta",esc(t.trigger_type),t.run_count||0)}</div></div></div>`).join("") || `<div class="empty">${tr("ud.notask")}</div>`;
   $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
-    <h3 style="margin:0 0 8px;color:#cfd8ff">用户 · ${uid} ${d.online?'<span class="chip ok">在线</span>':''}</h3>
+    <h3 style="margin:0 0 8px;color:#cfd8ff">${tr("ud.title",uid)} ${d.online?`<span class="chip ok">${tr("ud.online")}</span>`:''}</h3>
     <div class="mkpis">
-      ${mkpi('运行', s.runs||0)}${mkpi('成功率', rate+'%')}${mkpi('Token', fmtNum(tok))}
-      ${mkpi('成本', fmtCost(s.cost))}${mkpi('p95', fmtMs(s.p95_ms))}
+      ${mkpi(tr("ud.run"), s.runs||0)}${mkpi(tr("ud.okrate"), rate+'%')}${mkpi(tr("ud.token"), fmtNum(tok))}
+      ${mkpi(tr("ud.cost"), fmtCost(s.cost))}${mkpi(tr("ud.p95"), fmtMs(s.p95_ms))}
     </div>
-    <div class="dsec"><h4>近期运行（点击看链路）</h4><div style="max-height:200px;overflow:auto">${runs}</div></div>
-    <div class="dsec"><h4>会话（点击看对话）</h4><div style="max-height:200px;overflow:auto">${sessions}</div></div>
-    <div class="dsec"><h4>长期记忆（${(d.memory||[]).length} 条）</h4><div style="max-height:160px;overflow:auto">${mem}</div></div>
-    <div class="dsec"><h4>知识库（${kbs.count||0} 块 / ${(kb.sources||[]).length} 源 · ${esc(kbs.model||'—')}）</h4>${srcs}</div>
-    <div class="dsec"><h4>定时任务（${(d.tasks||[]).length}）</h4>${tasks}</div>`;
+    <div class="dsec"><h4>${tr("ud.recentruns")}</h4><div style="max-height:200px;overflow:auto">${runs}</div></div>
+    <div class="dsec"><h4>${tr("ud.sessions")}</h4><div style="max-height:200px;overflow:auto">${sessions}</div></div>
+    <div class="dsec"><h4>${tr("ud.memory",(d.memory||[]).length)}</h4><div style="max-height:160px;overflow:auto">${mem}</div></div>
+    <div class="dsec"><h4>${tr("ud.kb",kbs.count||0,(kb.sources||[]).length,esc(kbs.model||'—'))}</h4>${srcs}</div>
+    <div class="dsec"><h4>${tr("ud.tasks",(d.tasks||[]).length)}</h4>${tasks}</div>`;
 }
 
 /* ── 对话浏览浮层（监测对话）───────────────────────── */
 async function openSession(sid, backUid){
   if(!sid) return;
   $("overlay").classList.add("on");
-  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">加载对话 …</div>`;
+  $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${tr("cv.loading")}</div>`;
   try{
     const d=await api("/api/dashboard/session/"+encodeURIComponent(sid));
     renderConversation(sid, d.messages||[], backUid);
   }catch(e){
-    const m=String(e.message)==="404"?"会话不存在":("加载失败："+esc(e.message));
+    const m=String(e.message)==="404"?tr("cv.notfound"):tr("cv.loadfail",esc(e.message));
     $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span><div class="empty">${m}</div>`;
   }
 }
 function renderConversation(sid, msgs, backUid){
-  const back=backUid?`<a class="link" onclick="openUser('${esc(backUid)}')">← 返回用户</a>  `:"";
+  const back=backUid?`<a class="link" onclick="openUser('${esc(backUid)}')">${tr("cv.back")}</a>  `:"";
   const body=msgs.length?msgs.map(m=>{
     if(m.role==="tool")
-      return `<div class="msg tool"><div class="rl">工具结果${m.name?' · '+esc(m.name):''}</div>${esc(m.content||'')}</div>`;
+      return `<div class="msg tool"><div class="rl">${tr("cv.toolresult")}${m.name?' · '+esc(m.name):''}</div>${esc(m.content||'')}</div>`;
     const tools=(m.tools||[]).map(t=>`<span class="toolc">⚙ ${esc(t)}</span>`).join("");
-    const rl=m.role==="user"?"用户":"助手";
-    const txt=esc(m.content||"")||(tools?"":'<span class="mut">（空）</span>');
+    const rl=m.role==="user"?tr("cv.user"):tr("cv.assistant");
+    const txt=esc(m.content||"")||(tools?"":`<span class="mut">${tr("cv.empty")}</span>`);
     return `<div class="msg ${m.role==='user'?'user':'assistant'}"><div class="rl">${rl}</div>${txt}${tools}</div>`;
-  }).join(""):`<div class="empty">无消息</div>`;
+  }).join(""):`<div class="empty">${tr("cv.nomsg")}</div>`;
   $("modal").innerHTML=`<span class="x" onclick="closeOverlay()">×</span>
-    <h3 style="margin:0 0 4px;color:#cfd8ff">${back}对话 · ${esc(sid)}</h3>
-    <div class="mut" style="font-size:11px">${msgs.length} 条消息（最多展示最近 300 条）</div>
+    <h3 style="margin:0 0 4px;color:#cfd8ff">${back}${tr("cv.title",esc(sid))}</h3>
+    <div class="mut" style="font-size:11px">${tr("cv.count",msgs.length)}</div>
     <div class="conv">${body}</div>`;
 }
 
@@ -656,7 +754,7 @@ async function pollOverview(){
 }
 async function pollAnalytics(){
   try{ const a=await api("/api/dashboard/analytics?range="+RANGE);
-    $("seriesNote").textContent=RANGE+" · "+(a.bucket==="day"?"按天":"按小时");
+    $("seriesNote").textContent=tr("an.note",RANGE,a.bucket==="day"?tr("an.byday"):tr("an.byhour"));
     $("seriesChart").innerHTML=areaChart(a.series); renderModels(a.by_model);
   }catch(_){}
 }
@@ -667,12 +765,11 @@ async function pollRuns(){ try{ const d=await api("/api/dashboard/runs?limit=20"
 
 function showGate(code){
   if(es){ es.close(); es=null; }
-  $("app").innerHTML=`<div class="gate"><h2>需要管理员令牌</h2>
-    <p>该观测大屏跨用户读取全局数据（错误码 ${esc(code)}）。请在地址后附加 <code>?token=你的MILU_ADMIN_TOKEN</code> 访问，
-    或在仅本机访问时确认服务端未设置该令牌。</p></div>`;
+  $("app").innerHTML=`<div class="gate"><h2>${tr("gate.title")}</h2>
+    <p>${tr("gate.desc",esc(code))}</p></div>`;
 }
 
-function tickClock(){ $("clock").textContent=new Date().toLocaleTimeString("zh-CN",{hour12:false}); }
+function tickClock(){ $("clock").textContent=new Date().toLocaleTimeString(locale(),{hour12:false}); }
 
 $("rangeSeg").addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b) return;
@@ -703,7 +800,7 @@ function togglePause(){
   paused=!paused;
   $("pauseBtn").classList.toggle("on",paused);
   $("pauseBtn").textContent = paused ? "▶" : "⏸";
-  if(paused){ stopPolling(); $("liveDot").className="live off"; $("liveTxt").textContent="已暂停"; }
+  if(paused){ stopPolling(); $("liveDot").className="live off"; $("liveTxt").textContent=tr("live.paused"); }
   else startPolling();
 }
 $("pauseBtn").addEventListener("click",togglePause);
@@ -714,6 +811,7 @@ $("refreshBtn").addEventListener("click",()=>{
 });
 
 /* 启动 */
+applyI18n();
 tickClock(); setInterval(tickClock,1000);
 startPolling();
 </script>
