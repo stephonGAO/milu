@@ -13,9 +13,15 @@
   - **配置**：`config.json` 新增 `sandbox` 分节（从 `SandboxConfig` dataclass 派生，默认 `backend=subprocess`、`timeout=60`）；`milu config set sandbox.backend local` 退回零开销、`sandbox.ephemeral_workdir true` 用一次性临时目录加强隔离。CLI 与 Web 服务读分层配置下传。
   - 黑名单 / 受保护路径检查保留在工具层（后端无关的纵深防御，先于执行）。
 
+- **Agent 工作区（`Agent(workspace=...)` + `resources.workspace_dir`）**：agent 产出文件的统一落点，默认 `~/.milu/workspace`（`MILU_WORKSPACE` 或 config `agent.workspace` 覆盖），不再污染 milu 启动目录/项目。
+  - `file_read`/`file_write` 的**相对路径**与**沙箱执行 CWD** 都锚定工作区；**绝对路径不受影响**（仍可显式读写他处）。读写同根，写出的相对路径文件可同名读回。
+  - 注入与 sandbox/knowledge 同款 ContextVar（`_current_workspace`，`run()` 入口注入、子代理继承）；裸 `Agent(workspace=None)`/单测不注入 → 相对路径回退进程 CWD（hermetic 不变）。提示词经 `{{workspace}}` 告知模型。
+  - **CLI 单人**用工作区根、**Web 多用户**按 `workspace/{user}` 隔离（`_safe_user_id` 对 `.`/`..` 纯点号组件回退 default，防目录穿越）。⚠️ `local` 后端 `python_repl` 进程内 exec 无法安全切 CWD，其相对路径仍按进程目录（`file_write` 工具与默认 subprocess 后端不受影响）。
+
 ### 变更
 
 - **代码执行默认超时 30s → 60s**（`SandboxConfig.timeout` 与 `shell_command` 形参默认）。
+- **agent 产出文件默认落 `~/.milu/workspace`**（而非 milu 启动目录/项目）；相对路径文件读写与沙箱 CWD 均锚定该工作区，绝对路径不变。
 - **代码执行默认后端 local → subprocess**（子进程隔离）：CLI `milu chat` / `milu run` 与 `milu serve` 默认在子进程中跑 `python_repl` / `shell_command`，密钥不再暴露给被执行代码、死循环可被真杀、崩溃不波及主进程。可信单人场景如需零开销可 `milu config set sandbox.backend local` 退回。
 
 ## [0.3.0] - 2026-06-18

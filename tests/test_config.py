@@ -162,6 +162,7 @@ def test_write_project_template(paths):
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["agent"]["max_turns"] == 200
     assert data["agent"]["llm"]["provider"] == "qwen"
+    assert data["agent"]["workspace"] == ""   # 工作区默认空串（→ ~/.milu/workspace）
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "observability",
         "default_models", "security", "sandbox", "display", "lang",

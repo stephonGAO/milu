@@ -1,7 +1,9 @@
 {
   "agent": {
+    "//": "workspace：agent 工作区根目录——file_read/file_write 的相对路径与沙箱执行 CWD 都落在这里，避免产物污染 milu 启动目录/项目。空串=默认 ~/.milu/workspace（Web 多用户再按 user_id 加子目录隔离）；可填绝对路径固定，或用环境变量 MILU_WORKSPACE 覆盖。读写工作区以外的文件请用绝对路径。",
     "mode": "auto",
     "session_enabled": true,
+    "workspace": "",
     "llm": {
       "provider": "qwen",
       "model": "qwen3.6-plus",

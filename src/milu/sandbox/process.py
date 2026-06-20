@@ -27,6 +27,7 @@ import tempfile
 
 from milu.sandbox.base import ExecResult, SandboxBackend
 from milu.tools._selfguard import get_protected_paths
+from milu.resources import current_workspace
 
 # 透传给子进程的环境变量白名单（其余一律不传，避免泄漏密钥）。
 # PATH 与系统必要项保留，否则解释器/shell 无法定位可执行文件。
@@ -101,11 +102,12 @@ class SubprocessBackend(SandboxBackend):
         return env
 
     def _make_workdir(self):
-        """返回 (cwd, cleanup)。优先级：固定 workdir > 一次性临时目录 > 继承当前目录。
+        """返回 (cwd, cleanup)。优先级：固定 workdir > 一次性临时目录 > agent 工作区 > 进程目录。
 
         - 配置了 workdir：复用该目录（不清理）；
         - ephemeral_workdir=True：每次一次性临时目录、执行后清理（更强隔离）；
-        - 默认：继承当前工作目录（与 local 一致，编码工作流照常在项目目录生效）。
+        - 注入了 agent 工作区（current_workspace）：在工作区执行（与 file_write 落点一致）；
+        - 否则：继承进程当前工作目录（裸调用/单测的 hermetic 行为）。
         """
         if self.config.workdir:
             os.makedirs(self.config.workdir, exist_ok=True)
@@ -117,6 +119,10 @@ class SubprocessBackend(SandboxBackend):
                 shutil.rmtree(d, ignore_errors=True)
 
             return d, cleanup
+        ws = current_workspace()
+        if ws:
+            os.makedirs(ws, exist_ok=True)
+            return ws, (lambda: None)
         return os.getcwd(), (lambda: None)
 
     def _make_preexec(self):

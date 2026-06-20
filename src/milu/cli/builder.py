@@ -79,10 +79,14 @@ def build_agent(s: Settings) -> Agent:
             cleanup_old_traces(trace.retention_days)
         except Exception:
             pass
-    # 代码执行沙箱后端：分层配置 sandbox 分节转 SandboxConfig 下传（默认 local，
-    # 用户在 config.json 改 sandbox.backend=subprocess 即升级为子进程隔离）。
+    # 代码执行沙箱后端：分层配置 sandbox 分节转 SandboxConfig 下传（默认 subprocess
+    # 子进程隔离；用户在 config.json 改 sandbox.backend=local 可退回零开销本地执行）。
     from milu.sandbox import SandboxConfig
     sandbox = SandboxConfig.from_mapping(s.sandbox)
+    # agent 工作区：相对路径文件读写 + 沙箱 CWD 的落点。CLI 单人无需按用户隔离，
+    # 默认 ~/.milu/workspace（config 的 agent.workspace 或环境变量 MILU_WORKSPACE 可覆盖）。
+    from milu.resources import workspace_dir
+    workspace = str(workspace_dir(base=s.agent.get("workspace") or None))
     return Agent(
         llm=llm,
         mode=s.mode,
@@ -93,6 +97,7 @@ def build_agent(s: Settings) -> Agent:
         knowledge=knowledge,
         trace=trace,
         sandbox=sandbox,
+        workspace=workspace,
         on_confirm=confirm_unsafe,
     )
 

@@ -18,6 +18,22 @@ from typing import Literal, Optional
 
 from milu.tools.decorator import tool
 from milu.tools._selfguard import is_protected_path, selfguard_error
+from milu.resources import current_workspace
+
+
+def _resolve_path(path: str) -> str:
+    """相对路径锚定到 agent 工作区（current_workspace）；绝对路径原样返回。
+
+    未注入工作区（裸调用/单测）时回退进程 CWD（即相对路径行为照旧，保持 hermetic）。
+    读写共用同一解析 → 写出的相对路径文件可用同名相对路径读回。
+    """
+    if not path or os.path.isabs(path):
+        return path
+    ws = current_workspace()
+    if not ws:
+        return path
+    os.makedirs(ws, exist_ok=True)
+    return os.path.join(ws, path)
 
 # ── 常量 ─────────────────────────────────────────────────
 _MAX_READ_LINES = 200          # 单次读取最大行数
@@ -404,6 +420,9 @@ async def file_read(
             "available": ["index", "read", "grep"],
         }, ensure_ascii=False)
 
+    # 相对路径锚定 agent 工作区（与 file_write 一致；绝对路径不变）
+    path = _resolve_path(path)
+
     # 读保护：与写保护共用同一套受保护路径（含 .env 等凭据文件）
     if is_protected_path(path):
         return json.dumps(selfguard_error(path, "配置"), ensure_ascii=False)
@@ -471,6 +490,9 @@ async def file_write(
             "error": f"未知 action: {action}",
             "available": ["write", "append", "replace", "insert", "delete"],
         }, ensure_ascii=False)
+
+    # 相对路径锚定 agent 工作区（绝对路径不变）→ 产物不污染启动目录/项目
+    path = _resolve_path(path)
 
     # 自我保护：禁止写入 milu 源码和程序配置文件
     if is_protected_path(path):

@@ -103,6 +103,10 @@ def _builtin_defaults() -> dict:
         "agent": {
             "mode": "auto",
             "session_enabled": True,
+            # agent 工作区根目录（相对路径文件读写 + 沙箱 CWD 的落点）。
+            # 空串 → 默认 user_data_dir()/workspace（Web 多用户再按 user_id 加子目录）；
+            # 也可填绝对路径固定，或用环境变量 MILU_WORKSPACE 覆盖。
+            "workspace": "",
             # 该 Agent 使用的模型对象（model 留 null → 按 default_models[provider] 取默认）
             "llm": {
                 "provider": DEFAULT_PROVIDER,

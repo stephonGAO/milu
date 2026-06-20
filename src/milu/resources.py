@@ -14,7 +14,9 @@ pip 安装后即可通过下列函数取到它们的绝对路径，无需依赖�
 """
 from __future__ import annotations
 
+import contextvars
 import os
+import re
 from pathlib import Path
 
 # 包内模板根目录（随 wheel 一起分发）
@@ -81,6 +83,57 @@ def project_dir() -> Path:
 def default_session_dir() -> Path:
     """会话日志默认根目录：user_data_dir()/sessions。"""
     return user_data_dir() / "sessions"
+
+
+def _safe_user_id(user_id: str | None) -> str:
+    """user_id 文件系统安全化（与 memory/knowledge/scheduler 同一规则）。
+
+    额外防目录穿越：本函数结果用作**目录组件**（workspace/{safe}），故纯点号组件
+    （"." / ".." / 全是点）会回退为 "default"——否则 `root / ".."` 会逃出工作区根。
+    （memory 等把 safe 用作文件名 `{safe}.json`，不存在此风险，故仅本处加固。）
+    """
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", (user_id or "default").strip() or "default")[:64]
+    if not safe.strip("."):
+        return "default"
+    return safe
+
+
+def workspace_dir(user_id: str | None = None, base: str | None = None) -> Path:
+    """Agent 工作区 —— agent 产出文件的默认落点，与项目/启动目录解耦。
+
+    file_read / file_write 的**相对路径**、以及沙箱执行 CWD 默认都落在这里，
+    避免 agent 把文件写进 milu 启动目录或某个项目里。绝对路径不受影响。
+
+    解析优先级：
+      1. 显式 base（应用层从 config 读到的 agent.workspace，空串视为未设）
+      2. 环境变量 MILU_WORKSPACE
+      3. user_data_dir()/workspace
+    多用户场景传 user_id（非 "default"）→ 追加 {safe_user_id} 子目录隔离。
+
+    :return: 工作区路径（不保证已存在，消费方按需 mkdir）。
+    """
+    if base:
+        root = Path(base).expanduser()
+    else:
+        env = os.environ.get("MILU_WORKSPACE")
+        root = Path(env).expanduser() if env else (user_data_dir() / "workspace")
+    if user_id and user_id != "default":
+        root = root / _safe_user_id(user_id)
+    return root
+
+
+# ── Agent 工作区注入（与 sandbox / knowledge 同款 ContextVar；asyncio 任务级隔离）──
+# Agent.run() 入口注入「本次运行的工作区绝对路径」；file_read/file_write 的相对路径与
+# 沙箱执行 CWD 据此解析。子代理沿 Context 继承父工作区。未注入（裸 Agent/单测）时为
+# None → 工具回退进程 CWD（相对路径照旧，保持 hermetic）。
+_current_workspace: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_current_workspace", default=None
+)
+
+
+def current_workspace() -> str | None:
+    """当前生效的工作区绝对路径（未注入时返回 None）。"""
+    return _current_workspace.get()
 
 
 def default_mcp_config_path() -> Path:
