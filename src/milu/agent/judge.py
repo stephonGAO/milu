@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 JUDGE_TIMEOUT = 30.0
 
 _VALID_DECISIONS = {"allow", "confirm", "deny"}
+
+# 内联思考块：思考模型（如 MiniMax-M3、qwen 思考版）未把 reasoning 拆分到
+# reasoning_content 时，会把思考以 <think>…</think> 内联进 content，需先剥掉。
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 
 _JUDGE_PROMPT = """你是工具调用安全审查器。Agent 正在执行用户请求，以下工具调用即将运行，\
 请逐一判定其安全性。
@@ -74,20 +79,39 @@ def _format_calls(calls: list[dict], registry: "ToolRegistry") -> str:
     return "\n".join(lines)
 
 
-def _parse_verdicts(content: str) -> dict[str, JudgeVerdict]:
-    """解析判定器输出为 {tool_call_id: JudgeVerdict}。
+def _extract_json_object(content: str) -> str:
+    """从可能混有思考/前言/代码块的判定输出中定位 JSON 对象子串。
 
-    宽容处理：剥离代码块围栏；逐条校验 decision 取值，非法条目忽略
-    （fail-open，与整体回退策略一致）。解析整体失败抛异常由调用方兜底。
+    判定模型（尤其思考模型）常把目标 JSON 包在 <think>…</think>、```json```
+    代码块或解释性文字里——若直接 json.loads 整段会抛 JSONDecodeError。
+    这里依次剥离这些包裹，再退化为「截取第一个 { 到最后一个 }」定位 JSON：
+      1. 去内联思考块（reasoning 未拆分时内联的 <think>…</think>）
+      2. 剥代码块围栏 ```json … ```
+      3. 截取最外层 {…}（前后仍可能残留解释性文字）
+    定位不到 JSON（无花括号）时原样返回，交由 json.loads 抛错走 fail-open。
     """
-    text = content.strip()
+    text = _THINK_RE.sub("", content).strip()
     if text.startswith("```"):
         # 剥离 ```json ... ``` 围栏
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
         text = text.strip()
-    data = json.loads(text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return text[start:end + 1]
+    return text
+
+
+def _parse_verdicts(content: str) -> dict[str, JudgeVerdict]:
+    """解析判定器输出为 {tool_call_id: JudgeVerdict}。
+
+    宽容处理：先经 `_extract_json_object` 剥离思考块/代码块/前言定位 JSON；
+    逐条校验 decision 取值，非法条目忽略（fail-open，与整体回退策略一致）。
+    解析整体失败抛异常由调用方兜底。
+    """
+    data = json.loads(_extract_json_object(content.strip()))
 
     verdicts: dict[str, JudgeVerdict] = {}
     for item in data.get("verdicts", []):
@@ -130,11 +154,15 @@ async def judge_tool_calls(
 
     async def _collect() -> str:
         content = ""
-        # 安全判定要求确定性输出 → 温度压到 0（不支持 temperature 的
-        # provider 会在 _validate_params 中过滤该参数，仅记警告，不报错）
+        # 安全判定要求确定性输出 → 温度压到 0；判定是简单分类无需思考 →
+        # enable_thinking=False 关掉思考（降延迟、避免思考挤占输出导致 JSON 被截断，
+        # 也避免思考模型把 <think> 内联进 content）。不支持这两个参数的 provider 会在
+        # _validate_params 中过滤、仅记一次警告，不报错；非 enable_thinking 命名的
+        # 思考 provider 由 _extract_json_object 的剥离兜底（防御纵深）。
         async for chunk in judge_llm.chat(
             [Message(role=MessageRole.USER, content=prompt)],
             temperature=0.0,
+            enable_thinking=False,
         ):
             if chunk.content:
                 content += chunk.content

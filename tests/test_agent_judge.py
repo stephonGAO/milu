@@ -141,6 +141,40 @@ class TestParseVerdicts:
         with pytest.raises(Exception):
             _parse_verdicts("这不是 JSON")
 
+    def test_inline_think_block_stripped(self):
+        """思考模型把 <think>…</think> 内联进 content（reasoning 未拆分）→ 仍能解析
+
+        复现 MiniMax-M3 判定输出的真实形态：思考内联 + 其后跟 JSON。
+        修复前会对 '<think>...' 整段 json.loads 抛 JSONDecodeError → fail-open 误放行。
+        """
+        raw = (
+            "<think>The user wants me to review a tool call. "
+            "Running a python script is benign. I'll allow it.</think>\n\n"
+            + _verdict_json("c1", "allow", "常规脚本执行")
+        )
+        verdicts = _parse_verdicts(raw)
+        assert verdicts["c1"].decision == "allow"
+
+    def test_prose_around_json_extracted(self):
+        """模型在 JSON 前后加解释性文字 → 截取最外层 {…} 仍能解析"""
+        raw = "根据判定标准，结论如下：\n" + _verdict_json("c1", "deny", "高危") + "\n以上。"
+        verdicts = _parse_verdicts(raw)
+        assert verdicts["c1"].decision == "deny"
+
+    def test_think_then_code_fence(self):
+        """思考块 + ```json``` 代码块混合包裹 → 仍能解析"""
+        raw = (
+            "<think>分析中……</think>\n```json\n"
+            + _verdict_json("c1", "confirm") + "\n```"
+        )
+        verdicts = _parse_verdicts(raw)
+        assert verdicts["c1"].decision == "confirm"
+
+    def test_no_json_object_raises(self):
+        """无花括号的纯文本 → 抛错（交由调用方 fail-open）"""
+        with pytest.raises(Exception):
+            _parse_verdicts("<think>我无法判断</think>抱歉。")
+
 
 # ── auto 模式判定行为 ─────────────────────────────────────
 
@@ -330,6 +364,27 @@ class TestJudgePrompt:
         assert "danger_op" in prompt, "应包含工具名"
         assert "/tmp/x" in prompt, "应包含工具参数"
         assert "禁止访问生产数据库" in prompt, "应包含自定义规则"
+
+    @pytest.mark.asyncio
+    async def test_judge_call_disables_thinking(self):
+        """判定调用应传 enable_thinking=False（关思考、降延迟、避免 <think> 内联破坏 JSON）"""
+        captured: list[dict] = []
+
+        async def chat(messages, **kwargs):
+            captured.append(kwargs)
+            yield StreamChunk(content=_verdict_json("call_1", "allow"))
+
+        judge = AsyncMock()
+        judge.chat = chat
+
+        agent = _make_agent(
+            _make_mock_llm("danger_op"), [_make_unsafe_tool()], judge,
+        )
+        await _run(agent)
+
+        assert len(captured) == 1, "判定器应被调用一次"
+        assert captured[0].get("enable_thinking") is False, "判定调用应关闭思考"
+        assert captured[0].get("temperature") == 0.0, "判定调用应温度为 0"
 
 
 # ── judge_llm 默认解析（None→主 llm / False→关闭 / 实例→指定）──
