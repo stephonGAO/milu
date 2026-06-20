@@ -71,6 +71,12 @@ _KNOWLEDGE_KEYS = (
 # user_id 为运行时身份、runs_index/extra_sinks 为程序化参数，均不入 config.json；
 # price_table 为嵌套字典单独处理）
 _OBSERVABILITY_KEYS = ("capture_content", "max_content_chars", "retention_days")
+# sandbox 分节暴露的可调字段（SandboxConfig 子集：docker_mounts 为列表、docker 后端
+# 计划于后续版本，不入分节）
+_SANDBOX_KEYS = (
+    "backend", "timeout", "memory_mb", "cpu_seconds",
+    "network", "max_output_chars", "workdir", "ephemeral_workdir", "docker_image",
+)
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}
 _FALSY = {"0", "false", "no", "off", "n"}
@@ -84,6 +90,7 @@ def _builtin_defaults() -> dict:
     from milu.agent.config import AgentConfig, CompactConfig
     from milu.knowledge.config import KnowledgeConfig
     from milu.observability import TraceConfig
+    from milu.sandbox import SandboxConfig
     from milu.scheduler.engine import SchedulerConfig
     from milu.serving.pool import AgentPoolConfig
 
@@ -91,6 +98,7 @@ def _builtin_defaults() -> dict:
     scheduler_defaults = SchedulerConfig()
     knowledge_defaults = KnowledgeConfig()
     trace_defaults = TraceConfig()
+    sandbox_defaults = SandboxConfig()
     return {
         "agent": {
             "mode": "auto",
@@ -130,6 +138,13 @@ def _builtin_defaults() -> dict:
         },
         "security": {
             "selfguard_enabled": True,   # 禁止 Agent 读写 milu 自身代码和配置文件
+        },
+        "sandbox": {
+            # python_repl / shell_command 的执行后端。默认 subprocess（子进程隔离：
+            # 超时真杀、POSIX 限资源、清洗环境隐藏密钥、注入 guarded-open 拦截 .env/源码、
+            # 默认继承当前目录，跨平台零依赖）；改 "local" 退回进程内/宿主 shell（零开销、
+            # 可信场景）；"docker" 真隔离，计划于后续版本。
+            **{k: getattr(sandbox_defaults, k) for k in _SANDBOX_KEYS},
         },
         "display": {
             # 是否把子代理（researcher/reader/coder 等）的内部事件输出到 CLI / Web 前端。
@@ -233,6 +248,10 @@ class MiluConfig:
         return self.data.get("security", {})
 
     @property
+    def sandbox(self) -> dict:
+        return self.data.get("sandbox", {})
+
+    @property
     def display(self) -> dict:
         return self.data.get("display", {})
 
@@ -273,6 +292,11 @@ class MiluConfig:
         """构造 TraceConfig（observability.enabled 开关由调用方自行判断）。"""
         from milu.observability import TraceConfig
         return TraceConfig.from_mapping(self.observability, user_id=user_id)
+
+    def to_sandbox_config(self):
+        """构造 SandboxConfig（python_repl / shell_command 的执行后端配置）。"""
+        from milu.sandbox import SandboxConfig
+        return SandboxConfig.from_mapping(self.sandbox)
 
     # ── dotted 读取 ──────────────────────────────────────
     def get(self, dotted: str):

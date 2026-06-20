@@ -79,6 +79,10 @@ def build_agent(s: Settings) -> Agent:
             cleanup_old_traces(trace.retention_days)
         except Exception:
             pass
+    # 代码执行沙箱后端：分层配置 sandbox 分节转 SandboxConfig 下传（默认 local，
+    # 用户在 config.json 改 sandbox.backend=subprocess 即升级为子进程隔离）。
+    from milu.sandbox import SandboxConfig
+    sandbox = SandboxConfig.from_mapping(s.sandbox)
     return Agent(
         llm=llm,
         mode=s.mode,
@@ -88,6 +92,7 @@ def build_agent(s: Settings) -> Agent:
         subagents=None if s.use_subagents else [],
         knowledge=knowledge,
         trace=trace,
+        sandbox=sandbox,
         on_confirm=confirm_unsafe,
     )
 

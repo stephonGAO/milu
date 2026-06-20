@@ -60,6 +60,18 @@
   "security": {
     "selfguard_enabled": true
   },
+  "sandbox": {
+    "//": "python_repl / shell_command 的执行后端。backend=subprocess（默认）：独立子进程隔离——超时真杀、POSIX 限内存/CPU（Windows 跳过）、清洗环境隐藏 *_API_KEY、注入 guarded-open 拦截读 .env / 改 milu 源码、默认继承当前目录，跨平台零依赖；local：进程内 exec / 宿主 shell，零开销、可信场景用；docker：真隔离，计划于后续版本。timeout：默认执行超时秒数（shell_command 的 timeout 形参可覆盖）。memory_mb/cpu_seconds 仅 subprocess 的 POSIX 生效（null=不限）。workdir=null 时继承当前工作目录；ephemeral_workdir=true 则 subprocess 每次在一次性临时目录执行（更强隔离）。",
+    "backend": "subprocess",
+    "timeout": 60,
+    "memory_mb": 1024,
+    "cpu_seconds": null,
+    "network": false,
+    "max_output_chars": 8192,
+    "workdir": null,
+    "ephemeral_workdir": false,
+    "docker_image": "python:3.12-slim"
+  },
   "display": {
     "show_subagent_events": false
   },

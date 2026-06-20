@@ -385,7 +385,7 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 - [x] 可观测性：span 树追踪（对齐 OTel GenAI 语义约定）+ CLI `milu trace`
 - [x] 多用户观测大屏（跨用户数据中心视角，`/dashboard`）
 - [ ] 追踪层 OTLP 导出器
-- [ ] `python_repl` / `shell_command` 的沙箱执行后端
+- [x] `python_repl` / `shell_command` 的可插拔沙箱后端（**默认子进程隔离**：清洗 `*_API_KEY`、超时真杀、崩溃隔离、guarded-open 拦 `.env`/源码；`local` 零开销可选；Docker 后端计划中）
 - [ ] 知识库可插拔 ANN 后端（sqlite-vec），超越暴力余弦
 - [ ] 英文文档集（架构与指南，当前为中文）
 - [ ] 容器镜像发布到镜像仓库

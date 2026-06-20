@@ -164,10 +164,13 @@ def test_write_project_template(paths):
     assert data["agent"]["llm"]["provider"] == "qwen"
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "observability",
-        "default_models", "security", "display", "lang",
+        "default_models", "security", "sandbox", "display", "lang",
     }
     assert data["lang"] == "zh"   # CLI 界面语言默认中文
     assert data["display"]["show_subagent_events"] is False
     assert data["knowledge"]["enabled"] is True   # 知识库默认开启（空库零开销）
+    assert data["sandbox"]["backend"] == "subprocess"  # 代码执行后端默认子进程隔离
+    assert data["sandbox"]["timeout"] == 60
+    assert data["sandbox"]["ephemeral_workdir"] is False
     assert data["observability"]["enabled"] is True   # 运行追踪默认开启（仅本地落盘）
     assert data["observability"]["capture_content"] == "truncated"

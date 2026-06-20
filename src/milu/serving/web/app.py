@@ -345,6 +345,9 @@ def _make_agent_factory(state, shared_mcp):
             hub = getattr(state, "dashboard_hub", None)
             if hub is not None:
                 trace.extra_sinks.append(make_span_sink(hub, user_id))
+        # 代码执行沙箱后端：config.json sandbox 分节（默认 local；可改 subprocess 隔离）
+        from milu.sandbox import SandboxConfig
+        sandbox = SandboxConfig.from_mapping(getattr(state, "sandbox_cfg", None) or {})
         return Agent(
             llm=llm,
             tools=[*BUILTIN_TOOLS, create_structured_output_tool()],
@@ -357,6 +360,7 @@ def _make_agent_factory(state, shared_mcp):
             subagents=None if d.use_subagents else [],
             mcp_manager=shared_mcp,
             trace=trace,                    # 运行追踪（观测面板数据源）
+            sandbox=sandbox,                # 代码执行后端（默认 local）
             on_confirm=lambda t, a: _confirm_unsafe(state, user_id, session_id, t, a),
         )
     return factory
@@ -443,6 +447,9 @@ def create_app(
                 cleanup_old_traces(int(st.observability_cfg.get("retention_days", 30)))
             except Exception as e:
                 logger.warning("过期 trace 清理失败（已忽略）：%s", e)
+        # sandbox 分节供 agent_factory 构造代码执行后端（默认 local；config.json 可改
+        # 为 subprocess 升级子进程隔离）
+        st.sandbox_cfg = dict(mc.sandbox)
         pool = AgentPool(
             llm_factory=lambda uid, sid: default_llm,
             agent_factory=_make_agent_factory(st, shared_mcp),

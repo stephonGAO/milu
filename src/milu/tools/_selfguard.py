@@ -108,6 +108,19 @@ def is_protected_path(path: str) -> bool:
     return False
 
 
+def get_protected_paths() -> tuple[list[str], list[str]]:
+    """返回受保护的（目录列表, 文件列表），均为规范化绝对路径；功能关闭时返回 ([], [])。
+
+    供 SubprocessBackend 把受保护清单以字面量注入子进程的 guarded-open 前导——
+    子进程经 -I 隔离、不共享父进程的模块状态/ContextVar，故由父进程算好后注入，
+    且天然继承父进程的 selfguard 启用状态（关闭则清单为空、子进程不拦截）。
+    """
+    if not _ENABLED:
+        return [], []
+    _ensure_init()
+    return list(_PROTECTED_DIRS), list(_PROTECTED_FILES)
+
+
 def selfguard_error(path: str, reason: str = "代码") -> dict:
     """返回统一的自我保护错误响应 dict。"""
     return {

@@ -385,7 +385,7 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 - [x] Observability: span-tree tracing (OTel GenAI semconv-aligned) + CLI `milu trace`
 - [x] Multi-user observability dashboard (cross-user data-center view at `/dashboard`)
 - [ ] OTLP exporter for the tracing layer
-- [ ] Sandboxed code execution backends for `python_repl` / `shell_command`
+- [x] Pluggable sandbox backends for `python_repl` / `shell_command` (subprocess isolation **by default** — scrubs `*_API_KEY`, real timeout-kill, crash isolation, guarded-open; `local` for zero overhead; Docker backend planned)
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)
 - [ ] Prebuilt images on a container registry

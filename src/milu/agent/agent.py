@@ -79,6 +79,7 @@ from milu.tools.builtin.knowledge_tool import (
     render_knowledge_prompt,
 )
 from milu.knowledge import KnowledgeConfig
+from milu.sandbox import SandboxBackend, SandboxConfig, _current_sandbox, build_backend
 from milu.exceptions import content_safety_hint
 from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
@@ -264,6 +265,7 @@ class Agent:
         subagents: "list | None" = None,                    # None→内置三件套（顶层）；[]→无；列表→自定义 SubAgentConfig
         memory: "bool | str" = False,                       # 长期记忆开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→启用并按该用户标识隔离存储
         knowledge: "bool | str | KnowledgeConfig" = False,  # 向量知识库开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→按该用户标识隔离；KnowledgeConfig→程序化定制
+        sandbox: "str | SandboxConfig | SandboxBackend | None" = None,  # 代码执行后端：None→进程内/宿主 shell（默认，hermetic）；"subprocess"→子进程隔离；SandboxConfig/实例→程序化定制（docker 计划于后续版本）
         schedule_user: "str | None" = None,                 # 定时任务用户标识：None→工具层退化为 "default"（CLI 单人）；多用户场景传 user_id（任务文件按用户隔离）
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
@@ -371,6 +373,15 @@ class Agent:
                 kn_cfg = KnowledgeConfig()
             self._knowledge = KnowledgeRuntime(kn_cfg)
             self._registry.register_many([kb_search, kb_ingest, kb_manage])
+
+        # ── 代码执行沙箱后端（默认进程内/宿主 shell，与现状一致、hermetic）──
+        # None → 不注入（工具回退到模块级默认 LocalBackend）；str/SandboxConfig/实例 →
+        # 构造对应后端（如 "subprocess" 子进程隔离）。库纯净性：Agent 不读 config.json，
+        # 应用/CLI 入口读分层配置后构造 SandboxConfig 传入。后端经 run() 入口 ContextVar
+        # 注入工具层；选哪个后端与「模式 + AI 判定」正交（前者决定怎么跑，后者决定要不要跑）。
+        self._sandbox: SandboxBackend | None = (
+            build_backend(sandbox) if sandbox is not None else None
+        )
 
         # ── 定时任务用户标识（与 memory 平级的能力参数）──
         # None → 工具层 _resolve_user() 退化为 "default"（CLI 单人行为不变）；
@@ -782,6 +793,15 @@ class Agent:
         if self._knowledge is not None:
             await self._knowledge.aclose()
 
+    async def close_sandbox(self) -> None:
+        """释放沙箱后端资源（docker 容器/池等）。
+
+        未注入或 local/subprocess 后端时为 no-op；重复调用安全。与 close_knowledge
+        并列在 __aexit__ / AgentPool 淘汰路径调用（为 docker 后端的生命周期预留）。
+        """
+        if self._sandbox is not None:
+            await self._sandbox.aclose()
+
     async def __aenter__(self):
         await self.connect_mcp()
         return self
@@ -790,6 +810,7 @@ class Agent:
         self.save_session()
         await self.disconnect_mcp()
         await self.close_knowledge()
+        await self.close_sandbox()
         return False
 
     async def run(
@@ -824,6 +845,8 @@ class Agent:
         memory_token = _current_memory_path.set(self._memory_path)
         # 知识库运行时（未启用时注入 None → 工具返回启用指引；子代理不继承）
         knowledge_token = _current_knowledge.set(self._knowledge)
+        # 代码执行沙箱后端（None → 工具回退模块级默认 LocalBackend；显式注入则子代理沿用）
+        sandbox_token = _current_sandbox.set(self._sandbox)
         # 定时任务用户标识（未设置时注入 None → 工具层退化 "default"）
         schedule_user_token = _current_schedule_user.set(self._schedule_user)
         mode_token = _current_parent_mode.set(self._mode)
@@ -1652,6 +1675,7 @@ class Agent:
                 _safe_reset(_current_todo_plan_items, plan_items_token)
             _safe_reset(_current_memory_path, memory_token)
             _safe_reset(_current_knowledge, knowledge_token)
+            _safe_reset(_current_sandbox, sandbox_token)
             _safe_reset(_current_schedule_user, schedule_user_token)
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)

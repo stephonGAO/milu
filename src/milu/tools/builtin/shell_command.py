@@ -1,18 +1,22 @@
 """内置工具：Shell 命令执行
 
 执行系统 Shell 命令并返回输出。
-内置危险命令黑名单，拦截高风险操作。
+内置危险命令黑名单，拦截高风险操作（后端无关的纵深防御，留在工具层）。
 内置安全命令白名单，talk 模式下允许白名单中的命令。
+
+命令的「实际执行」交给当前生效的沙箱后端（local 宿主 shell / subprocess 受限子进程 /
+docker 容器，经 Agent.run() 入口 ContextVar 注入；见 milu.sandbox）；黑名单 / 白名单 /
+受保护路径检查无论用哪个后端都先行执行。
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import shlex
 
 from milu.tools.decorator import tool
 from milu.tools._selfguard import is_protected_path
+from milu.sandbox import ExecResult, current_backend
 
 # 输出最大字符数
 _MAX_OUTPUT_CHARS = 8192
@@ -112,20 +116,34 @@ def _is_dangerous_command(command: str) -> str | None:
     return None
 
 
+def _format_shell_result(res: ExecResult, max_chars: int) -> str:
+    """把 ExecResult 拼接为回填 LLM 的文本（保持与改造前一致的输出形态）。"""
+    parts = []
+    if res.stdout:
+        parts.append(res.stdout)
+    if res.stderr:
+        parts.append(f"[stderr]\n{res.stderr}")
+    parts.append(f"[退出码: {res.exit_code}]")
+    result = "\n".join(parts)
+    if len(result) > max_chars:
+        result = result[:max_chars] + f"\n\n... [输出已截断，共 {len(result)} 字符]"
+    return result
+
+
 @tool(
     name="shell_command",
     description="执行 Shell 命令并返回 stdout/stderr 输出",
     is_safe=False,
     safe_check=_is_safe_shell,
 )
-async def shell_command(command: str, timeout: int = 30) -> str:
+async def shell_command(command: str, timeout: int = 60) -> str:
     """
     在系统 Shell 中执行命令。这是一个危险操作，请谨慎使用。
 
     :param command: 要执行的 Shell 命令
-    :param timeout: 超时时间（秒），默认 30
+    :param timeout: 超时时间（秒），默认 60
     """
-    # 危险命令拦截
+    # 危险命令拦截（后端无关的纵深防御，先于执行）
     matched = _is_dangerous_command(command)
     if matched:
         return f"错误: 危险命令被拦截（匹配规则: {matched}），该命令禁止执行"
@@ -141,43 +159,15 @@ async def shell_command(command: str, timeout: int = 30) -> str:
                 if is_protected_path(token):
                     return f"错误: 安全限制——命令中包含对 milu 受保护路径的写操作，已拦截: {token}"
 
+    # 实际执行交给当前生效的沙箱后端（local / subprocess / docker）
+    backend = current_backend()
     try:
-        proc = await asyncio.create_subprocess_shell(
-            command,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return f"错误: 命令执行超时（{timeout}秒），已强制终止"
-
-        # 解码输出
-        stdout_text = stdout.decode("utf-8", errors="replace") if stdout else ""
-        stderr_text = stderr.decode("utf-8", errors="replace") if stderr else ""
-        exit_code = proc.returncode
-
-        # 拼接结果
-        parts = []
-        if stdout_text:
-            parts.append(stdout_text)
-        if stderr_text:
-            parts.append(f"[stderr]\n{stderr_text}")
-        parts.append(f"[退出码: {exit_code}]")
-
-        result = "\n".join(parts)
-
-        # 截断超长输出
-        if len(result) > _MAX_OUTPUT_CHARS:
-            result = result[:_MAX_OUTPUT_CHARS] + f"\n\n... [输出已截断，共 {len(result)} 字符]"
-
-        return result
-
+        res = await backend.run_shell(command, timeout=timeout)
     except Exception as e:
         return f"错误: 命令执行失败 - {e}"
+
+    if res.timed_out:
+        return f"错误: 命令执行超时（{timeout}秒），已强制终止"
+
+    max_chars = getattr(backend.config, "max_output_chars", _MAX_OUTPUT_CHARS)
+    return _format_shell_result(res, max_chars)

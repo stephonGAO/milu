@@ -2,6 +2,22 @@
 
 本项目重要变更记录。日期格式 YYYY-MM-DD。
 
+## [Unreleased]
+
+### 新增
+
+- **可插拔沙箱执行后端（`src/milu/sandbox/`）**：`python_repl` / `shell_command` 的实际执行委派给可插拔后端，在「软门控」（模式 + AI 判定决定要不要跑）之上补齐「执行时隔离」（决定跑在哪、能碰什么），二者正交。见 `docs/沙箱执行方案设计.md`。
+  - `SandboxBackend`(ABC) + `ExecResult` + 三实现：`SubprocessBackend`（**默认**，独立子进程 `python -X utf8 -I -` 喂 stdin / shell 子进程——超时**真杀进程**、POSIX `setrlimit` 限内存/CPU、**环境清洗隐藏 `*_API_KEY`**、**注入 guarded-open 拦截读 `.env` / 写 milu 源码**、**默认继承当前工作目录**，跨平台零依赖）、`LocalBackend`（进程内 exec / 宿主 shell，零依赖、零子进程开销，可信场景退回档）、`DockerBackend`（真隔离，**计划于后续版本**）。
+  - **默认即子进程隔离**：local 进程内 exec 的三缺口（能读全部 `os.environ` 密钥、软超时杀不掉死循环线程、崩溃波及主进程）是「同进程执行」的固有属性、进程内无法堵住；subprocess 把代码放进子进程并补 guarded-open（堵「env 已清洗但 `.env` 仍可 `open` 读密钥」旁路，对齐 local）+ 继承 CWD（编码工作流不变），故 = local 全部防护 + 密钥/超时/崩溃三项硬提升。⚠️ guarded-open 为「随手访问」防护，determined 代码仍可经 `io.open`/`os.open` 绕过（硬隔离待 docker）。
+  - **注入与 knowledge 同款**：`Agent(sandbox=...)`（`None`→不注入回退 hermetic 后端 LocalBackend；`"local"`/`SandboxConfig`/实例→定制），`run()` 入口经 `_current_sandbox` ContextVar 注入，`ToolExecutor` 零改动。**两个默认之别**：应用层默认 = subprocess；hermetic 回退恒 = local（裸工具调用/单测零子进程开销，库纯净）。
+  - **配置**：`config.json` 新增 `sandbox` 分节（从 `SandboxConfig` dataclass 派生，默认 `backend=subprocess`、`timeout=60`）；`milu config set sandbox.backend local` 退回零开销、`sandbox.ephemeral_workdir true` 用一次性临时目录加强隔离。CLI 与 Web 服务读分层配置下传。
+  - 黑名单 / 受保护路径检查保留在工具层（后端无关的纵深防御，先于执行）。
+
+### 变更
+
+- **代码执行默认超时 30s → 60s**（`SandboxConfig.timeout` 与 `shell_command` 形参默认）。
+- **代码执行默认后端 local → subprocess**（子进程隔离）：CLI `milu chat` / `milu run` 与 `milu serve` 默认在子进程中跑 `python_repl` / `shell_command`，密钥不再暴露给被执行代码、死循环可被真杀、崩溃不波及主进程。可信单人场景如需零开销可 `milu config set sandbox.backend local` 退回。
+
 ## [0.3.0] - 2026-06-18
 
 本版本以**跨用户观测大屏（数据中心）**为主线，并完成 CLI 与 Web 全链路中英双语（兼容 0.2.x，无破坏性变更）。

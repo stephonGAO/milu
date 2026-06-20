@@ -48,11 +48,12 @@ class Settings:
     selfguard_enabled: bool = True
     show_subagent_events: bool = False   # 是否在 CLI 渲染子代理内部事件（默认隐藏）
     context_window: int | None = None    # 显式覆盖上下文窗口（None=按模型名自动解析）
-    # 运行限额 / 压缩 / 知识库 / 观测分节（供 builder 构造对应运行期 Config）
+    # 运行限额 / 压缩 / 知识库 / 观测 / 沙箱分节（供 builder 构造对应运行期 Config）
     agent: dict = field(default_factory=dict)
     compact: dict = field(default_factory=dict)
     knowledge: dict = field(default_factory=dict)
     observability: dict = field(default_factory=dict)
+    sandbox: dict = field(default_factory=dict)
 
 
 def resolve_settings(config: MiluConfig, args) -> Settings:
@@ -112,4 +113,5 @@ def resolve_settings(config: MiluConfig, args) -> Settings:
         compact=dict(config.compact),
         knowledge=dict(config.knowledge),
         observability=dict(config.observability),
+        sandbox=dict(config.sandbox),
     )
