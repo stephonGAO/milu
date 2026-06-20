@@ -75,7 +75,8 @@ _OBSERVABILITY_KEYS = ("capture_content", "max_content_chars", "retention_days")
 # 计划于后续版本，不入分节）
 _SANDBOX_KEYS = (
     "backend", "timeout", "memory_mb", "cpu_seconds",
-    "network", "max_output_chars", "workdir", "ephemeral_workdir", "docker_image",
+    "network", "max_output_chars", "workdir", "ephemeral_workdir",
+    "docker_image", "docker_cpus", "docker_user",
 )
 
 _TRUTHY = {"1", "true", "yes", "on", "y"}

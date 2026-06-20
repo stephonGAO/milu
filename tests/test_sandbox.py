@@ -6,9 +6,12 @@ Docker 后端本版本未实现（build_backend 对 "docker" 抛错），相关�
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 
 import pytest
+
+from milu.resources import _current_workspace
 
 from milu.sandbox import (
     ExecResult,
@@ -44,9 +47,9 @@ class TestBuildBackend:
         inst = LocalBackend(SandboxConfig())
         assert build_backend(inst) is inst
 
-    def test_docker_not_yet_available(self):
-        with pytest.raises(ValueError, match="docker"):
-            build_backend("docker")
+    def test_docker_backend_constructs(self):
+        from milu.sandbox import DockerBackend
+        assert isinstance(build_backend("docker"), DockerBackend)
 
     def test_unknown_backend(self):
         with pytest.raises(ValueError):
@@ -227,6 +230,78 @@ class TestSubprocessBackend:
         assert res.exit_code != 0
         assert "line 2" in res.stderr
         assert "ValueError" in res.stderr
+
+
+# ── DockerBackend（真隔离；hermetic 部分不需要本机 docker）────────
+class TestDockerBackend:
+    def _backend(self, **kw):
+        from milu.sandbox import DockerBackend
+        return DockerBackend(SandboxConfig(backend="docker", **kw))
+
+    def test_base_args_isolation_flags(self):
+        args = self._backend(memory_mb=512)._base_args("milu_sbx_test")
+        assert "--rm" in args and "--read-only" in args
+        assert args[args.index("--network") + 1] == "none"     # 默认断网
+        assert args[args.index("--memory") + 1] == "512m"
+        assert "--pids-limit" in args
+        assert args[args.index("-w") + 1] == "/work"
+        assert args[args.index("--name") + 1] == "milu_sbx_test"
+
+    def test_base_args_network_enabled(self):
+        args = self._backend(network=True)._base_args("n")
+        assert args[args.index("--network") + 1] == "bridge"
+
+    def test_base_args_no_workspace_uses_tmpfs(self):
+        # 未注入工作区 → /work 用 tmpfs（全隔离，无宿主挂载）
+        assert _current_workspace.get() is None
+        args = self._backend()._base_args("n")
+        assert any(a.startswith("/work:") for a in args)        # --tmpfs /work:...
+        assert not any(a.endswith(":/work") for a in args)      # 无 -v 挂载
+
+    def test_base_args_mounts_workspace(self, tmp_path):
+        token = _current_workspace.set(str(tmp_path))
+        try:
+            args = self._backend()._base_args("n")
+        finally:
+            _current_workspace.reset(token)
+        mount = args[args.index("-v") + 1]
+        assert mount.endswith(":/work")
+        assert os.path.normcase(mount[: -len(":/work")]) == os.path.normcase(str(tmp_path))
+
+    def test_base_args_cpus_and_user(self):
+        args = self._backend(docker_cpus=2.0, docker_user="1000:1000")._base_args("n")
+        assert args[args.index("--cpus") + 1] == "2.0"
+        assert args[args.index("--user") + 1] == "1000:1000"
+
+    async def test_unavailable_returns_friendly_error(self, monkeypatch):
+        """docker 不可用 → run_python 返回中文友好错（不抛、不崩对话）。"""
+        b = self._backend()
+
+        async def _fake_prepare():
+            return "Docker 未安装或不在 PATH：……"
+        monkeypatch.setattr(b, "_prepare", _fake_prepare)
+        res = await b.run_python("print(1)")
+        assert res.exit_code is None and "Docker" in res.stderr
+
+    async def test_probe_binary_missing(self, monkeypatch):
+        """探测：docker 可执行文件不存在 → 未安装提示。"""
+        b = self._backend()
+
+        async def _fake_probe(argv, *, timeout):
+            return None, "", "docker 可执行文件不存在"
+        monkeypatch.setattr(b, "_probe_exec", _fake_probe)
+        msg = await b._do_prepare()
+        assert msg and "未安装" in msg
+
+    @pytest.mark.skipif(shutil.which("docker") is None, reason="本机未安装 docker CLI")
+    async def test_real_docker_run_if_available(self):
+        """端到端：docker 可用时容器内执行；daemon 未启动则跳过（优雅降级）。"""
+        b = self._backend(timeout=180)
+        err = await b._prepare()
+        if err:
+            pytest.skip(f"docker 不可用，跳过真跑：{err[:80]}")
+        res = await b.run_python("print(6 * 7)")
+        assert "42" in res.stdout and res.exit_code == 0
 
 
 # ── 工具委派：python_repl / shell_command 走注入的后端 ──────

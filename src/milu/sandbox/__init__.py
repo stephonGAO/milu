@@ -12,6 +12,7 @@ from milu.sandbox.base import (
 from milu.sandbox.config import SandboxConfig, build_backend
 from milu.sandbox.local import LocalBackend
 from milu.sandbox.process import SubprocessBackend
+from milu.sandbox.docker import DockerBackend
 
 __all__ = [
     "ExecResult",
@@ -19,6 +20,7 @@ __all__ = [
     "SandboxConfig",
     "LocalBackend",
     "SubprocessBackend",
+    "DockerBackend",
     "build_backend",
     "current_backend",
     "default_backend",

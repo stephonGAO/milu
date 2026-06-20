@@ -13,7 +13,8 @@ from milu.sandbox.base import SandboxBackend
 # 不入分节；workdir 默认 None）
 _KNOWN_KEYS = (
     "backend", "timeout", "memory_mb", "cpu_seconds",
-    "network", "max_output_chars", "workdir", "ephemeral_workdir", "docker_image",
+    "network", "max_output_chars", "workdir", "ephemeral_workdir",
+    "docker_image", "docker_cpus", "docker_user",
 )
 
 
@@ -29,8 +30,10 @@ class SandboxConfig:
     max_output_chars: int = 8192         # shell 输出截断上限（字符）
     workdir: str | None = None           # 固定工作目录；None=继承当前工作目录（与 local 一致，编码工作流照常）
     ephemeral_workdir: bool = False      # True 时 subprocess 每次在一次性临时目录执行（更强隔离，相对路径写不落项目目录）
-    docker_image: str = "python:3.12-slim"   # docker 后端镜像（计划于后续版本）
-    docker_mounts: list = field(default_factory=list)  # docker 挂载（计划于后续版本）
+    docker_image: str = "python:3.12-slim"   # docker 后端镜像（首次执行按需自动拉取）
+    docker_cpus: float | None = None     # docker --cpus（CPU 配额，如 2.0；None=不限）
+    docker_user: str | None = None       # docker --user（如 "1000:1000" 非 root；None=镜像默认）
+    docker_mounts: list = field(default_factory=list)  # docker 额外挂载（-v 列表，如 ["/data:/data:ro"]；默认仅挂工作区）
 
     @classmethod
     def from_mapping(cls, m: dict | None) -> "SandboxConfig":
@@ -51,10 +54,8 @@ def _from_config(cfg: SandboxConfig) -> SandboxBackend:
         from milu.sandbox.process import SubprocessBackend
         return SubprocessBackend(cfg)
     if name == "docker":
-        raise ValueError(
-            "docker 沙箱后端尚未在本版本提供（计划于后续版本），"
-            "请将 sandbox.backend 设为 local 或 subprocess"
-        )
+        from milu.sandbox.docker import DockerBackend
+        return DockerBackend(cfg)
     raise ValueError(f"未知沙箱后端: {cfg.backend!r}（可选：local / subprocess / docker）")
 
 
