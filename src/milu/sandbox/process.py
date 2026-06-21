@@ -2,7 +2,8 @@
 
 相对 LocalBackend 的提升（这些正是 local 后端在进程内 exec 下无法堵住的固有缺口）：
   - **超时能真杀**：到点 kill 子进程（local 的线程级超时杀不掉死循环）；
-  - **资源限额**：POSIX 经 RLIMIT_AS/RLIMIT_CPU 限内存与 CPU 时间（Windows 暂跳过）；
+  - **资源限额**：经 RLIMIT_AS/RLIMIT_CPU 限内存与 CPU 时间——**内存硬限额实际只在
+    Linux 可靠生效**（macOS 内核往往不强制 RLIMIT_AS，Windows 无 preexec_fn 跳过）；
   - **状态隔离**：崩溃/无限分配不波及 milu 主进程；
   - **环境清洗**：只透传最小必要环境变量 → 执行的代码看不到 {PROVIDER}_API_KEY 等密钥
     （local 的进程内 exec 能直接读 os.environ 拿到全部密钥）；
@@ -142,6 +143,7 @@ class SubprocessBackend(SandboxBackend):
             if mem:
                 nbytes = int(mem) * 1024 * 1024
                 # RLIMIT_AS 限地址空间；过低会让解释器/numpy 启动失败，故 try 容错。
+                # 注：Linux 可靠强制；macOS 内核往往不强制（调用成功但不真正限制）。
                 try:
                     resource.setrlimit(resource.RLIMIT_AS, (nbytes, nbytes))
                 except (ValueError, OSError):

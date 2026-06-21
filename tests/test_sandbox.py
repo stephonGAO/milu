@@ -164,9 +164,16 @@ class TestSubprocessBackend:
         res = await b.run_python("import sys; print('' in sys.path or '.' in sys.path)")
         assert "False" in res.stdout
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="RLIMIT 仅 POSIX 支持")
-    async def test_memory_limit_posix(self):
-        """POSIX 下内存限额生效：超额分配触发 MemoryError / 非零退出。"""
+    @pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="RLIMIT_AS 仅 Linux 可靠强制（macOS 内核往往不强制、Windows 无 preexec_fn）",
+    )
+    async def test_memory_limit_linux(self):
+        """Linux 下内存限额生效：超额分配触发 MemoryError / 非零退出。
+
+        说明：macOS 的 RLIMIT_AS 内核往往不强制（setrlimit 调用成功但不真正限制地址
+        空间），Windows 无 preexec_fn，故内存硬限额实际只在 Linux 生效，此项也仅在 Linux 跑。
+        """
         b = SubprocessBackend(SandboxConfig(backend="subprocess", memory_mb=256))
         # 尝试分配约 1GB，应被 RLIMIT_AS 拦下
         res = await b.run_python("x = bytearray(1024 * 1024 * 1024)")
