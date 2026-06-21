@@ -165,8 +165,10 @@ def test_write_project_template(paths):
     assert data["agent"]["workspace"] == ""   # 工作区默认空串（→ ~/.milu/workspace）
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "observability",
-        "default_models", "security", "sandbox", "display", "lang",
+        "default_models", "security", "sandbox", "display", "lang", "multiuser",
     }
+    assert data["multiuser"] == "normal"                   # 部署策略默认普通
+    assert data["agent"]["workspace_jail"] is False        # 文件围栏默认关
     assert data["lang"] == "zh"   # CLI 界面语言默认中文
     assert data["display"]["show_subagent_events"] is False
     assert data["knowledge"]["enabled"] is True   # 知识库默认开启（空库零开销）

@@ -87,6 +87,8 @@ def build_agent(s: Settings) -> Agent:
     # 默认 ~/.milu/workspace（config 的 agent.workspace 或环境变量 MILU_WORKSPACE 可覆盖）。
     from milu.resources import workspace_dir
     workspace = str(workspace_dir(base=s.agent.get("workspace") or None))
+    # 工作区围栏（multiuser=strict 会经分层配置把 agent.workspace_jail 设为 true）
+    workspace_jail = bool(s.agent.get("workspace_jail", False))
     return Agent(
         llm=llm,
         mode=s.mode,
@@ -98,6 +100,7 @@ def build_agent(s: Settings) -> Agent:
         trace=trace,
         sandbox=sandbox,
         workspace=workspace,
+        workspace_jail=workspace_jail,
         on_confirm=confirm_unsafe,
     )
 

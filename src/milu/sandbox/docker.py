@@ -28,6 +28,25 @@ logger = logging.getLogger(__name__)
 _UNSET = object()   # _prepare 结果缓存的未初始化哨兵
 
 
+def docker_available_sync(timeout: float = 6.0) -> bool:
+    """同步快探 docker daemon 是否就绪（供 CLI/serve 启动横幅判断，非执行路径）。
+
+    docker 未安装 / daemon 未启 / 探测异常均返回 False。不抛异常。
+    """
+    import shutil
+    import subprocess
+    if shutil.which("docker") is None:
+        return False
+    try:
+        r = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True, timeout=timeout,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 class DockerBackend(SandboxBackend):
     """容器内执行（真隔离，需本机 Docker Engine；走 docker CLI、零 Python 依赖）。"""
 

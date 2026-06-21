@@ -1,9 +1,10 @@
 {
   "agent": {
-    "//": "workspace：agent 工作区根目录——file_read/file_write 的相对路径与沙箱执行 CWD 都落在这里，避免产物污染 milu 启动目录/项目。空串=默认 ~/.milu/workspace（Web 多用户再按 user_id 加子目录隔离）；可填绝对路径固定，或用环境变量 MILU_WORKSPACE 覆盖。读写工作区以外的文件请用绝对路径。",
+    "//": "workspace：agent 工作区根目录——file_read/file_write 的相对路径与沙箱执行 CWD 都落在这里，避免产物污染 milu 启动目录/项目。空串=默认 ~/.milu/workspace（Web 多用户再按 user_id 加子目录隔离）；可填绝对路径固定，或用环境变量 MILU_WORKSPACE 覆盖。读写工作区以外的文件请用绝对路径。workspace_jail=true 时文件工具（file_read/file_write/doc_read/image_read）只能在工作区内读写、越界拒绝（普通单人留 false；multiuser=strict 会自动设 true）。",
     "mode": "auto",
     "session_enabled": true,
     "workspace": "",
+    "workspace_jail": false,
     "llm": {
       "provider": "qwen",
       "model": "qwen3.6-plus",
@@ -90,5 +91,7 @@
     "gemini": "gemini-3.5-flash",
     "anthropic": "claude-sonnet-4.6"
   },
-  "lang": "zh"
+  "lang": "zh",
+  "//multiuser": "部署策略（与单次运行的 agent.mode 正交）。normal=普通（默认，便利优先，按当前各分节配置）；strict=严格多用户——一键强制安全基线：sandbox.backend=docker（代码进容器、碰不到宿主）+ agent.workspace_jail=true（文件工具关进工作区）+ docker 断网。strict 作为最高层【强制覆盖】这三个安全键，不被本文件/用户配置架空（其余键如模型/docker_image 仍按配置）；故 strict 必须能用 docker，否则代码执行会失败（启动横幅会探测并告警）。无法用 docker 又想部分隔离：用 normal + 手动 sandbox.backend=subprocess + agent.workspace_jail=true。切换：milu config set multiuser strict。",
+  "multiuser": "normal"
 }

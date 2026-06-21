@@ -19,6 +19,11 @@
   - 注入与 sandbox/knowledge 同款 ContextVar（`_current_workspace`，`run()` 入口注入、子代理继承）；裸 `Agent(workspace=None)`/单测不注入 → 相对路径回退进程 CWD（hermetic 不变）。提示词经 `{{workspace}}` 告知模型。
   - **CLI 单人**用工作区根、**Web 多用户**按 `workspace/{user}` 隔离（`_safe_user_id` 对 `.`/`..` 纯点号组件回退 default，防目录穿越）。⚠️ `local` 后端 `python_repl` 进程内 exec 无法安全切 CWD，其相对路径仍按进程目录（`file_write` 工具与默认 subprocess 后端不受影响）。
 
+- **部署策略 `multiuser`（normal/strict，config 顶层键，默认 normal）**：把多用户严格隔离的散落开关打包成一个部署档，一键切换、不漏配。
+  - `strict` 作为**最高层强制覆盖**（`内置 ← 项目 ← 用户 ← strict`），保证 `sandbox.backend=docker` + `agent.workspace_jail=true` + docker 断网这三个安全键**不被配置文件架空**（全量模板 `config/milu.json` 显式含 subprocess/jail=false，必须由 strict 盖过才生效）；其余键仍按配置。docker daemon 未就绪时 CLI/serve 启动横幅经 `docker_available_sync()` 探测并红色告警。切换：`milu config set multiuser strict`。
+  - **真隔离需两块都到位**：docker 关住 python/shell（subprocess 下 python 仍能 open 读宿主），工作区围栏关住文件工具。
+- **文件工具工作区围栏 `agent.workspace_jail`（`Agent(workspace_jail=...)` + `_current_workspace_jail`）**：开启后 `file_read`/`file_write`/`doc_read`/`image_read` 只能在工作区内读写，越界（逃逸的绝对路径 / `..` 穿越）拒绝；普通单人留默认 false（保留绝对路径读项目）。补齐了「docker 只隔离代码执行、文件工具仍在宿主进程」的缺口。
+
 ### 变更
 
 - **代码执行默认超时 30s → 60s**（`SandboxConfig.timeout` 与 `shell_command` 形参默认）。

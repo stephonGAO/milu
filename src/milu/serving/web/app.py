@@ -353,6 +353,7 @@ def _make_agent_factory(state, shared_mcp):
         from milu.resources import workspace_dir
         workspace = str(workspace_dir(
             user_id=user_id, base=getattr(state, "workspace_cfg", "") or None))
+        workspace_jail = bool(getattr(state, "workspace_jail_cfg", False))
         return Agent(
             llm=llm,
             tools=[*BUILTIN_TOOLS, create_structured_output_tool()],
@@ -367,6 +368,7 @@ def _make_agent_factory(state, shared_mcp):
             trace=trace,                    # 运行追踪（观测面板数据源）
             sandbox=sandbox,                # 代码执行后端（默认 subprocess）
             workspace=workspace,            # agent 工作区（按用户隔离）
+            workspace_jail=workspace_jail,  # 工作区围栏（strict 多用户）
             on_confirm=lambda t, a: _confirm_unsafe(state, user_id, session_id, t, a),
         )
     return factory
@@ -458,6 +460,8 @@ def create_app(
         st.sandbox_cfg = dict(mc.sandbox)
         # agent 工作区根（agent.workspace；空串→默认 ~/.milu/workspace），按 user_id 加子目录隔离
         st.workspace_cfg = mc.agent.get("workspace", "")
+        # 工作区围栏（multiuser=strict 经分层配置设为 true）：文件工具禁止越出工作区
+        st.workspace_jail_cfg = bool(mc.agent.get("workspace_jail", False))
         pool = AgentPool(
             llm_factory=lambda uid, sid: default_llm,
             agent_factory=_make_agent_factory(st, shared_mcp),

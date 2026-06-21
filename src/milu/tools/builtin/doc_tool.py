@@ -289,6 +289,13 @@ async def doc_read(
     :param page_start: 起始页码（pdf 时使用，从 1 开始）
     :param page_end: 结束页码（pdf 时使用）
     """
+    # 相对路径锚定 agent 工作区 + strict 工作区围栏（与 file_read 一致）
+    from milu.tools.builtin.file_tool import _resolve_path, _jail_violation
+    path = _resolve_path(path)
+    jail = _jail_violation(path)
+    if jail is not None:
+        return json.dumps(jail, ensure_ascii=False)
+
     abs_path = os.path.abspath(path)
     ext = os.path.splitext(abs_path)[1].lower()
 

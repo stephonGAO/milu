@@ -18,7 +18,7 @@ from typing import Literal, Optional
 
 from milu.tools.decorator import tool
 from milu.tools._selfguard import is_protected_path, selfguard_error
-from milu.resources import current_workspace
+from milu.resources import current_workspace, current_workspace_jail
 
 
 def _resolve_path(path: str) -> str:
@@ -34,6 +34,30 @@ def _resolve_path(path: str) -> str:
         return path
     os.makedirs(ws, exist_ok=True)
     return os.path.join(ws, path)
+
+
+def _jail_violation(path: str) -> dict | None:
+    """工作区围栏（multiuser=strict）：越出工作区的路径返回错误 dict，否则 None。
+
+    在 `_resolve_path` 之后调用——相对路径已锚定工作区内、必过；只拦逃逸的绝对路径与
+    `..` 穿越。围栏未启用 / 未注入工作区时不拦（普通单人部署行为不变）。
+    """
+    if not current_workspace_jail():
+        return None
+    ws = current_workspace()
+    if not ws:
+        return None
+    ws_abs = os.path.normcase(os.path.abspath(ws))
+    p_abs = os.path.normcase(os.path.abspath(path))
+    if p_abs == ws_abs or p_abs.startswith(ws_abs + os.sep):
+        return None
+    return {
+        "success": False,
+        "error": "工作区围栏：严格多用户模式下禁止访问工作区外的路径",
+        "path": path,
+        "workspace": ws,
+        "hint": "只能在自己的工作区内读写；如确需访问外部文件，请由管理员调整部署策略（multiuser）或工作区围栏设置",
+    }
 
 # ── 常量 ─────────────────────────────────────────────────
 _MAX_READ_LINES = 200          # 单次读取最大行数
@@ -422,6 +446,10 @@ async def file_read(
 
     # 相对路径锚定 agent 工作区（与 file_write 一致；绝对路径不变）
     path = _resolve_path(path)
+    # 工作区围栏（strict 多用户）：越界绝对路径/穿越直接拒绝
+    jail = _jail_violation(path)
+    if jail is not None:
+        return json.dumps(jail, ensure_ascii=False)
 
     # 读保护：与写保护共用同一套受保护路径（含 .env 等凭据文件）
     if is_protected_path(path):
@@ -493,6 +521,10 @@ async def file_write(
 
     # 相对路径锚定 agent 工作区（绝对路径不变）→ 产物不污染启动目录/项目
     path = _resolve_path(path)
+    # 工作区围栏（strict 多用户）：越界绝对路径/穿越直接拒绝
+    jail = _jail_violation(path)
+    if jail is not None:
+        return json.dumps(jail, ensure_ascii=False)
 
     # 自我保护：禁止写入 milu 源码和程序配置文件
     if is_protected_path(path):

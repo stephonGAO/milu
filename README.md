@@ -386,6 +386,7 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 - [x] Multi-user observability dashboard (cross-user data-center view at `/dashboard`)
 - [ ] OTLP exporter for the tracing layer
 - [x] Pluggable sandbox backends for `python_repl` / `shell_command` (subprocess isolation **by default** — scrubs `*_API_KEY`, real timeout-kill, crash isolation, guarded-open; `local` for zero overhead; **`docker` for true isolation** — containerized, no host FS/network/secrets, mounts only the per-user workspace; opt-in, zero pip deps)
+- [x] Strict multi-user deployment profile (`multiuser=strict` bundles docker isolation + file-tool workspace jail + no-network in one switch; per-key overridable with startup warnings)
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)
 - [ ] Prebuilt images on a container registry

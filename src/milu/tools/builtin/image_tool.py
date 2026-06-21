@@ -64,6 +64,13 @@ async def image_read(path: str) -> str:
             "doubao-1.5-vision-pro 等），或让用户描述图片内容。"
         )
 
+    # 相对路径锚定 agent 工作区 + strict 工作区围栏（与 file_read 一致）
+    from milu.tools.builtin.file_tool import _resolve_path, _jail_violation
+    path = _resolve_path(path)
+    jail = _jail_violation(path)
+    if jail is not None:
+        return _err(jail["error"], path=jail["path"], hint=jail["hint"])
+
     abs_path = os.path.abspath(path)
     if not os.path.isfile(abs_path):
         return _err(f"文件不存在: {abs_path}")

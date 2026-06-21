@@ -136,6 +136,18 @@ def current_workspace() -> str | None:
     return _current_workspace.get()
 
 
+# 文件工具工作区围栏开关（与 _current_workspace 配套）：True 且工作区已注入时，
+# file_read/file_write/doc_read/image_read 拒绝访问工作区外路径（multiuser=strict 用）。
+_current_workspace_jail: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_current_workspace_jail", default=False
+)
+
+
+def current_workspace_jail() -> bool:
+    """当前是否启用文件工具工作区围栏（未注入时 False）。"""
+    return _current_workspace_jail.get()
+
+
 def default_mcp_config_path() -> Path:
     """MCP 配置文件默认路径：user_data_dir()/mcp_servers.json。"""
     return user_data_dir() / "mcp_servers.json"

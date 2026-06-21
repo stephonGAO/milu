@@ -534,6 +534,20 @@ def _cmd_serve(args) -> int:
             mode=c('yellow', settings.mode),
             sch=t('开') if opts['use_scheduler'] else t('关'),
             mcp=t('开') if opts['use_mcp'] else t('关')))
+    # 部署策略与隔离状态（多用户服务尤其关键；docker daemon 未就绪时红色告警）
+    from milu.config import deployment_lines
+    _be = config.sandbox.get("backend", "subprocess")
+    _docker_ok = None
+    if config.multiuser == "strict" and _be == "docker":
+        from milu.sandbox.docker import docker_available_sync
+        _docker_ok = docker_available_sync()
+    for _line in deployment_lines(
+        config.multiuser, _be,
+        bool(config.agent.get("workspace_jail", False)),
+        docker_ok=_docker_ok,
+    ):
+        _col = 'red' if _line.startswith('⚠') else ('yellow' if config.multiuser == 'strict' else 'dim')
+        print(f"  {c(_col, _line)}")
     print(c("dim", t("  不同浏览器标签用不同「用户ID」即可演示多用户隔离。Ctrl+C 停止。")))
     print(DIVIDER + "\n")
 

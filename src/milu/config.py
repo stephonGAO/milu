@@ -108,6 +108,10 @@ def _builtin_defaults() -> dict:
             # 空串 → 默认 user_data_dir()/workspace（Web 多用户再按 user_id 加子目录）；
             # 也可填绝对路径固定，或用环境变量 MILU_WORKSPACE 覆盖。
             "workspace": "",
+            # 文件工具工作区围栏：true 时 file_read/file_write/doc_read/image_read 只能
+            # 在工作区内读写，越界（逃逸的绝对路径 / ..）拒绝。普通单人部署留 false（可用
+            # 绝对路径读项目文件）；multiuser=strict 会把它设为 true。
+            "workspace_jail": False,
             # 该 Agent 使用的模型对象（model 留 null → 按 default_models[provider] 取默认）
             "llm": {
                 "provider": DEFAULT_PROVIDER,
@@ -159,6 +163,25 @@ def _builtin_defaults() -> dict:
         "default_models": dict(DEFAULT_MODELS),
         # CLI 界面语言（zh/en，默认中文）；运行时可经 --lang / MILU_LANG 覆盖
         "lang": "zh",
+        # 部署策略（与单次运行的 agent.mode 正交）：normal=普通（当前默认，便利优先）；
+        # strict=严格多用户——一键打包安全基线（沙箱 docker、文件围栏 on、断网），见
+        # _strict_overrides()。作为「比内置默认更低的一层」应用，显式配置仍可覆盖单项。
+        "multiuser": "normal",
+    }
+
+
+def _strict_overrides() -> dict:
+    """multiuser=strict 强制的安全键（作为最高层覆盖，保证多用户隔离不被配置架空）。
+
+    只强制下列安全关键键；其余键（模型/限额/docker_image/docker_user 等）仍按配置文件。
+    若部署机器无法用 docker、又想要部分隔离，请用 multiuser=normal + 手动设置
+    sandbox.backend=subprocess + agent.workspace_jail=true（自担 python 仍可读宿主之责）。
+    """
+    return {
+        # 代码执行进容器：python/shell 关进 docker、碰不到宿主（真隔离的核心）
+        "sandbox": {"backend": "docker", "network": False},
+        # 文件工具关进工作区：file_read/write/doc_read/image_read 不得越界
+        "agent": {"workspace_jail": True},
     }
 
 
@@ -210,12 +233,22 @@ class MiluConfig:
 
     @classmethod
     def load(cls) -> "MiluConfig":
-        """加载并分层合并：基线 ← 项目 config/milu.json ← 用户 ~/.milu/config.json。"""
+        """加载并分层合并：基线 ← 项目 config/milu.json ← 用户 ~/.milu/config.json。
+
+        若生效 `multiuser` 策略为 strict，则把安全基线 `_strict_overrides()` 作为
+        **最高层强制覆盖**（设 strict 即保证 sandbox=docker + 文件围栏 + 断网，
+        无论配置文件里写了什么——否则全量模板里的显式值会把 strict 架空）。
+        strict 只强制这几个安全键，其余键（模型/限额/docker_image 等）仍按配置。
+        """
+        files = [f for f in (_read_json(project_config_path()),
+                             _read_json(user_config_path())) if f]
         merged = _builtin_defaults()
-        for path in (project_config_path(), user_config_path()):
-            loaded = _read_json(path)
-            if loaded:
-                merged = _deep_merge(merged, loaded)
+        for loaded in files:
+            merged = _deep_merge(merged, loaded)
+        strategy = str(merged.get("multiuser") or "normal").strip().lower()
+        if strategy == "strict":
+            merged = _deep_merge(merged, _strict_overrides())   # strict 强制覆盖在最上层
+            merged["multiuser"] = "strict"
         return cls(merged)
 
     # ── 分节便捷访问 ──────────────────────────────────────
@@ -259,6 +292,11 @@ class MiluConfig:
     @property
     def display(self) -> dict:
         return self.data.get("display", {})
+
+    @property
+    def multiuser(self) -> str:
+        """部署策略：normal（默认）/ strict。"""
+        return str(self.data.get("multiuser") or "normal")
 
     @property
     def default_models(self) -> dict:
@@ -317,6 +355,25 @@ class MiluConfig:
 def load_config() -> MiluConfig:
     """加载分层合并后的生效配置（应用/CLI 入口调用）。"""
     return MiluConfig.load()
+
+
+def deployment_lines(strategy: str, backend: str, jail: bool, *,
+                     docker_ok: bool | None = None) -> list[str]:
+    """部署策略与隔离状态摘要（供 CLI/serve 启动横幅打印）。
+
+    strict 强制 sandbox=docker + 文件围栏 + 断网，故无"配置被削弱"一说；这里展示
+    生效状态，并在 docker daemon 未就绪时给出运行时告警（docker_ok 由调用方探测传入）。
+    """
+    strategy = strategy or "normal"
+    lines = [f"部署策略: {strategy}  (sandbox={backend}, 文件围栏={'on' if jail else 'off'})"]
+    if strategy == "strict":
+        lines.append("strict：已强制 docker 沙箱 + 文件工作区围栏 + 断网（代码与文件均关进各用户工作区）")
+        if backend == "docker":
+            if docker_ok is False:
+                lines.append("⚠ Docker daemon 未运行 → 代码执行(python/shell)会失败，请启动 Docker Engine（或改 multiuser=normal）")
+            elif docker_ok is None:
+                lines.append("提示: docker 隔离需本机 Docker Engine 已启动，否则执行代码会报错")
+    return lines
 
 
 # ── 用户级写入：config set / config init ─────────────────────

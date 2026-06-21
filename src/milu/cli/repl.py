@@ -147,6 +147,21 @@ def print_header(agent, settings: Settings) -> None:
         l_skills=t("技能"), skills_note=t("内置技能元数据已注入，LLM 按需 load_skill 加载"),
         cmd_line=t("命令: /help 查看全部命令  ·  /quit 退出"),
     ))
+    # 部署策略与隔离状态（strict 醒目；docker daemon 未就绪时运行时告警）
+    from milu.config import deployment_lines
+    _be = settings.sandbox.get("backend", "subprocess")
+    _docker_ok = None
+    if settings.multiuser == "strict" and _be == "docker":
+        from milu.sandbox.docker import docker_available_sync
+        _docker_ok = docker_available_sync()
+    for _line in deployment_lines(
+        settings.multiuser, _be,
+        bool(settings.agent.get("workspace_jail", False)),
+        docker_ok=_docker_ok,
+    ):
+        _col = 'red' if _line.startswith('⚠') else (
+            'yellow' if settings.multiuser == 'strict' else 'dim')
+        print(f"  {c(_col, _line)}")
 
 
 # ── / 命令处理 ────────────────────────────────────────────

@@ -80,7 +80,11 @@ from milu.tools.builtin.knowledge_tool import (
 )
 from milu.knowledge import KnowledgeConfig
 from milu.sandbox import SandboxBackend, SandboxConfig, _current_sandbox, build_backend
-from milu.resources import _current_workspace, current_workspace
+from milu.resources import (
+    _current_workspace,
+    _current_workspace_jail,
+    current_workspace,
+)
 from milu.exceptions import content_safety_hint
 from milu.llm.base.vision import build_user_content
 from milu.agent.subagent import (
@@ -268,6 +272,7 @@ class Agent:
         knowledge: "bool | str | KnowledgeConfig" = False,  # 向量知识库开关：False→关闭（默认）；True→启用（身份 "default"）；字符串→按该用户标识隔离；KnowledgeConfig→程序化定制
         sandbox: "str | SandboxConfig | SandboxBackend | None" = None,  # 代码执行后端：None→进程内/宿主 shell（默认，hermetic）；"subprocess"→子进程隔离；SandboxConfig/实例→程序化定制（docker 计划于后续版本）
         workspace: "str | None" = None,                     # agent 工作区：None→不重定向（裸用相对路径按进程 CWD，hermetic）；路径→file_read/file_write 相对路径与沙箱 CWD 都落此目录；子代理继承
+        workspace_jail: "bool | None" = None,               # 文件工具工作区围栏：None→不注入（默认关，子代理继承）；True→file_read/write/doc_read/image_read 禁止越出工作区（multiuser=strict 用）；False→显式关
         schedule_user: "str | None" = None,                 # 定时任务用户标识：None→工具层退化为 "default"（CLI 单人）；多用户场景传 user_id（任务文件按用户隔离）
         judge_llm: "BaseLLM | bool | None" = None,          # auto 模式 AI 安全判定器：None→默认复用主 llm；False→关闭；实例→指定模型
         judge_rules: str = "",                              # 追加给判定器的自定义规则文本（如「禁止访问生产库」）
@@ -390,6 +395,8 @@ class Agent:
         # _current_workspace，file_read/file_write 相对路径与沙箱 CWD 都落此目录。
         # 子代理 self._workspace 为 None → run() 不覆盖 → 沿 Context 继承父工作区。
         self._workspace: str | None = workspace
+        # 工作区围栏（与 workspace 同款继承语义；None→不注入/继承父，bool→显式设置）
+        self._workspace_jail: bool | None = workspace_jail
 
         # ── 定时任务用户标识（与 memory 平级的能力参数）──
         # None → 工具层 _resolve_user() 退化为 "default"（CLI 单人行为不变）；
@@ -861,6 +868,10 @@ class Agent:
         # 继承父工作区（coder 写文件也落同一处），裸 Agent/单测保持 hermetic
         workspace_token = (
             _current_workspace.set(self._workspace) if self._workspace is not None else None
+        )
+        workspace_jail_token = (
+            _current_workspace_jail.set(self._workspace_jail)
+            if self._workspace_jail is not None else None
         )
         # 定时任务用户标识（未设置时注入 None → 工具层退化 "default"）
         schedule_user_token = _current_schedule_user.set(self._schedule_user)
@@ -1693,6 +1704,8 @@ class Agent:
             _safe_reset(_current_sandbox, sandbox_token)
             if workspace_token is not None:   # 仅在本 Agent 显式设了 workspace 时才 set（见上）
                 _safe_reset(_current_workspace, workspace_token)
+            if workspace_jail_token is not None:
+                _safe_reset(_current_workspace_jail, workspace_jail_token)
             _safe_reset(_current_schedule_user, schedule_user_token)
             _safe_reset(_current_parent_mode, mode_token)
             _safe_reset(_current_parent_confirm, confirm_token)
