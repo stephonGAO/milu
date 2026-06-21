@@ -13,6 +13,9 @@ build/
 *.egg-info/
 *.egg
 
+# Agent 工具的隔离 git worktree 残留（勿跟踪、勿打进发布包）
+milu.worktrees/
+
 # Environment
 .env
 .env.local

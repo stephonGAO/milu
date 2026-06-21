@@ -95,6 +95,11 @@ include = [
     "LICENSE",
     ".env.example",
 ]
+# include 的 "tests"/"examples" 是 gitignore 式通配、会匹配任意层级目录；显式排除
+# Agent 隔离 worktree 残留 milu.worktrees/，否则其内的 tests/examples/src 副本会被卷入 sdist
+exclude = [
+    "milu.worktrees",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
