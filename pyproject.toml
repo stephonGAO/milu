@@ -60,6 +60,11 @@ dependencies = [
 ddg = [
     "ddgs>=8.0.0",
 ]
+# 微信客服（经企业微信）接入：回调消息 AES-256-CBC 加解密需要 cryptography。
+# 接入微信客服时 pip install "milu[wechat]"（cryptography 常已随其他库装上）。
+wechat = [
+    "cryptography>=3.4",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
