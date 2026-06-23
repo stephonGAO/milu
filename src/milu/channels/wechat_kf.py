@@ -35,6 +35,8 @@ from typing import Awaitable, Callable
 import httpx
 from fastapi import APIRouter, FastAPI, Request, Response
 
+from .base import Channel, Dispatch, InboundMessage
+from .state import InMemoryStateStore, StateStore
 from .wecom_crypto import WeComCrypto, WeComCryptError
 
 logger = logging.getLogger("milu.channels.wechat_kf")
@@ -42,7 +44,8 @@ logger = logging.getLogger("milu.channels.wechat_kf")
 _QYAPI = "https://qyapi.weixin.qq.com/cgi-bin"
 
 # 「接 milu」的接缝：给定（external_userid, 用户文本）返回回复文本。
-# echo 阶段不传，默认原样回显。
+# echo 阶段不传，默认原样回显。这是早期单渠道的简化接缝；统一的多渠道接入
+# 请用 WeChatKfChannel + Gateway（见 .gateway / .runner）。本钩子保留向后兼容。
 OnText = Callable[[str, str], Awaitable[str]]
 
 
@@ -130,10 +133,17 @@ class WeChatKfClient:
             self._token_expire = time.time() + data.get("expires_in", 7200)
             return self._token
 
-    async def sync_msg(self, token: str, open_kfid: str) -> list[dict]:
-        """用回调 token 拉取该客服账号的新消息，按游标翻页直到 has_more=0。"""
+    async def fetch_messages(
+        self, token: str, open_kfid: str, cursor: str
+    ) -> tuple[list[dict], str]:
+        """**无状态**拉取：从给定 cursor 起翻页拉到 has_more=0。
+
+        返回 (消息列表, next_cursor)；游标由调用方持有/持久化（供 WeChatKfChannel
+        接 StateStore 用）。不读写实例内的 `_cursors`。
+        """
         out: list[dict] = []
         has_more = 1
+        cur = cursor
         while has_more:
             at = await self.access_token()
             r = await self._http.post(
@@ -142,7 +152,7 @@ class WeChatKfClient:
                 json={
                     "token": token,
                     "open_kfid": open_kfid,
-                    "cursor": self._cursors.get(open_kfid, ""),
+                    "cursor": cur,
                     "limit": 1000,
                 },
             )
@@ -150,12 +160,21 @@ class WeChatKfClient:
             if data.get("errcode", 0) != 0:
                 raise RuntimeError(f"sync_msg 失败：{data}")
             # 游标推进（即便本批为空也要保存，避免重复拉取）
-            self._cursors[open_kfid] = data.get(
-                "next_cursor", self._cursors.get(open_kfid, "")
-            )
+            cur = data.get("next_cursor", cur)
             has_more = data.get("has_more", 0)
             out.extend(data.get("msg_list", []))
-        return out
+        return out, cur
+
+    async def sync_msg(self, token: str, open_kfid: str) -> list[dict]:
+        """用回调 token 拉取该客服账号的新消息（内存游标版，向后兼容）。
+
+        新代码请用 `fetch_messages` + 外部 StateStore（见 WeChatKfChannel）。
+        """
+        msgs, cur = await self.fetch_messages(
+            token, open_kfid, self._cursors.get(open_kfid, "")
+        )
+        self._cursors[open_kfid] = cur
+        return msgs
 
     async def send_text(self, touser: str, open_kfid: str, content: str) -> dict:
         """发送文本消息给指定用户（48 小时会话窗口内有效）。"""
@@ -321,6 +340,155 @@ def create_app(
         await client.aclose()
 
     return app
+
+
+# ── Channel 适配器（统一网关用）────────────────────────────────────────
+class WeChatKfChannel(Channel):
+    """微信客服渠道适配器（webhook 型，接入统一 Gateway）。
+
+    与上面 echo 阶段的 `build_router`/`create_app` 等价但走统一契约：把消息规整成
+    InboundMessage 交给 dispatch（通常是 AgentRunner），回复经 send_msg 主动下发；
+    游标与去重交给可持久化的 StateStore（重启不丢、不重复回复）。
+    """
+
+    def __init__(
+        self,
+        config: WeChatKfConfig,
+        *,
+        state: StateStore | None = None,
+        client: WeChatKfClient | None = None,
+        http: httpx.AsyncClient | None = None,
+        cold_start_grace: float = 120.0,
+    ) -> None:
+        self._config = config
+        self._crypto = WeComCrypto(
+            token=config.token,
+            encoding_aes_key=config.encoding_aes_key,
+            receive_id=config.corp_id,
+        )
+        self._client = client or WeChatKfClient(config, http=http)
+        self._owns_client = client is None
+        self._state = state or InMemoryStateStore(dedup_capacity=config.dedup_capacity)
+        # 冷启动（游标为空，常见于首次部署/状态被清）保护：sync_msg 用空游标会返回
+        # 该客服账号最近数天的**全部历史消息**，若逐条回复会刷屏并触发微信客服发送
+        # 频率限制（errcode 95001）。故冷启动时只回复 send_time 在最近 grace 秒内的
+        # 「新鲜」消息（如触发本次回调的那条），更早的积压只推进游标、不回复。
+        # 设为 0 关闭该保护（回放全部历史）。
+        self._cold_start_grace = cold_start_grace
+
+    @property
+    def name(self) -> str:
+        return "wechat_kf"
+
+    def register(self, app: FastAPI, dispatch: Dispatch) -> None:
+        cfg = self._config
+        crypto = self._crypto
+
+        @app.get(cfg.callback_path)
+        async def verify(
+            msg_signature: str, timestamp: str, nonce: str, echostr: str
+        ) -> Response:
+            """① URL 验证：解密 echostr 原样返回明文。"""
+            try:
+                plain = crypto.verify_url(msg_signature, timestamp, nonce, echostr)
+            except WeComCryptError:
+                logger.warning("回调 URL 验证失败")
+                return Response("fail", status_code=403)
+            return Response(plain)
+
+        @app.post(cfg.callback_path)
+        async def receive(
+            request: Request, msg_signature: str, timestamp: str, nonce: str
+        ) -> Response:
+            """② 接收事件：解密 → kf_msg_or_event 则后台拉取+回复（5 秒内先回 success）。"""
+            body = (await request.body()).decode("utf-8", "ignore")
+            try:
+                plain = crypto.decrypt_message(body, msg_signature, timestamp, nonce)
+            except WeComCryptError:
+                logger.warning("回调消息解密失败")
+                return Response("fail", status_code=403)
+            try:
+                root = ET.fromstring(plain)
+            except ET.ParseError:
+                logger.warning("回调明文非合法 XML")
+                return Response("success")
+            if root.findtext("Event") == "kf_msg_or_event":
+                token = root.findtext("Token") or ""
+                open_kfid = root.findtext("OpenKfId") or ""
+                if token and open_kfid:
+                    asyncio.create_task(
+                        self._pull_and_dispatch(token, open_kfid, dispatch)
+                    )
+            return Response("success")
+
+    async def _pull_and_dispatch(
+        self, token: str, open_kfid: str, dispatch: Dispatch
+    ) -> None:
+        """拉取该客服账号新消息 → 逐条 dispatch → send_msg 回复（整段不抛异常）。"""
+        try:
+            cursor = await self._state.get_cursor(self.name, open_kfid)
+            messages, next_cursor = await self._client.fetch_messages(
+                token, open_kfid, cursor
+            )
+        except Exception:
+            logger.exception("sync_msg 拉取失败 open_kfid=%s", open_kfid)
+            return
+
+        # 冷启动（空游标）保护：只放行最近 grace 秒内的新鲜消息，跳过历史积压
+        cold_start = not cursor and self._cold_start_grace > 0
+        fresh_after = time.time() - self._cold_start_grace
+        skipped_backlog = 0
+
+        for msg in messages:
+            msgid = msg.get("msgid", "")
+            if await self._state.seen(self.name, msgid):
+                continue
+            if msg.get("msgtype") != "text":  # 暂只处理文本
+                continue
+            # 冷启动时丢弃历史积压（登记去重 + 让游标推进，但不回复，避免刷屏/限频）
+            if cold_start and int(msg.get("send_time", 0)) < fresh_after:
+                skipped_backlog += 1
+                continue
+            external_userid = msg.get("external_userid")
+            content = (msg.get("text") or {}).get("content", "")
+            if not external_userid or not content:
+                continue
+            inbound = InboundMessage(
+                channel=self.name,
+                user_id=external_userid,
+                text=content,
+                reply_to={"open_kfid": open_kfid},
+                msg_id=msgid,
+                raw=msg,
+            )
+            try:
+                reply = await dispatch(inbound)
+            except Exception:
+                logger.exception("dispatch 生成回复失败 user=%s", external_userid)
+                reply = None
+            if reply is None or not reply.text:
+                continue
+            try:
+                resp = await self._client.send_text(
+                    external_userid, open_kfid, reply.text
+                )
+                if resp.get("errcode", 0) != 0:
+                    logger.warning("send_msg 返回错误：%s", resp)
+            except Exception:
+                logger.exception("send_msg 回复失败 user=%s", external_userid)
+
+        if skipped_backlog:
+            logger.info(
+                "冷启动跳过 %d 条历史积压消息（仅推进游标不回复）open_kfid=%s",
+                skipped_backlog, open_kfid,
+            )
+        # 游标推进到本批末尾（已处理消息均已登记去重，重启也不会重复回复）
+        await self._state.set_cursor(self.name, open_kfid, next_cursor)
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+        await self._state.close()
 
 
 def run_server(host: str = "0.0.0.0", port: int = 8800) -> None:

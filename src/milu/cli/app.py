@@ -11,6 +11,7 @@
     schedule             定时任务管理（list/run/delete/enable/disable）
     scheduler            调度守护进程（start）
     serve                启动内置 Web 服务（多用户对话 + 全功能演示前端）
+    gateway              多渠道接入网关（微信客服/飞书/Telegram → milu Agent）
     trace                运行追踪查看（list/show/compare/stats，可观测性）
 
 全局选项（厂商/模型/模式/语言等）写在子命令之后，例如：
@@ -161,6 +162,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.add_argument("--no-session", action="store_true", help=t("禁用会话持久化"))
     p_serve.add_argument("--no-scheduler", action="store_true", help=t("不嵌入定时任务调度引擎"))
     p_serve.add_argument("--reload", action="store_true", help=t("开发模式：代码变更自动重载"))
+
+    # ── gateway：多渠道接入网关（微信客服 / 飞书 / Telegram）──
+    p_gw = sub.add_parser(
+        "gateway", help=t("启动多渠道接入网关（微信客服/飞书/Telegram → milu Agent）"))
+    p_gw.add_argument("--host", default="0.0.0.0", help=t("监听地址（默认 0.0.0.0）"))
+    p_gw.add_argument("--port", type=int, default=8800, help=t("监听端口（默认 8800）"))
+    p_gw.add_argument("-p", "--provider", help=t("默认厂商（默认按配置）"))
+    p_gw.add_argument("-m", "--model", help=t("默认模型（默认按厂商内置）"))
+    p_gw.add_argument("--api-key", help=t("临时 API Key（一般用 .env 配置）"))
+    p_gw.add_argument("--mode", choices=["talk", "manual", "auto", "superwork"],
+                      help=t("默认操作模式（默认 auto）"))
+    p_gw.add_argument("--lang", choices=["zh", "en"], help=t("选择语言（zh/en，默认 zh）"))
+    p_gw.add_argument("--channel", help=t(
+        "启用的渠道（逗号分隔：wechat_kf,feishu,telegram；缺省按已配置的凭证自动探测）"))
+    p_gw.add_argument("--no-subagents", action="store_true", help=t("不挂载内置子代理"))
+    p_gw.add_argument("--no-session", action="store_true", help=t("禁用会话持久化"))
+    p_gw.add_argument("--no-persist", action="store_true",
+                      help=t("去重/游标不落盘（用内存版，重启即丢）"))
 
     return parser
 
@@ -565,6 +584,134 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _build_gateway_channels(requested: list[str] | None, persist: bool):
+    """按环境变量凭证（或显式 --channel）构建启用的渠道列表。
+
+    :param requested: 显式指定的渠道名集合；None 表示按凭证自动探测。
+    :param persist: True 用文件持久化 StateStore（去重/游标重启不丢），False 用内存版。
+    :return: (channels, store, warnings)
+    """
+    from milu.channels import FileStateStore, InMemoryStateStore
+
+    store = FileStateStore() if persist else InMemoryStateStore()
+    channels = []
+    warnings: list[str] = []
+
+    def _want(name: str) -> bool:
+        return requested is None or name in requested
+
+    # 微信客服
+    if _want("wechat_kf"):
+        if os.environ.get("WECHAT_KF_CORP_ID"):
+            from milu.channels.wechat_kf import WeChatKfChannel, WeChatKfConfig
+            channels.append(WeChatKfChannel(WeChatKfConfig.from_env(), state=store))
+        elif requested is not None:
+            warnings.append(t("渠道 wechat_kf 缺少环境变量（WECHAT_KF_*），已跳过"))
+    # 飞书
+    if _want("feishu"):
+        if os.environ.get("FEISHU_APP_ID"):
+            from milu.channels.feishu import FeishuChannel, FeishuConfig
+            channels.append(FeishuChannel(FeishuConfig.from_env(), state=store))
+        elif requested is not None:
+            warnings.append(t("渠道 feishu 缺少环境变量（FEISHU_*），已跳过"))
+    # Telegram
+    if _want("telegram"):
+        if os.environ.get("TELEGRAM_BOT_TOKEN"):
+            from milu.channels.telegram import TelegramChannel, TelegramConfig
+            channels.append(TelegramChannel(TelegramConfig.from_env(), state=store))
+        elif requested is not None:
+            warnings.append(t("渠道 telegram 缺少环境变量（TELEGRAM_BOT_TOKEN），已跳过"))
+
+    return channels, store, warnings
+
+
+# 各渠道的回调路径取值（用于启动横幅展示）
+def _channel_endpoint(ch) -> str:
+    cfg = getattr(ch, "_config", None)
+    path = getattr(cfg, "callback_path", None)
+    if path:
+        return path
+    if ch.name == "telegram":
+        return t("（长轮询，无回调路径）")
+    return "-"
+
+
+def _cmd_gateway(args) -> int:
+    """启动多渠道接入网关：webhook（微信客服/飞书）+ 长轮询（Telegram）→ milu Agent。"""
+    ensure_dotenv_loaded()
+
+    config = load_config()
+    settings = resolve_settings(config, args)
+    # gateway 默认 auto（无人值守自主决策）；显式 --mode 优先
+    if not getattr(args, "mode", None):
+        settings.mode = "auto"
+
+    if getattr(args, "api_key", None):
+        os.environ[env_key_name(settings.provider)] = args.api_key
+
+    requested = None
+    if getattr(args, "channel", None):
+        requested = [x.strip() for x in args.channel.split(",") if x.strip()]
+    persist = not getattr(args, "no_persist", False)
+
+    channels, store, warnings = _build_gateway_channels(requested, persist)
+    for w in warnings:
+        print(c("yellow", f"  {w}"))
+    if not channels:
+        print(c("red", t("没有可用渠道。请至少配置一个渠道的环境变量：")), file=sys.stderr)
+        print(c("dim", "  微信客服: WECHAT_KF_CORP_ID/SECRET/TOKEN/AESKEY"), file=sys.stderr)
+        print(c("dim", "  飞书:     FEISHU_APP_ID/APP_SECRET（+ VERIFY_TOKEN/ENCRYPT_KEY）"), file=sys.stderr)
+        print(c("dim", "  Telegram: TELEGRAM_BOT_TOKEN"), file=sys.stderr)
+        return 1
+
+    from milu.cli.builder import build_gateway_pool
+    from milu.channels import AgentRunner, Gateway
+
+    pool, mc = build_gateway_pool(settings)
+    runner = AgentRunner(pool)
+    gateway = Gateway.from_runner(runner, channels, title="milu Gateway")
+
+    host, port = args.host, args.port
+    print(f"{DIVIDER}")
+    print(c("bold", c("cyan", t("  milu 多渠道网关"))))
+    print(DIVIDER)
+    print(t("  监听地址: {url}", url=c('cyan', f'http://{host}:{port}')))
+    print(t("  默认厂商: {p}  模型: {m}",
+            p=c('yellow', settings.provider), m=c('dim', settings.model)))
+    print(t("  操作模式: {mode}  去重/游标: {persist}",
+            mode=c('yellow', settings.mode),
+            persist=t('文件持久化') if persist else t('内存版')))
+    print(t("  启用渠道（{n} 个）:", n=len(channels)))
+    for ch in channels:
+        print(f"    - {c('green', ch.name)}  {c('dim', _channel_endpoint(ch))}")
+    print(c("dim", t(
+        "  webhook 渠道请把平台回调 URL 指向 https://<公网域名><回调路径>（需公网 HTTPS）。")))
+    # 部署/隔离状态（多用户网关尤其关键；docker daemon 未就绪时红色告警）
+    from milu.config import deployment_lines
+    try:
+        from milu.config import docker_available_sync
+    except ImportError:
+        docker_available_sync = None  # 老版本兜底
+    _be = mc.sandbox.get("backend", "subprocess")
+    _docker_ok = None
+    if mc.multiuser == "strict" and _be == "docker" and docker_available_sync:
+        _docker_ok = docker_available_sync()
+    for _line in deployment_lines(
+        mc.multiuser, _be, bool(mc.agent.get("workspace_jail", False)),
+        docker_ok=_docker_ok,
+    ):
+        _col = 'red' if _line.startswith('⚠') else ('yellow' if mc.multiuser == 'strict' else 'dim')
+        print(f"  {c(_col, _line)}")
+    print(c("dim", t("  Ctrl+C 停止。")))
+    print(DIVIDER + "\n")
+
+    try:
+        gateway.run(host=host, port=port)
+    except KeyboardInterrupt:
+        print(c("dim", t("\n  网关已停止。")))
+    return 0
+
+
 # ── main ─────────────────────────────────────────────────
 
 def _resolve_lang(argv_list: list[str]) -> str:
@@ -609,6 +756,7 @@ def main(argv: list[str] | None = None) -> int:
         "schedule": _cmd_schedule,
         "scheduler": _cmd_scheduler,
         "serve": _cmd_serve,
+        "gateway": _cmd_gateway,
         "trace": _cmd_trace,
     }
     handler = handlers.get(command)

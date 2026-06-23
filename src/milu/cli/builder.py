@@ -105,6 +105,83 @@ def build_agent(s: Settings) -> Agent:
     )
 
 
+def build_gateway_pool(s: Settings):
+    """为 `milu gateway` 构建多用户 AgentPool（含 per-用户隔离 + strict 透传）。
+
+    与 Web 服务的 agent_factory 同款：每个 (user_id, session_id) 构造一个 per-用户
+    Agent，**工作区按 user_id 隔离**（避免多用户经 file_read/file_write 互看产物），
+    sandbox/workspace_jail/knowledge/trace 从分层配置派生。`load_config()` 已对
+    multiuser=strict 应用最高层覆盖（sandbox.backend=docker + workspace_jail=true），
+    故这里读到的就是生效后的隔离基线——把生产踩过的「from_llm 默认工厂不自动套
+    strict」坑直接堵在产品默认里。
+
+    :return: (AgentPool, MiluConfig) ——后者供调用方打印部署/隔离状态横幅。
+    """
+    from milu.agent import Agent
+    from milu.agent.config import AgentConfig
+    from milu.config import load_config
+    from milu.resources import workspace_dir
+    from milu.sandbox import SandboxConfig
+    from milu.serving.pool import AgentPool
+
+    apply_security(s)
+    mc = load_config()  # 已应用 multiuser=strict 覆盖
+    llm = build_llm(s)
+
+    _def = AgentConfig()
+    agent_config = AgentConfig(
+        max_turns=s.agent.get("max_turns", _def.max_turns),
+        timeout=s.agent.get("timeout", _def.timeout),
+        total_timeout=s.agent.get("total_timeout", _def.total_timeout),
+        max_total_tokens=s.agent.get("max_total_tokens", _def.max_total_tokens),
+        tool_call_limit=s.agent.get("tool_call_limit", _def.tool_call_limit),
+    )
+
+    # 闭包内用到的分层配置快照（一次读取，避免每次构造都打开文件）
+    sandbox_cfg = dict(mc.sandbox)
+    workspace_base = mc.agent.get("workspace", "") or None
+    workspace_jail = bool(mc.agent.get("workspace_jail", False))
+    knowledge_cfg = dict(mc.knowledge)
+    obs_cfg = dict(mc.observability)
+    mode = s.mode
+    session_enabled = s.session_enabled
+    use_subagents = s.use_subagents
+
+    def factory(user_id: str, session_id: str, _llm):
+        sandbox = SandboxConfig.from_mapping(sandbox_cfg)
+        workspace = str(workspace_dir(user_id=user_id, base=workspace_base))
+        knowledge = False
+        if knowledge_cfg.get("enabled"):
+            from milu.knowledge import KnowledgeConfig
+            knowledge = KnowledgeConfig.from_mapping(knowledge_cfg, user_id=user_id)
+        trace = False
+        if obs_cfg.get("enabled"):
+            from milu.observability import TraceConfig
+            trace = TraceConfig.from_mapping(obs_cfg, user_id=user_id)
+        return Agent(
+            llm=llm,
+            config=agent_config,
+            mode=mode,
+            session_enabled=session_enabled,
+            session_id=AgentPool._derive_session_id(user_id, session_id),
+            schedule_user=user_id,          # 定时任务按 user_id 隔离
+            knowledge=knowledge,            # 向量知识库（默认关），按 user_id 隔离
+            trace=trace,                    # 运行追踪（本地落盘）
+            subagents=None if use_subagents else [],
+            sandbox=sandbox,                # 代码执行后端（strict 下为 docker）
+            workspace=workspace,            # agent 工作区（按用户隔离）
+            workspace_jail=workspace_jail,  # 工作区围栏（strict 多用户）
+        )
+
+    pool = AgentPool(
+        llm_factory=lambda uid, sid: llm,
+        agent_factory=factory,
+        config=mc.to_pool_config(),
+        agent_config=agent_config,
+    )
+    return pool, mc
+
+
 def build_scheduler_engine(echo: bool):
     """构造 CLI 形态的调度引擎（daemon 与 chat 嵌入共用，无 agent_pool）。
 

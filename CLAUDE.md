@@ -164,6 +164,18 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 - **跨运行聚合下沉 `analytics.py`**：`summarize_runs`/`group_stats`/`timeseries`/`percentile` 为纯函数（只吃 RunReport 行、无读盘无副作用），**CLI `trace stats` 与观测大屏共用同一套口径**，避免两处指标漂移
 - **消费端**：① CLI `milu trace list/show/compare/stats`（`cli/trace_cmd.py`，树状渲染/对比表/p50/p95 聚合，CJK 宽度对齐用 `_pad`）；② Web 单用户「观测」面板三端点 `GET /api/traces`、`/api/trace/{id}`（前缀匹配，按 X-User-Id 过滤防跨用户读取）、`/api/observability/summary`（聚合卡片 + 运行列表 + 瀑布图，纯 CSS 色块按 kind 着色，judge 理由直接展示）；③ **跨用户观测大屏**（`/dashboard`，见 §6.5）——管理员视角，经 `MILU_ADMIN_TOKEN` 门控，复用 analytics 口径 + `DashboardHub` 实时 span 推送
 
+### 10. 渠道接入 / 网关层 (`src/milu/channels/`，CLI `milu gateway`，见 `docs/Gateway 多渠道接入.md`)
+
+把 milu Agent 接到各 IM 平台（微信客服 / 飞书 / Telegram…），**Ports & Adapters（六边形）**：平台无关的「接入核心」与每个平台的「适配器 Channel」解耦，新增平台 = 只写一个 Channel。本层只在显式 `import milu.channels`（或 `milu gateway`）时加载，**不进 `import milu`**；cryptography 仅 webhook 渠道（微信/飞书）按需 import，`milu[wechat]`/`milu[feishu]`/`milu[gateway]` 可选依赖。
+
+- **核心契约 `base.py`**：`InboundMessage`（channel/user_id/text/session_id/images/reply_to/raw/msg_id）+ `OutboundMessage` + `Dispatch` 类型 + `Channel` ABC（`name` + `register(app,dispatch)` webhook 挂路由 / `run(dispatch)` polling 长轮询，两默认 no-op / `close()`）。**统一契约**：渠道自己 ingest → 组 InboundMessage → `await dispatch(msg)` → 平台 API 回发 `reply.text`；webhook 与 polling 两形态都收敛到这一条
+- **接 milu `runner.py`**：`AgentRunner` 持 `AgentPool`，`__call__(inbound)` 按 `渠道:用户` 派生 (uid,sid) → `pool.acquire` 跑一轮取 `AgentDone.final_text`（异常/空回复回退兜底语，绝不向渠道抛）。**这是接 milu 的唯一处**——替代早期手写 run.py 的 `on_text`。`from_llm(llm, agent_kwargs=...)` 便利构造，strict 隔离经 agent_kwargs 透传、视觉经 images
+- **编排 `gateway.py`**：`Gateway(dispatch, channels, on_startup/on_shutdown)` / `from_runner(runner, channels)`。`build_app()`→FastAPI：webhook 路由在 build 期挂（lifespan 内加不生效）、polling 渠道在 lifespan 起后台任务、`/healthz` 列渠道、shutdown 取消任务+close 渠道+on_shutdown。`run()` 起 uvicorn
+- **状态持久化 `state.py`**：`StateStore` ABC（`get_cursor`/`set_cursor`/`seen` 有界 LRU 去重）+ `InMemoryStateStore`（重启即丢）+ `FileStateStore`（落 `user_data_dir()/gateway/{channel}.json`，**游标+去重重启不丢**，原子写 mkstemp+fsync+os.replace + 去抖刷盘 + per-渠道 asyncio.Lock）。⚠️ `_write` 必须**同步**原子写（不用 `to_thread`）——构造 obj→写→清 dirty 之间无 await，否则 close() 取消 to_thread 写会丢失但 dirty 已清、flush() 兜底失效（修过的真 bug）
+- **三渠道**：`wechat_kf.py`（`WeChatKfChannel` webhook；抽出无状态 `WeChatKfClient.fetch_messages(token,open_kfid,cursor)->(msgs,next_cursor)` 给 Channel 走 StateStore，旧 `sync_msg`/`handle_event`/`create_app`/`on_text` 保留**向后兼容**生产 run.py）、`feishu.py`（`FeishuChannel` 事件订阅 v2 + 内置 `FeishuCrypto` AES-256-CBC `key=sha256(encrypt_key)`/IV=密文前16字节 + `url_verification` 回 challenge + verify_token 校验 + `tenant_access_token` 发 `/im/v1/messages`，event_id 去重）、`telegram.py`（`TelegramChannel` polling，`run()` 循环 getUpdates→dispatch→sendMessage，offset 经 StateStore 持久化，**空轮询 `idle_backoff` 退避防 CPU 空转**，`TELEGRAM_API_BASE` 可指代理/自建 Bot API——国内连不上官方域名）
+- **CLI `milu gateway`**（`cli/app.py` `_cmd_gateway` + `cli/builder.py` `build_gateway_pool`）：按已配置凭证**自动探测启用**渠道（或 `--channel a,b`），默认 mode=auto。`build_gateway_pool` 用**自定义 agent_factory**（仿 Web `_make_agent_factory`）：每用户 Agent **工作区按 user_id 隔离** + sandbox/workspace_jail/knowledge/trace 从分层配置派生；`load_config()` 已对 `multiuser=strict` 应用覆盖（docker+jail），**把「from_llm 默认工厂不自动套 strict」的生产坑堵进产品默认**。启动横幅打印渠道/回调路径/隔离状态（docker 未就绪红字告警）。**网关配置走 env+CLI 旗标、不新增 config.json 分节**（strict 隔离读既有 sandbox/multiuser 配置）
+- 测试 `tests/test_{gateway,feishu,telegram,wechat_kf}.py`（HTTP 全走 `httpx.ASGITransport`/`MockTransport` 进程内，无真实网络/凭证）
+
 ## 关键设计约束（多用户并发 / 无状态化）
 
 这是近期重构的核心，改动相关代码前必读 `serving/pool.py` 顶部的长注释：

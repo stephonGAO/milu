@@ -60,9 +60,20 @@ dependencies = [
 ddg = [
     "ddgs>=8.0.0",
 ]
-# 微信客服（经企业微信）接入：回调消息 AES-256-CBC 加解密需要 cryptography。
-# 接入微信客服时 pip install "milu[wechat]"（cryptography 常已随其他库装上）。
+# 多渠道接入网关（milu gateway / milu.channels）。webhook 型渠道（微信客服、
+# 飞书）的回调消息走 AES-256-CBC 加解密，需要 cryptography；Telegram（长轮询）
+# 与网关本身只用 httpx/fastapi/uvicorn（已是核心依赖），无新增。
+# - 微信客服:  pip install "milu[wechat]"
+# - 飞书:      pip install "milu[feishu]"
+# - 全部 webhook 渠道: pip install "milu[gateway]"
+# （cryptography 常已随其他库装上。）
 wechat = [
+    "cryptography>=3.4",
+]
+feishu = [
+    "cryptography>=3.4",
+]
+gateway = [
     "cryptography>=3.4",
 ]
 dev = [

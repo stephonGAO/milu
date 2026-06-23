@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock
 
 import httpx
@@ -18,11 +19,14 @@ import pytest
 
 from milu.channels.wecom_crypto import WeComCrypto, WeComCryptError, sha1_signature
 from milu.channels.wechat_kf import (
+    WeChatKfChannel,
     WeChatKfClient,
     WeChatKfConfig,
     build_router,
     handle_event,
 )
+from milu.channels.base import InboundMessage, OutboundMessage
+from milu.channels.state import InMemoryStateStore
 from fastapi import FastAPI
 
 # 测试用凭证（EncodingAESKey 必须是合法的 43 位 base64）
@@ -90,12 +94,14 @@ def test_decrypt_message():
 
 
 # ── 2. handle_event echo 逻辑 ─────────────────────────────────────────
-def _text_msg(msgid: str, user: str, content: str) -> dict:
+def _text_msg(msgid: str, user: str, content: str, send_time: int | None = None) -> dict:
     return {
         "msgid": msgid,
         "msgtype": "text",
         "external_userid": user,
         "text": {"content": content},
+        # 默认给当前时间，使其在冷启动新鲜窗口内（不被 backlog 保护跳过）
+        "send_time": int(time.time()) if send_time is None else send_time,
     }
 
 
@@ -210,6 +216,131 @@ async def test_http_receive_post_triggers_echo():
     # 后台任务完成后应已 echo
     await asyncio.wait_for(done.wait(), timeout=2)
     assert _send.calls == [("userA", "wk1", "你好milu")]  # type: ignore[attr-defined]
+
+
+# ── 4. WeChatKfChannel（统一网关适配器 + StateStore）──────────────────
+async def _post_kf_event(app: FastAPI, open_kfid: str = "wk1") -> httpx.Response:
+    """构造一条加密的 kf_msg_or_event 回调并 POST。"""
+    c = _crypto()
+    inner = (
+        "<xml><Event><![CDATA[kf_msg_or_event]]></Event>"
+        f"<Token><![CDATA[ENCTOKEN]]></Token>"
+        f"<OpenKfId><![CDATA[{open_kfid}]]></OpenKfId></xml>"
+    )
+    encrypt = c.encrypt(inner)
+    body = f"<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>"
+    ts, nonce = "1411443780", "abc"
+    sig = sha1_signature(_TOKEN, ts, nonce, encrypt)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        return await ac.post(
+            "/wechat/kf/callback",
+            params={"msg_signature": sig, "timestamp": ts, "nonce": nonce},
+            content=body,
+        )
+
+
+async def test_channel_dispatch_reply_and_cursor():
+    cfg = _config()
+    client = WeChatKfClient(cfg)
+    # fetch_messages 返回 (消息列表, next_cursor)
+    client.fetch_messages = AsyncMock(
+        return_value=([_text_msg("m1", "userA", "你好milu")], "cursor-1")
+    )
+    done = asyncio.Event()
+    sent = []
+
+    async def _send(touser, open_kfid, content):
+        sent.append((touser, open_kfid, content))
+        done.set()
+        return {"errcode": 0}
+
+    client.send_text = _send  # type: ignore[assignment]
+    state = InMemoryStateStore()
+    ch = WeChatKfChannel(cfg, client=client, state=state)
+
+    async def dispatch(msg: InboundMessage) -> OutboundMessage:
+        assert msg.channel == "wechat_kf"
+        assert msg.reply_to == {"open_kfid": "wk1"}
+        return OutboundMessage(text=f"[milu] {msg.text}")
+
+    app = FastAPI()
+    ch.register(app, dispatch)
+
+    r = await _post_kf_event(app)
+    assert r.status_code == 200 and r.text == "success"
+
+    await asyncio.wait_for(done.wait(), timeout=2)
+    assert sent == [("userA", "wk1", "[milu] 你好milu")]
+    # 游标推进并落到 StateStore
+    assert await state.get_cursor("wechat_kf", "wk1") == "cursor-1"
+
+
+async def test_channel_cold_start_skips_backlog():
+    """冷启动（空游标）只回新鲜消息，跳过数天前的历史积压（防 95001 刷屏）。"""
+    cfg = _config()
+    client = WeChatKfClient(cfg)
+    old = _text_msg("old1", "userA", "几天前的历史", send_time=int(time.time()) - 99999)
+    fresh = _text_msg("new1", "userA", "你好", send_time=int(time.time()))
+    client.fetch_messages = AsyncMock(return_value=([old, fresh], "cur"))
+    done = asyncio.Event()
+    sent = []
+
+    async def _send(touser, open_kfid, content):
+        sent.append(content)
+        done.set()
+        return {"errcode": 0}
+
+    client.send_text = _send  # type: ignore[assignment]
+    state = InMemoryStateStore()   # 空游标 = 冷启动
+    ch = WeChatKfChannel(cfg, client=client, state=state)
+
+    async def dispatch(msg):
+        return OutboundMessage(text=f"[milu] {msg.text}")
+
+    app = FastAPI()
+    ch.register(app, dispatch)
+    await _post_kf_event(app)
+    await asyncio.wait_for(done.wait(), timeout=2)
+    await asyncio.sleep(0.1)
+    assert sent == ["[milu] 你好"]   # 只回新鲜消息，老消息被跳过
+    # 冷启动后游标已推进，下次即非冷启动、正常回复全部
+    assert await state.get_cursor("wechat_kf", "wk1") == "cur"
+
+
+async def test_channel_dedup_via_state():
+    cfg = _config()
+    client = WeChatKfClient(cfg)
+    client.fetch_messages = AsyncMock(
+        return_value=(
+            [
+                _text_msg("m1", "userA", "hi"),
+                _text_msg("m1", "userA", "hi"),   # 同 msgid 去重
+                {"msgid": "m2", "msgtype": "image", "external_userid": "userA"},  # 非文本
+            ],
+            "cur",
+        )
+    )
+    done = asyncio.Event()
+    calls = []
+
+    async def _send(touser, open_kfid, content):
+        calls.append(content)
+        done.set()
+        return {"errcode": 0}
+
+    client.send_text = _send  # type: ignore[assignment]
+    ch = WeChatKfChannel(cfg, client=client, state=InMemoryStateStore())
+
+    async def dispatch(msg):
+        return OutboundMessage(text=msg.text)
+
+    app = FastAPI()
+    ch.register(app, dispatch)
+    await _post_kf_event(app)
+    await asyncio.wait_for(done.wait(), timeout=2)
+    await asyncio.sleep(0.1)   # 给潜在的多余回复机会
+    assert calls == ["hi"]     # 只回一次
 
 
 async def test_http_receive_bad_signature_rejected():
