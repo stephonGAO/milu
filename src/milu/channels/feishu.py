@@ -195,28 +195,36 @@ class FeishuChannel(Channel):
             except ValueError:
                 return Response("bad request", status_code=400)
 
-            # 密文模式：先解密成明文 JSON
+            # 密文模式：先解密成明文 JSON。解密失败/未配 key 时 **ack 忽略**（回 200）
+            # 而非 403——对飞书返回非 2xx 会触发反复重投与「回调失败」告警。
             if "encrypt" in payload:
                 if self._crypto is None:
-                    logger.warning("收到密文事件但未配置 FEISHU_ENCRYPT_KEY")
-                    return Response("forbidden", status_code=403)
+                    logger.warning("收到密文事件但未配置 FEISHU_ENCRYPT_KEY，已忽略")
+                    return JSONResponse({"code": 0})
                 try:
                     payload = json.loads(self._crypto.decrypt(payload["encrypt"]))
                 except Exception:
-                    logger.warning("飞书事件解密失败")
-                    return Response("forbidden", status_code=403)
+                    logger.warning("飞书事件解密失败，已忽略")
+                    return JSONResponse({"code": 0})
 
-            # ① URL 验证握手：原样回 challenge
+            # token 兼容两种 schema：v2.0 在 header.token，v1.0/URL 验证在顶层 token
+            token = (payload.get("header") or {}).get("token") or payload.get("token")
+
+            # ① URL 验证握手：token 不符才拒绝（不能把 challenge 回给别的应用）
             if payload.get("type") == "url_verification":
-                if cfg.verify_token and payload.get("token") != cfg.verify_token:
+                if cfg.verify_token and token != cfg.verify_token:
+                    logger.warning("飞书 url_verification token 不匹配，拒绝")
                     return Response("forbidden", status_code=403)
                 return JSONResponse({"challenge": payload.get("challenge", "")})
 
-            # ② 事件 v2：校验来源 token
-            header = payload.get("header") or {}
-            if cfg.verify_token and header.get("token") != cfg.verify_token:
-                return Response("forbidden", status_code=403)
+            # ② 事件投递：token 不符 / 非目标事件，一律 ack（200）后忽略。
+            #    飞书除消息事件外还会发其它回调（重复 URL 校验、非消息事件、v1.0 schema
+            #    等），对这些回 403 会被飞书判为端点失败并反复重投——故只 ack 不处理。
+            if cfg.verify_token and token != cfg.verify_token:
+                logger.debug("飞书事件 token 不匹配，忽略（仍 ack 200）")
+                return JSONResponse({"code": 0})
 
+            header = payload.get("header") or {}
             if header.get("event_type") == "im.message.receive_v1":
                 event_id = header.get("event_id", "")
                 # 后台处理（飞书要求快速回 200），立即 ack

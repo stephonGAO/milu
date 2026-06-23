@@ -105,14 +105,32 @@ async def test_url_verification_bad_token_rejected():
     assert r.status_code == 403
 
 
-async def test_encrypted_body_without_key_rejected():
-    # 渠道未配 encrypt_key，却收到密文 → 403
+async def test_encrypted_body_without_key_acked_and_ignored():
+    # 渠道未配 encrypt_key 却收到密文 → ack 200 忽略（不 403，避免飞书重投风暴）
     ch = FeishuChannel(_config(encrypt=False), state=InMemoryStateStore())
     app = _channel_app(ch)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
         r = await ac.post("/feishu/event", json={"encrypt": "AAAA"})
-    assert r.status_code == 403
+    assert r.status_code == 200
+
+
+async def test_event_bad_token_acked_not_processed():
+    """非 url_verification 的事件 token 不符 → 回 200 ack 但不处理（不再 403）。"""
+    cfg = _config(encrypt=False)
+    done = asyncio.Event()
+    client, sent = _mock_client(cfg, done)
+    ch = FeishuChannel(cfg, client=client, state=InMemoryStateStore())
+    app = _channel_app(ch)
+    bad = _text_event("evtX", "ou_a", "hi")
+    bad["header"]["token"] = "WRONG_TOKEN"   # 伪造 / 非本应用来源
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/feishu/event", json=bad)
+    assert r.status_code == 200          # ack，不再 403
+    await asyncio.sleep(0.15)
+    assert sent == []                    # 但不处理、不回发
 
 
 # ── 3. 文本消息事件 → dispatch → 回发 ─────────────────────────────────
