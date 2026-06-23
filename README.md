@@ -68,6 +68,9 @@ pip install -U "milu[ddg]"    # optional: adds the key-free DuckDuckGo backend f
                               # (Rust-based dep; kept optional so milu installs on Termux/Alpine)
 ```
 
+> [!TIP]
+> **In mainland China and the download is slow?** Use a domestic mirror to speed it up, e.g. `pip install -U milu -i https://mirrors.aliyun.com/pypi/simple/` (works from any machine with public internet).
+
 <details>
 <summary><b>New to Python? Beginner step-by-step</b></summary>
 

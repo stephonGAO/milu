@@ -68,6 +68,13 @@ pip install -U "milu[ddg]"    # 可选：web_search 的 DuckDuckGo 免 Key 后�
                               # 含 Rust 扩展依赖，保持可选以便 Termux/Alpine 等平台正常安装）
 ```
 
+> [!TIP]
+> **国内下载慢？** 默认 PyPI 在海外，换国内镜像源即可加速（任何能上公网的机器都能用）：
+>
+> ```bash
+> pip install -U milu -i https://mirrors.aliyun.com/pypi/simple/
+> ```
+
 <details>
 <summary><b>没装过 Python？小白分步指引</b></summary>
 
