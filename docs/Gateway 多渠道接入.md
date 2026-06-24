@@ -67,6 +67,18 @@ milu gateway --no-persist            # 去重/游标用内存版（重启即丢�
 5. 启动 `milu gateway` 后，回到「事件订阅」保存请求地址——milu 会自动回 `challenge`
    完成握手。之后在飞书里私聊机器人即可对话。
 
+**两种接入模式**（`FEISHU_MODE`）：
+- `webhook`（默认）：飞书 **push** 到你的回调 URL。需公网 HTTPS（生产用）。
+- `ws`（**长连接**）：本进程**主动连飞书**收事件，**无需公网回调/HTTPS/隧道**，最适合
+  **本地开发调试**（和 Telegram 一样省事）。设 `FEISHU_MODE=ws` 即可，发消息仍走
+  tenant_access_token。需装 SDK：`pip install "milu[feishu-ws]"`（lark-oapi）。
+  本地开发：在飞书后台「事件订阅 → 订阅方式」选「长连接」，然后：
+  ```bash
+  set FEISHU_MODE=ws            # PowerShell: $env:FEISHU_MODE="ws"
+  milu gateway --channel feishu
+  ```
+  两种模式 `name` 同为 `feishu`，同一用户身份/会话连续一致；生产切回 webhook 不影响历史。
+
 ### Telegram
 1. 找 **@BotFather** `/newbot` 创建机器人，拿 **token**。
 2. 环境变量（`.env` 3.7 节）：

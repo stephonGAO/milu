@@ -607,11 +607,16 @@ def _build_gateway_channels(requested: list[str] | None, persist: bool):
             channels.append(WeChatKfChannel(WeChatKfConfig.from_env(), state=store))
         elif requested is not None:
             warnings.append(t("渠道 wechat_kf 缺少环境变量（WECHAT_KF_*），已跳过"))
-    # 飞书
+    # 飞书：FEISHU_MODE=ws → 长连接（本地开发免隧道，需 lark-oapi）；否则 webhook
     if _want("feishu"):
         if os.environ.get("FEISHU_APP_ID"):
-            from milu.channels.feishu import FeishuChannel, FeishuConfig
-            channels.append(FeishuChannel(FeishuConfig.from_env(), state=store))
+            from milu.channels.feishu import FeishuConfig
+            if os.environ.get("FEISHU_MODE", "webhook").strip().lower() == "ws":
+                from milu.channels.feishu_ws import FeishuWsChannel
+                channels.append(FeishuWsChannel(FeishuConfig.from_env(), state=store))
+            else:
+                from milu.channels.feishu import FeishuChannel
+                channels.append(FeishuChannel(FeishuConfig.from_env(), state=store))
         elif requested is not None:
             warnings.append(t("渠道 feishu 缺少环境变量（FEISHU_*），已跳过"))
     # Telegram
@@ -627,6 +632,8 @@ def _build_gateway_channels(requested: list[str] | None, persist: bool):
 
 # 各渠道的回调路径取值（用于启动横幅展示）
 def _channel_endpoint(ch) -> str:
+    if type(ch).__name__ == "FeishuWsChannel":
+        return t("（长连接，无回调路径）")
     cfg = getattr(ch, "_config", None)
     path = getattr(cfg, "callback_path", None)
     if path:

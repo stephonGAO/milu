@@ -73,6 +73,11 @@ wechat = [
 feishu = [
     "cryptography>=3.4",
 ]
+# 飞书长连接（websocket）模式：本地开发免隧道。走官方 lark-oapi SDK 的 ws 客户端作
+# 传输（私有 protobuf 帧协议）。仅 FEISHU_MODE=ws 时需要；webhook 模式无此依赖。
+feishu-ws = [
+    "lark-oapi>=1.2",
+]
 gateway = [
     "cryptography>=3.4",
 ]
