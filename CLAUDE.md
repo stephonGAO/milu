@@ -166,7 +166,7 @@ milu serve --port 9000 --no-scheduler   # 自定义端口、不嵌入定时任�
 
 ### 10. 渠道接入 / 网关层 (`src/milu/channels/`，CLI `milu gateway`，见 `docs/Gateway 多渠道接入.md`)
 
-把 milu Agent 接到各 IM 平台（微信客服 / 飞书 / Telegram…），**Ports & Adapters（六边形）**：平台无关的「接入核心」与每个平台的「适配器 Channel」解耦，新增平台 = 只写一个 Channel。本层只在显式 `import milu.channels`（或 `milu gateway`）时加载，**不进 `import milu`**；cryptography 仅 webhook 渠道（微信/飞书）按需 import，`milu[wechat]`/`milu[feishu]`/`milu[gateway]` 可选依赖。
+把 milu Agent 接到各 IM 平台（微信客服 / 飞书 / Telegram…），**Ports & Adapters（六边形）**：平台无关的「接入核心」与每个平台的「适配器 Channel」解耦，新增平台 = 只写一个 Channel。本层只在显式 `import milu.channels`（或 `milu gateway`）时加载，**不进 `import milu`**；webhook 渠道（微信/飞书）的回调加解密走 cryptography（**已进核心依赖**，`pip install milu` 即可用，无需额外 extra）。唯一可选 extra 是 `milu[feishu-ws]`（lark-oapi ~57MB，仅飞书长连接本地开发模式需要）。
 
 - **核心契约 `base.py`**：`InboundMessage`（channel/user_id/text/session_id/images/reply_to/raw/msg_id）+ `OutboundMessage` + `Dispatch` 类型 + `Channel` ABC（`name` + `register(app,dispatch)` webhook 挂路由 / `run(dispatch)` polling 长轮询，两默认 no-op / `close()`）。**统一契约**：渠道自己 ingest → 组 InboundMessage → `await dispatch(msg)` → 平台 API 回发 `reply.text`；webhook 与 polling 两形态都收敛到这一条
 - **接 milu `runner.py`**：`AgentRunner` 持 `AgentPool`，`__call__(inbound)` 按 `渠道:用户` 派生 (uid,sid) → `pool.acquire` 跑一轮取 `AgentDone.final_text`（异常/空回复回退兜底语，绝不向渠道抛）。**这是接 milu 的唯一处**——替代早期手写 run.py 的 `on_text`。`from_llm(llm, agent_kwargs=...)` 便利构造，strict 隔离经 agent_kwargs 透传、视觉经 images

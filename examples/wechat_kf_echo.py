@@ -8,7 +8,7 @@
    「回调配置」里自定义 Token / EncodingAESKey（43 位）。
 2. 配置环境变量（见 .env.example 的 3.5 节）：
        WECHAT_KF_CORP_ID / WECHAT_KF_SECRET / WECHAT_KF_TOKEN / WECHAT_KF_AESKEY
-3. 安装可选依赖：pip install "milu[wechat]"
+3. 安装 milu：pip install milu（cryptography 已在核心依赖，回调加解密开箱即用）
 
 运行：
     python examples/wechat_kf_echo.py

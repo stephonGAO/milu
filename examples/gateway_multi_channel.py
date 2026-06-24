@@ -10,7 +10,7 @@
     飞书:      FEISHU_APP_ID / APP_SECRET（+ VERIFY_TOKEN/ENCRYPT_KEY）（3.6）
     Telegram:  TELEGRAM_BOT_TOKEN                              （3.7）
 
-依赖：pip install "milu[gateway]"（webhook 渠道需 cryptography；Telegram 无需）
+依赖：pip install milu（微信/飞书 webhook + Telegram 全部开箱即用；cryptography 已在核心）
 
 运行：
     python examples/gateway_multi_channel.py

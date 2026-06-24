@@ -13,9 +13,10 @@
     Gateway.from_runner(runner, channels).run(port=8800)         # 一把起多渠道服务
 
 核心件（`base`/`runner`/`gateway`/`state`）只依赖核心库（fastapi/AgentPool），
-本 `__init__` 直接导出；**具体渠道适配器**（wechat_kf/feishu 需 cryptography）按需
-经子模块惰性加载——`from milu.channels import WeChatKfChannel` 触发时才真正 import，
-不把 cryptography 拖进 `import milu.channels`。
+本 `__init__` 直接导出；**具体渠道适配器**（wechat_kf/feishu 用 cryptography 加解密）
+按需经子模块惰性加载——`from milu.channels import WeChatKfChannel` 触发时才真正 import。
+cryptography 虽已是核心依赖（pip install milu 即具备），惰性加载仍避免在
+`import milu.channels` 时就把它（约 10MB）载入，按需才付开销。
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 
 实现企业微信 / 微信客服「回调通知」的 AES-256-CBC 加解密与 SHA1 签名校验，
 对齐官方 WXBizMsgCrypt 规范，但**自实现、不依赖腾讯样例代码**（规避再分发的
-许可负担），底层走 cryptography（milu 环境已具备，作为 `milu[wechat]` 可选依赖声明）。
+许可负担），底层走 cryptography（已是 milu 核心依赖，pip install milu 即具备）。
 
 参考：回调配置 https://developer.work.weixin.qq.com/document/path/90930
 

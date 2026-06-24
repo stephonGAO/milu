@@ -48,38 +48,32 @@ dependencies = [
     "sse-starlette>=2.0.0",
     # MCP 协议（连接外部 MCP 服务器）：与 serve 依赖大量重叠，净增很小，故进核心
     "mcp>=1.0.0",
+    # 多渠道网关 webhook 渠道（微信客服 / 飞书）回调消息 AES-256-CBC 加解密。
+    # 体积小（约 12MB 含 cffi/pycparser）、各平台均有预编译 wheel，且撑起两个生产渠道，
+    # 故进核心——webhook 渠道开箱即用（milu gateway 零额外安装）。
+    "cryptography>=3.4",
     # asyncio.timeout() 的 Python 3.10 backport（3.11+ 用标准库，故仅 <3.11 安装）
     "async-timeout>=4.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
-# 全功能已在核心：pip install milu 即得 CLI + Web 服务 + RAG + MCP。
-# 唯一例外 ddg：ddgs 的底层 primp 是 Rust 扩展，无预编译 wheel 的平台
-# （Termux/Alpine 等）会让安装卡死在源码编译，且 DDG 国内网络本就不可用，
-# 故降级为可选——需要 DuckDuckGo 免 Key 搜索时 pip install "milu[ddg]"。
+# 全功能已在核心：pip install milu 即得 CLI + Web 服务 + RAG + MCP + 多渠道网关
+# （微信客服 / 飞书 webhook / Telegram）。cryptography 已进核心依赖，webhook 渠道的
+# 回调加解密开箱即用，无需 milu[wechat]/milu[feishu]/milu[gateway] 这类额外安装。
+#
+# 仅两个例外，因「装不上」或「太重」而保持可选：
+# ① ddg：ddgs 的底层 primp 是 Rust 扩展，无预编译 wheel 的平台（Termux/Alpine 等）
+#    会让安装卡死在源码编译，且 DDG 国内网络本就不可用，故降级为可选——需要
+#    DuckDuckGo 免 Key 搜索时 pip install "milu[ddg]"。
 ddg = [
     "ddgs>=8.0.0",
 ]
-# 多渠道接入网关（milu gateway / milu.channels）。webhook 型渠道（微信客服、
-# 飞书）的回调消息走 AES-256-CBC 加解密，需要 cryptography；Telegram（长轮询）
-# 与网关本身只用 httpx/fastapi/uvicorn（已是核心依赖），无新增。
-# - 微信客服:  pip install "milu[wechat]"
-# - 飞书:      pip install "milu[feishu]"
-# - 全部 webhook 渠道: pip install "milu[gateway]"
-# （cryptography 常已随其他库装上。）
-wechat = [
-    "cryptography>=3.4",
-]
-feishu = [
-    "cryptography>=3.4",
-]
-# 飞书长连接（websocket）模式：本地开发免隧道。走官方 lark-oapi SDK 的 ws 客户端作
-# 传输（私有 protobuf 帧协议）。仅 FEISHU_MODE=ws 时需要；webhook 模式无此依赖。
+# ② 飞书长连接（websocket）模式：本地开发免隧道。走官方 lark-oapi SDK 的 ws 客户端
+#    作传输（私有 protobuf 帧协议）。该 SDK 体积偏大（约 57MB，含 protobuf/pycryptodome/
+#    websockets），且仅 FEISHU_MODE=ws 的本地开发才需要——飞书 webhook 生产模式零额外
+#    依赖，故不进核心、保持可选：pip install "milu[feishu-ws]"。
 feishu-ws = [
     "lark-oapi>=1.2",
-]
-gateway = [
-    "cryptography>=3.4",
 ]
 dev = [
     "pytest>=8.0.0",

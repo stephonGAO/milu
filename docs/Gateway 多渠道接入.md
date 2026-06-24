@@ -25,7 +25,7 @@ Channel 适配器 ──规整成 InboundMessage──▶ dispatch（AgentRunner
 ## 一键启动：`milu gateway`
 
 ```bash
-pip install "milu[gateway]"          # webhook 渠道需 cryptography；Telegram 无需
+pip install milu                     # 微信客服 / 飞书 webhook / Telegram 全部开箱即用
 # 配好任一渠道的环境变量（见下），然后：
 milu gateway                         # 按已配置的凭证自动启用对应渠道（默认 0.0.0.0:8800）
 milu gateway --channel telegram      # 只启用指定渠道（逗号分隔）
