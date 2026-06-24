@@ -176,12 +176,15 @@ class WeChatKfClient:
         self._cursors[open_kfid] = cur
         return msgs
 
-    async def download_media(self, media_id: str) -> tuple[bytes, str]:
-        """下载临时素材（图片/文件/语音）。返回 (二进制内容, content_type)。
+    async def download_media(self, media_id: str) -> tuple[bytes, str, str]:
+        """下载临时素材（图片/文件/语音）。返回 (二进制内容, content_type, 文件名)。
 
         media/get 成功时返回二进制流；失败时返回 JSON（如 media_id 过期）。用
-        content-type 判别：含 application/json 视为出错抛异常。
+        content-type 判别：含 application/json 视为出错抛异常。文件名只在响应头
+        Content-Disposition 里给（消息体不带），文件类消息靠它拿扩展名。
         """
+        from .media import filename_from_disposition
+
         at = await self.access_token()
         r = await self._http.get(
             f"{_QYAPI}/media/get",
@@ -190,7 +193,8 @@ class WeChatKfClient:
         ct = r.headers.get("Content-Type", "")
         if "application/json" in ct.lower():
             raise RuntimeError(f"media/get 失败：{r.text}")
-        return r.content, ct
+        filename = filename_from_disposition(r.headers.get("Content-Disposition", ""))
+        return r.content, ct, filename
 
     async def send_text(self, touser: str, open_kfid: str, content: str) -> dict:
         """发送文本消息给指定用户（48 小时会话窗口内有效）。"""
@@ -460,7 +464,7 @@ class WeChatKfChannel(Channel):
             if await self._state.seen(self.name, msgid):
                 continue
             msgtype = msg.get("msgtype")
-            if msgtype not in ("text", "image"):  # 暂处理文本/图片
+            if msgtype not in ("text", "image", "file"):  # 暂处理文本/图片/文件
                 continue
             # 冷启动时丢弃历史积压（登记去重 + 让游标推进，但不回复，避免刷屏/限频）
             if cold_start and int(msg.get("send_time", 0)) < fresh_after:
@@ -469,23 +473,31 @@ class WeChatKfChannel(Channel):
             external_userid = msg.get("external_userid")
             if not external_userid:
                 continue
-            text, images = "", []
+            text, images, files = "", [], []
             if msgtype == "text":
                 text = (msg.get("text") or {}).get("content", "")
                 if not text:
                     continue
-            else:  # image：下载临时素材落工作区，走视觉
+            elif msgtype == "image":  # 下载临时素材落工作区，走视觉
                 path = await self._save_image(
                     external_userid, (msg.get("image") or {}).get("media_id", "")
                 )
                 if not path:
                     continue
                 images = [path]
+            else:  # file：下载落工作区，模型用 doc_read/file_read 读取
+                path = await self._save_file(
+                    external_userid, (msg.get("file") or {}).get("media_id", "")
+                )
+                if not path:
+                    continue
+                files = [path]
             inbound = InboundMessage(
                 channel=self.name,
                 user_id=external_userid,
                 text=text,
                 images=images,
+                files=files,
                 reply_to={"open_kfid": open_kfid},
                 msg_id=msgid,
                 raw=msg,
@@ -519,7 +531,7 @@ class WeChatKfChannel(Channel):
         if not media_id:
             return None
         try:
-            data, ct = await self._client.download_media(media_id)
+            data, ct, _ = await self._client.download_media(media_id)
         except Exception:
             logger.exception("微信客服图片下载失败 media_id=%s", media_id)
             return None
@@ -527,6 +539,21 @@ class WeChatKfChannel(Channel):
 
         return save_image(
             self.name, user_id, data, content_type=ct, media_id=media_id
+        )
+
+    async def _save_file(self, user_id: str, media_id: str) -> str | None:
+        """下载文件临时素材并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。"""
+        if not media_id:
+            return None
+        try:
+            data, _, filename = await self._client.download_media(media_id)
+        except Exception:
+            logger.exception("微信客服文件下载失败 media_id=%s", media_id)
+            return None
+        from .media import save_file
+
+        return save_file(
+            self.name, user_id, data, filename=filename, media_id=media_id
         )
 
     async def close(self) -> None:

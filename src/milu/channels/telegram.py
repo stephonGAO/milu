@@ -26,6 +26,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from milu.llm.base.vision import IMAGE_EXTENSIONS
+
 from .base import Channel, Dispatch, InboundMessage
 from .state import InMemoryStateStore, StateStore
 
@@ -106,16 +108,30 @@ class TelegramChannel(Channel):
                     await self._state.set_cursor(self.name, "offset", str(offset))
                     continue
 
-                # 文本 / 图片配文（caption）；photo 是多尺寸数组，取最大那张走视觉
+                # 文本 / 图片配文（caption）；photo 多尺寸数组取最大那张走视觉，
+                # document 走文件（图片扩展名的文件仍按视觉处理）
                 text = msg.get("text") or msg.get("caption") or ""
                 images: list[str] = []
+                files: list[str] = []
                 photo = msg.get("photo")
+                doc = msg.get("document")
                 if photo:
                     file_id = (photo[-1] or {}).get("file_id", "")
                     path = await self._save_image(str(chat_id), file_id)
                     if path:
                         images.append(path)
-                if not text and not images:  # 不支持的消息类型（贴纸/位置等）跳过
+                elif doc:
+                    fid = doc.get("file_id", "")
+                    fname = doc.get("file_name", "")
+                    if os.path.splitext(fname)[1].lower() in IMAGE_EXTENSIONS:
+                        path = await self._save_image(str(chat_id), fid, filename=fname)
+                        if path:
+                            images.append(path)
+                    else:
+                        path = await self._save_file(str(chat_id), fid, filename=fname)
+                        if path:
+                            files.append(path)
+                if not text and not images and not files:  # 贴纸/位置等不支持类型跳过
                     await self._state.set_cursor(self.name, "offset", str(offset))
                     continue
 
@@ -124,6 +140,7 @@ class TelegramChannel(Channel):
                     user_id=str(chat_id),
                     text=text,
                     images=images,
+                    files=files,
                     reply_to={"chat_id": chat_id},
                     msg_id=str(update_id),
                     raw=upd,
@@ -177,7 +194,9 @@ class TelegramChannel(Channel):
         r = await self._http.get(url)
         return r.content
 
-    async def _save_image(self, user_id: str, file_id: str) -> str | None:
+    async def _save_image(
+        self, user_id: str, file_id: str, *, filename: str = ""
+    ) -> str | None:
         """下载图片并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。"""
         if not file_id:
             return None
@@ -191,7 +210,26 @@ class TelegramChannel(Channel):
             return None
         from .media import save_image
 
-        return save_image(self.name, user_id, data, filename=fp)
+        # 优先用消息里的原文件名（带正确扩展名），否则退回服务端 file_path
+        return save_image(self.name, user_id, data, filename=filename or fp)
+
+    async def _save_file(
+        self, user_id: str, file_id: str, *, filename: str = ""
+    ) -> str | None:
+        """下载文件并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。"""
+        if not file_id:
+            return None
+        try:
+            fp = await self._file_path(file_id)
+            if not fp:
+                return None
+            data = await self._download(fp)
+        except Exception:
+            logger.exception("Telegram 文件下载失败 file_id=%s", file_id)
+            return None
+        from .media import save_file
+
+        return save_file(self.name, user_id, data, filename=filename or fp)
 
     async def close(self) -> None:
         if self._owns_http:

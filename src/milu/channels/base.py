@@ -41,6 +41,7 @@ class InboundMessage:
     :param text: 规整后的纯文本内容。
     :param session_id: 会话标识；None 时由 AgentRunner 退化为 user_id（一人一会话）。
     :param images: 随消息附带的本地图片路径（接视觉用，可空）。
+    :param files: 随消息附带的本地文档/数据文件路径（模型用 doc_read/file_read 读取，可空）。
     :param reply_to: **渠道私有**的回发路由上下文（如微信 {"open_kfid":..}、
         飞书 {"receive_id":..}、Telegram {"chat_id":..}）。dispatch 不解读，
         原样回到该渠道的 send 逻辑。
@@ -53,6 +54,7 @@ class InboundMessage:
     text: str
     session_id: str | None = None
     images: list[str] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
     reply_to: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
     msg_id: str = ""

@@ -124,7 +124,7 @@ class FeishuWsChannel(Channel):
             event = data.event
             message = event.message
             mtype = getattr(message, "message_type", None)
-            if mtype not in ("text", "image"):  # 暂处理文本/图片
+            if mtype not in ("text", "image", "file"):  # 暂处理文本/图片/文件
                 return
             event_id = getattr(data.header, "event_id", "") or ""
             if event_id and await self._state.seen(self.name, event_id):
@@ -136,32 +136,43 @@ class FeishuWsChannel(Channel):
                 content = json.loads(message.content or "{}")
             except (ValueError, TypeError):
                 content = {}
-            text, images = "", []
+            message_id = getattr(message, "message_id", "") or ""
+            text, images, files = "", [], []
             if mtype == "text":
                 text = (content.get("text") or "").strip()
                 if not text:
                     return
-            else:  # image：复用 webhook 版的资源下载落盘，走视觉
+            elif mtype == "image":  # 复用 webhook 版的资源下载落盘，走视觉
                 from .feishu import save_image_resource
 
                 path = await save_image_resource(
                     self._client, self.name, open_id,
-                    getattr(message, "message_id", "") or "",
-                    content.get("image_key", ""),
+                    message_id, content.get("image_key", ""),
                 )
                 if not path:
                     return
                 images = [path]
+            else:  # file：复用 webhook 版资源下载，模型用 doc_read/file_read 读取
+                from .feishu import save_file_resource
+
+                path = await save_file_resource(
+                    self._client, self.name, open_id, message_id,
+                    content.get("file_key", ""), content.get("file_name", ""),
+                )
+                if not path:
+                    return
+                files = [path]
             inbound = InboundMessage(
                 channel=self.name,
                 user_id=open_id,
                 text=text,
                 images=images,
+                files=files,
                 reply_to={
                     "receive_id": open_id,
                     "chat_id": getattr(message, "chat_id", None),
                 },
-                msg_id=getattr(message, "message_id", "") or "",
+                msg_id=message_id,
                 raw={},
             )
             reply = await dispatch(inbound)

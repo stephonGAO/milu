@@ -16,6 +16,7 @@ from milu.agent.events import AgentDone
 from milu.serving.pool import AgentPool, AgentPoolConfig
 
 from .base import InboundMessage, OutboundMessage
+from .media import DOC_EXTENSIONS
 
 logger = logging.getLogger("milu.channels.runner")
 
@@ -27,6 +28,16 @@ DEFAULT_IMAGE_PROMPT = "请查看用户发来的图片并回应。"
 
 # 自定义 (channel,user)->（user_id, session_id) 的映射钩子
 SessionOf = Callable[[InboundMessage], "tuple[str, str]"]
+
+
+def _format_files(paths: list[str]) -> str:
+    """组装附件说明块（附在用户消息末尾，引导模型选对读取工具，对齐 Web 上传）。"""
+    lines = ["[附件] 用户随本条消息发来以下文件，请按需读取分析："]
+    for p in paths:
+        ext = os.path.splitext(p)[1].lower()
+        hint = "文档，用 doc_read 工具读取" if ext in DOC_EXTENSIONS else "文本/数据文件，用 file_read 工具读取"
+        lines.append(f"- {p}（{hint}）")
+    return "\n".join(lines)
 
 
 def _normalize_admins(spec) -> set[str]:
@@ -141,13 +152,18 @@ class AgentRunner:
     def _compose_input(self, inbound: InboundMessage) -> tuple[str, list[str] | None]:
         """把入站消息规整为喂给 Agent 的 (文本, 图片路径列表)。
 
-        图片经 `agent.run(images=...)` 走视觉物化；只发图片无配文时补一句默认指令，
-        否则 `agent.run("")` 没有可回应的文本。
+        - 图片 → 经 `agent.run(images=...)` 走视觉物化；
+        - 文件 → 在消息尾追加附件说明块，引导模型用 doc_read/file_read 读取分析；
+        - 只发媒体无配文时补一句默认指令，否则 `agent.run("")` 没有可回应的文本。
         """
         text = inbound.text or ""
         images = inbound.images or None
-        if images and not text.strip():
-            text = DEFAULT_IMAGE_PROMPT
+        files = inbound.files or []
+        if not text.strip():
+            text = "请分析用户发来的文件。" if files else (DEFAULT_IMAGE_PROMPT if images else text)
+        if files:
+            attach = _format_files(files)
+            text = f"{text}\n\n{attach}" if text else attach
         return text, images
 
     async def __call__(self, inbound: InboundMessage) -> OutboundMessage | None:

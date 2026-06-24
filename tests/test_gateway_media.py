@@ -99,7 +99,7 @@ async def test_wechat_image_dispatched_with_local_path():
     client.fetch_messages = AsyncMock(
         return_value=([_kf_image_msg("m1", "userA", "MEDIA123")], "cur-1")
     )
-    client.download_media = AsyncMock(return_value=(_PNG, "image/png"))
+    client.download_media = AsyncMock(return_value=(_PNG, "image/png", ""))
     client.send_text = AsyncMock(return_value={"errcode": 0})
 
     seen: dict = {}
@@ -320,3 +320,189 @@ async def test_runner_image_with_caption_keeps_text():
     runner = AgentRunner(_Pool(agent))
     await runner(InboundMessage(channel="c", user_id="u", text="这是啥", images=["/a.png"]))
     assert agent.text == "这是啥" and agent.images == ["/a.png"]
+
+
+# ── 6. media.save_file ────────────────────────────────────────────────
+def test_save_file_lands_in_workspace_keeps_filename():
+    p = media.save_file("feishu", "u9", b"%PDF-1.4 data", filename="季度报告.pdf")
+    path = Path(p)
+    assert path.is_file()
+    assert path.read_bytes() == b"%PDF-1.4 data"
+    assert path.suffix == ".pdf"
+    assert path.parent.name == "_incoming"
+
+
+def test_save_file_rejects_oversize():
+    big = b"x" * (media.MAX_FILE_BYTES + 1)
+    assert media.save_file("c", "u", big, filename="a.bin") is None
+
+
+def test_filename_from_disposition():
+    f = media.filename_from_disposition
+    assert f('attachment; filename="report.pdf"') == "report.pdf"
+    assert f("attachment; filename=plain.docx") == "plain.docx"
+    assert f("attachment; filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf") == "报告.pdf"
+    assert f("") == ""
+
+
+# ── 7. 微信客服 file ──────────────────────────────────────────────────
+def _kf_file_msg(msgid: str, user: str, media_id: str) -> dict:
+    return {
+        "msgid": msgid, "msgtype": "file", "external_userid": user,
+        "file": {"media_id": media_id}, "send_time": int(time.time()),
+    }
+
+
+async def test_wechat_file_dispatched_with_local_path():
+    cfg = _kf_config()
+    client = WeChatKfClient(cfg)
+    client.fetch_messages = AsyncMock(
+        return_value=([_kf_file_msg("m1", "userA", "FILEMEDIA")], "cur")
+    )
+    # download_media 返回 (bytes, content_type, 文件名)；文件名来自响应头
+    client.download_media = AsyncMock(
+        return_value=(b"%PDF-1.4 doc", "application/octet-stream", "手册.pdf")
+    )
+    client.send_text = AsyncMock(return_value={"errcode": 0})
+
+    seen: dict = {}
+    done = asyncio.Event()
+
+    async def dispatch(msg: InboundMessage) -> OutboundMessage:
+        seen["files"] = list(msg.files)
+        done.set()
+        return OutboundMessage(text="已读取")
+
+    ch = WeChatKfChannel(cfg, client=client, state=InMemoryStateStore())
+    await ch._pull_and_dispatch("T", "wk1", dispatch)
+    await asyncio.wait_for(done.wait(), timeout=2)
+
+    assert len(seen["files"]) == 1
+    fp = Path(seen["files"][0])
+    assert fp.is_file() and fp.suffix == ".pdf"
+
+
+# ── 8. 飞书 file ──────────────────────────────────────────────────────
+def _fs_file_event(event_id: str, open_id: str, file_key: str, file_name: str) -> dict:
+    return {
+        "schema": "2.0",
+        "header": {"event_id": event_id, "event_type": "im.message.receive_v1",
+                   "token": "vtok"},
+        "event": {
+            "sender": {"sender_id": {"open_id": open_id}},
+            "message": {"message_id": "om_" + event_id, "chat_id": "oc_1",
+                        "message_type": "file",
+                        "content": json.dumps({"file_key": file_key,
+                                               "file_name": file_name})},
+        },
+    }
+
+
+async def test_feishu_file_dispatched_with_local_path():
+    cfg = _fs_config()
+    client = FeishuClient(cfg)
+    client.download_resource = AsyncMock(
+        return_value=(b"docx-bytes", "application/octet-stream")
+    )
+    sent, done = [], asyncio.Event()
+
+    async def _send(open_id, text):
+        sent.append((open_id, text))
+        done.set()
+        return {"code": 0}
+
+    client.send_text = _send  # type: ignore[assignment]
+    seen: dict = {}
+
+    async def dispatch(msg: InboundMessage) -> OutboundMessage:
+        seen["files"] = list(msg.files)
+        return OutboundMessage(text="收到文件")
+
+    ch = FeishuChannel(cfg, client=client, state=InMemoryStateStore())
+    app = FastAPI()
+    ch.register(app, dispatch)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+        r = await ac.post("/feishu/event",
+                          json=_fs_file_event("e2", "ou_b", "file_k1", "纪要.docx"))
+        assert r.status_code == 200
+    await asyncio.wait_for(done.wait(), timeout=2)
+
+    client.download_resource.assert_awaited_once_with("om_e2", "file_k1", "file")
+    assert len(seen["files"]) == 1
+    assert Path(seen["files"][0]).suffix == ".docx"
+
+
+# ── 9. Telegram document ──────────────────────────────────────────────
+def _doc_update(uid: int, chat_id: int, file_id: str, file_name: str) -> dict:
+    return {
+        "update_id": uid,
+        "message": {"message_id": uid, "chat": {"id": chat_id},
+                    "document": {"file_id": file_id, "file_name": file_name}},
+    }
+
+
+async def test_telegram_document_dispatched_as_file():
+    sent: list = []
+    http = _make_tg_http([[_doc_update(1, 100, "DOCID", "spec.pdf")]], sent)
+    seen: dict = {}
+
+    async def dispatch(msg: InboundMessage) -> OutboundMessage:
+        seen["files"] = list(msg.files)
+        seen["images"] = list(msg.images)
+        return OutboundMessage(text="ok")
+
+    ch = TelegramChannel(
+        TelegramConfig(bot_token="t", poll_timeout=0),
+        state=InMemoryStateStore(), http=http,
+    )
+    await _run_until(ch, dispatch, lambda: len(sent) >= 1)
+    await ch.close()
+
+    assert seen["images"] == []
+    assert len(seen["files"]) == 1 and Path(seen["files"][0]).suffix == ".pdf"
+
+
+async def test_telegram_image_document_routed_to_vision():
+    """图片扩展名的 document 仍按视觉处理（走 images，不走 files）。"""
+    sent: list = []
+    http = _make_tg_http([[_doc_update(2, 100, "IMGDOC", "photo.png")]], sent)
+    seen: dict = {}
+
+    async def dispatch(msg: InboundMessage) -> OutboundMessage:
+        seen["files"] = list(msg.files)
+        seen["images"] = list(msg.images)
+        return OutboundMessage(text="ok")
+
+    ch = TelegramChannel(
+        TelegramConfig(bot_token="t", poll_timeout=0),
+        state=InMemoryStateStore(), http=http,
+    )
+    await _run_until(ch, dispatch, lambda: len(sent) >= 1)
+    await ch.close()
+
+    assert seen["files"] == []
+    assert len(seen["images"]) == 1 and Path(seen["images"][0]).suffix == ".png"
+
+
+# ── 10. AgentRunner：文件附件说明块 ───────────────────────────────────
+async def test_runner_file_appends_attachment_hint():
+    agent = _RecAgent()
+    runner = AgentRunner(_Pool(agent))
+    await runner(InboundMessage(
+        channel="c", user_id="u", text="帮我看看",
+        files=["/w/_incoming/1_a.pdf", "/w/_incoming/2_b.csv"],
+    ))
+    assert agent.text.startswith("帮我看看")
+    assert "[附件]" in agent.text
+    assert "doc_read" in agent.text and "a.pdf" in agent.text       # pdf → doc_read
+    assert "file_read" in agent.text and "b.csv" in agent.text      # csv → file_read
+
+
+async def test_runner_file_only_uses_default_prompt():
+    agent = _RecAgent()
+    runner = AgentRunner(_Pool(agent))
+    await runner(InboundMessage(channel="c", user_id="u", text="",
+                                files=["/w/_incoming/x.pdf"]))
+    assert agent.text.startswith("请分析用户发来的文件。")
+    assert "[附件]" in agent.text

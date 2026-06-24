@@ -28,6 +28,14 @@ logger = logging.getLogger("milu.channels.media")
 # 下载附件保留天数（落盘时顺带清理过期文件，防工作区无限增长）
 MEDIA_TTL_SECONDS = 7 * 24 * 3600
 
+# 文档/数据文件扩展名（与 Web 上传一致；模型用 doc_read 读取，其余走 file_read）
+DOC_EXTENSIONS = frozenset({
+    ".docx", ".doc", ".xlsx", ".xlsm", ".xls", ".pdf", ".pptx", ".ppt",
+})
+
+# 非图片附件大小上限（与 Web 上传一致）
+MAX_FILE_BYTES = 30 * 1024 * 1024
+
 # content-type → 图片扩展名（平台资源下载常只给 content-type，不带文件名）
 _CT_IMAGE_EXT = {
     "image/jpeg": ".jpg",
@@ -115,3 +123,44 @@ def save_image(
     if os.path.splitext(name)[1].lower() not in IMAGE_EXTENSIONS:
         name = f"{_safe_name(media_id) or 'image'}{_image_ext(content_type, filename)}"
     return str(_write(channel, user_id, data, name))
+
+
+def save_file(
+    channel: str,
+    user_id: str,
+    data: bytes,
+    *,
+    filename: str = "",
+    media_id: str = "",
+) -> str | None:
+    """把下载到的文档/数据文件落盘，返回绝对路径字符串；超限/空数据返回 None。
+
+    保留平台文件名（含扩展名）——doc_read/file_read 靠扩展名选解析器；无文件名时
+    退化为 media_id（多半无后缀，模型仍可用 file_read 读字节）。
+    """
+    if not data:
+        return None
+    if len(data) > MAX_FILE_BYTES:
+        logger.warning(
+            "文件超过 %.0fMB 上限，跳过 channel=%s", MAX_FILE_BYTES / 1024 / 1024, channel
+        )
+        return None
+    name = _safe_name(filename) if filename else (_safe_name(media_id) or "file")
+    return str(_write(channel, user_id, data, name))
+
+
+def filename_from_disposition(header: str) -> str:
+    """从 Content-Disposition 提取文件名（支持 filename 与 RFC5987 filename*）。
+
+    微信客服 media/get 不在消息体给文件名，只在下载响应头带——必须从这里取，
+    否则 doc_read 无扩展名无法选解析器。
+    """
+    if not header:
+        return ""
+    m = re.search(r"filename\*\s*=\s*[^']*''([^;]+)", header, re.I)
+    if m:
+        from urllib.parse import unquote
+
+        return unquote(m.group(1).strip().strip('"'))
+    m = re.search(r'filename\s*=\s*"?([^";]+)"?', header, re.I)
+    return m.group(1).strip() if m else ""

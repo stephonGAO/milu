@@ -204,6 +204,30 @@ async def save_image_resource(
     return save_image(channel, user_id, data, content_type=ct, media_id=image_key)
 
 
+async def save_file_resource(
+    client: "FeishuClient",
+    channel: str,
+    user_id: str,
+    message_id: str,
+    file_key: str,
+    file_name: str = "",
+) -> str | None:
+    """下载飞书文件资源并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。
+
+    webhook 与长连接共用。文件名取消息 content 里的 file_name（doc_read 靠它选解析器）。
+    """
+    if not (message_id and file_key):
+        return None
+    try:
+        data, _ = await client.download_resource(message_id, file_key, "file")
+    except Exception:
+        logger.exception("飞书文件下载失败 file_key=%s", file_key)
+        return None
+    from .media import save_file
+
+    return save_file(channel, user_id, data, filename=file_name, media_id=file_key)
+
+
 # ── Channel 适配器 ────────────────────────────────────────────────────
 class FeishuChannel(Channel):
     """飞书渠道（webhook 型）。"""
@@ -285,7 +309,7 @@ class FeishuChannel(Channel):
         event = payload.get("event") or {}
         message = event.get("message") or {}
         mtype = message.get("message_type")
-        if mtype not in ("text", "image"):  # 暂处理文本/图片
+        if mtype not in ("text", "image", "file"):  # 暂处理文本/图片/文件
             return
         sender_id = (event.get("sender") or {}).get("sender_id") or {}
         open_id = sender_id.get("open_id")
@@ -295,27 +319,37 @@ class FeishuChannel(Channel):
             content = json.loads(message.get("content") or "{}")
         except ValueError:
             content = {}
-        text, images = "", []
+        message_id = message.get("message_id", "")
+        text, images, files = "", [], []
         if mtype == "text":
             text = (content.get("text") or "").strip()
             if not text:
                 return
-        else:  # image：下载资源落工作区，走视觉
+        elif mtype == "image":  # 下载资源落工作区，走视觉
             path = await save_image_resource(
                 self._client, self.name, open_id,
-                message.get("message_id", ""), content.get("image_key", ""),
+                message_id, content.get("image_key", ""),
             )
             if not path:
                 return
             images = [path]
+        else:  # file：下载落工作区，模型用 doc_read/file_read 读取
+            path = await save_file_resource(
+                self._client, self.name, open_id, message_id,
+                content.get("file_key", ""), content.get("file_name", ""),
+            )
+            if not path:
+                return
+            files = [path]
 
         inbound = InboundMessage(
             channel=self.name,
             user_id=open_id,
             text=text,
             images=images,
+            files=files,
             reply_to={"receive_id": open_id, "chat_id": message.get("chat_id")},
-            msg_id=message.get("message_id", ""),
+            msg_id=message_id,
             raw=payload,
         )
         try:
