@@ -160,6 +160,18 @@ def _builtin_defaults() -> dict:
             # 默认关闭——子代理照常运行，仅不展示其内部 thinking/工具/文本细节，保持界面精简。
             "show_subagent_events": False,
         },
+        "gateway": {
+            # 多渠道网关（milu gateway）的 / 命令设置。
+            # commands：是否识别 IM 用户发来的 / 命令。默认 False——不识别，"/foo" 当普通
+            #   消息喂 LLM；true 则信息类命令（/help /reset /whoami /history /new /sessions…）
+            #   对所有人、敏感类（/mode 切换/prompt/load/save）仅 admins。CLI --commands 旗标
+            #   也可强制开启（旗标 OR 此项）。
+            # admins：管理员白名单，每项 "渠道:用户ID"（精确）或裸 "用户ID"（跨渠道）；与
+            #   环境变量 GATEWAY_ADMINS 取并集。用户在 IM 发 /whoami 获取自己的身份 ID。
+            #   （列表项请直接编辑本文件或用 GATEWAY_ADMINS，不支持 config set。）
+            "commands": False,
+            "admins": [],
+        },
         "default_models": dict(DEFAULT_MODELS),
         # CLI 界面语言（zh/en，默认中文）；运行时可经 --lang / MILU_LANG 覆盖
         "lang": "zh",
@@ -292,6 +304,11 @@ class MiluConfig:
     @property
     def display(self) -> dict:
         return self.data.get("display", {})
+
+    @property
+    def gateway(self) -> dict:
+        """多渠道网关 / 命令设置（commands 开关 + admins 白名单）。"""
+        return self.data.get("gateway", {})
 
     @property
     def multiuser(self) -> str:

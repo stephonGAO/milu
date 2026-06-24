@@ -90,6 +90,47 @@ milu gateway --no-persist            # 去重/游标用内存版（重启即丢�
 3. Telegram 走**长轮询**（无需公网回调/HTTPS），`milu gateway` 启动即开始收发。
    ⚠️ 国内云服务器通常连不上 `api.telegram.org`，需 `TELEGRAM_API_BASE` 指向可达地址。
 
+## / 命令（IM 里直接管理对话）
+
+IM 用户在聊天里发以 `/` 开头的消息即触发命令（不喂给 LLM），与 CLI/Web 命令集一致，
+回一段纯文本。
+
+**默认关闭**——不加 `--commands` 时，`/foo` 当普通消息照常喂给 LLM。启用两种方式（任一即可）：
+
+```bash
+milu gateway --commands               # ① CLI 旗标（一次性）
+milu config set gateway.commands true # ② config.json（持久，免每次加旗标）
+```
+
+启用后**权限分层**面向公网陌生用户：
+
+- **信息类（所有人可用）**：`/help`、`/whoami`（查看自己的身份 ID 与权限）、`/history`、
+  `/tools`、`/skills`、`/plan`、`/memory`、`/mode`（查看当前模式）、`/reset`（重置对话）、
+  `/compact`（手动压缩历史）、`/new`（新建自己的会话）、`/sessions`（**只列自己名下**的会话）。
+- **敏感类（仅管理员）**：`/mode <模式>`（切换，含 `superwork`=关闭所有安全检查）、
+  `/prompt`（系统提示词）、`/load <id>`（加载任意会话）、`/save`。非管理员调用会被拒绝。
+
+> `/sessions` 只展示调用者自己的会话——网关多用户共用一个会话根目录、会话 ID 内含各自
+> user_id，命令按「本用户命名空间前缀」过滤，绝不泄露他人会话。
+
+**配置管理员**：环境变量 `GATEWAY_ADMINS`，逗号分隔，每项为 `渠道:用户ID`（精确到渠道）
+或裸 `用户ID`（跨渠道匹配）。让用户在 IM 里发 `/whoami` 拿到自己的身份 ID，再加进白名单：
+
+```
+GATEWAY_ADMINS=feishu:ou_xxxxxxxx,telegram:123456789
+```
+
+管理员白名单也可写在 `config.json` 的 `gateway.admins`（列表），与 `GATEWAY_ADMINS`
+环境变量**取并集**。不配任一时敏感命令对所有人禁用（信息类仍可用）。启动横幅会打印命令
+开关与管理员数量。二次开发时 `AgentRunner(pool, commands=True)` 开启拦截（库默认 False）、
+`AgentRunner(pool, admins={...})` 可显式指定白名单（覆盖环境变量）。
+
+> 配置优先级：`commands` = CLI `--commands` 旗标 **或** `config.json gateway.commands`；
+> `admins` = `GATEWAY_ADMINS` 环境变量 **∪** `config.json gateway.admins`。
+
+> 注：`/new`/`/load` 切换的会话在 per-用户 Agent 被资源池淘汰（空闲 TTL）后会回到
+> 确定性派生的默认会话，适合临时排查；常态对话一人一会话、重启不丢。
+
 ## 多用户隔离与安全（公网部署务必看）
 
 公网客服会把 `python_repl`/`shell_command`/文件工具暴露给陌生用户，必须隔离：

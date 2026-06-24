@@ -180,6 +180,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_gw.add_argument("--no-session", action="store_true", help=t("禁用会话持久化"))
     p_gw.add_argument("--no-persist", action="store_true",
                       help=t("去重/游标不落盘（用内存版，重启即丢）"))
+    p_gw.add_argument("--commands", action="store_true",
+                      help=t("启用 / 命令（默认关闭，不识别；敏感命令仍仅 GATEWAY_ADMINS）"))
 
     return parser
 
@@ -675,7 +677,15 @@ def _cmd_gateway(args) -> int:
     from milu.channels import AgentRunner, Gateway
 
     pool, mc = build_gateway_pool(settings)
-    runner = AgentRunner(pool)
+    # / 命令开关：CLI 旗标 --commands 或 config.json gateway.commands（任一为真即开启）
+    gw_cfg = mc.gateway
+    enable_commands = bool(getattr(args, "commands", False)) or bool(gw_cfg.get("commands", False))
+    # 管理员白名单：config.json gateway.admins 与环境变量 GATEWAY_ADMINS 取并集
+    from milu.channels.runner import _normalize_admins
+    admins = _normalize_admins(gw_cfg.get("admins")) | _normalize_admins(
+        os.environ.get("GATEWAY_ADMINS", "")
+    )
+    runner = AgentRunner(pool, commands=enable_commands, admins=admins)
     gateway = Gateway.from_runner(runner, channels, title="milu Gateway")
 
     host, port = args.host, args.port
@@ -688,6 +698,19 @@ def _cmd_gateway(args) -> int:
     print(t("  操作模式: {mode}  去重/游标: {persist}",
             mode=c('yellow', settings.mode),
             persist=t('文件持久化') if persist else t('内存版')))
+    # / 命令：默认关闭（--commands 开启）。开启后信息类对所有人、敏感类（改模式/切会话）
+    # 仅 GATEWAY_ADMINS 白名单
+    if enable_commands:
+        n_admin = len(runner.admins)
+        admin_note = (
+            t('{n} 名管理员', n=n_admin) if n_admin
+            else t('无管理员（敏感命令对所有人禁用，设 GATEWAY_ADMINS 开启）')
+        )
+        print(t("  / 命令: {state}  ({admin})",
+                state=c('green', t('已启用')), admin=c('dim', admin_note)))
+    else:
+        print(t("  / 命令: {state}",
+                state=c('dim', t('未启用（--commands 开启）'))))
     print(t("  启用渠道（{n} 个）:", n=len(channels)))
     for ch in channels:
         print(f"    - {c('green', ch.name)}  {c('dim', _channel_endpoint(ch))}")

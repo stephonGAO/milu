@@ -165,7 +165,8 @@ def test_write_project_template(paths):
     assert data["agent"]["workspace"] == ""   # 工作区默认空串（→ ~/.milu/workspace）
     assert set(data.keys()) == {
         "agent", "compact", "pool", "scheduler", "knowledge", "observability",
-        "default_models", "security", "sandbox", "display", "lang", "multiuser",
+        "default_models", "security", "sandbox", "display", "gateway",
+        "lang", "multiuser",
     }
     assert data["multiuser"] == "normal"                   # 部署策略默认普通
     assert data["agent"]["workspace_jail"] is False        # 文件围栏默认关
@@ -177,3 +178,19 @@ def test_write_project_template(paths):
     assert data["sandbox"]["ephemeral_workdir"] is False
     assert data["observability"]["enabled"] is True   # 运行追踪默认开启（仅本地落盘）
     assert data["observability"]["capture_content"] == "truncated"
+    assert data["gateway"]["commands"] is False   # 网关 / 命令默认关闭
+    assert data["gateway"]["admins"] == []        # 管理员白名单默认空
+
+
+# ── 网关 / 命令配置分节 ───────────────────────────────────
+
+def test_gateway_section_defaults_and_override(paths):
+    cfg = load_config()
+    assert cfg.gateway["commands"] is False
+    assert cfg.gateway["admins"] == []
+    # commands 是 bool，可经 config set 切换
+    set_user_value("gateway.commands", "true")
+    assert load_config().gateway["commands"] is True
+    # admins 列表可经文件覆盖
+    _write(project_config_path(), {"gateway": {"admins": ["feishu:ou_a"]}})
+    assert load_config().gateway["admins"] == ["feishu:ou_a"]

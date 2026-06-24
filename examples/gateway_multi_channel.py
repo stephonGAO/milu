@@ -54,7 +54,10 @@ def main() -> None:
     # 公网多用户务必加上（代码进断网 docker 容器 + 文件工具关进工作区）：
     #   agent_kwargs={"sandbox": "docker", "workspace_jail": True}
     # 简单内网/自用可省略（默认 subprocess 子进程隔离）。
-    runner = AgentRunner.from_llm(llm)
+    # / 命令默认关闭（库默认 commands=False）；此处显式开启演示。开启后信息类
+    # （/help /reset /whoami /new /sessions …）对所有人，敏感类（改模式/读提示词/load/save）
+    # 仅 GATEWAY_ADMINS 白名单可用；admins={...} 也可在此显式指定（覆盖环境变量）。
+    runner = AgentRunner.from_llm(llm, commands=True)
 
     store = FileStateStore()                 # 去重/游标落 ~/.milu/gateway/
     channels = build_channels(store)

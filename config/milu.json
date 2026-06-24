@@ -80,6 +80,11 @@
   "display": {
     "show_subagent_events": false
   },
+  "gateway": {
+    "//": "多渠道网关（milu gateway）的 / 命令设置。commands：是否识别 IM 用户发来的 / 命令——默认 false（不识别，\"/foo\" 当普通消息喂 LLM）；设 true 则信息类命令（/help /reset /whoami /history /new /sessions 等）对所有人开放、敏感类（/mode 切换含 superwork、/prompt /load /save）仅 admins 白名单可用。CLI 旗标 --commands 也能强制开启（旗标 OR 此项）。admins：管理员白名单，每项为 \"渠道:用户ID\"（精确到渠道，如 feishu:ou_xxx）或裸 \"用户ID\"（跨渠道匹配），与环境变量 GATEWAY_ADMINS 取并集；用户在 IM 里发 /whoami 获取自己的身份 ID。列表项请直接编辑本文件或用 GATEWAY_ADMINS 环境变量，不支持 config set。",
+    "commands": false,
+    "admins": []
+  },
   "default_models": {
     "qwen": "qwen3.6-plus",
     "deepseek": "deepseek-v4-flash",
