@@ -22,6 +22,9 @@ logger = logging.getLogger("milu.channels.runner")
 # Agent 没产出有效回复时的兜底语（空回复会被渠道丢弃，体验不佳）
 DEFAULT_FALLBACK = "（抱歉，我暂时没想到怎么回答，换个说法再试试？）"
 
+# 只发图片、无配文时的默认指令（否则 agent.run("") 没有可回应的文本）
+DEFAULT_IMAGE_PROMPT = "请查看用户发来的图片并回应。"
+
 # 自定义 (channel,user)->（user_id, session_id) 的映射钩子
 SessionOf = Callable[[InboundMessage], "tuple[str, str]"]
 
@@ -135,6 +138,18 @@ class AgentRunner:
             or inbound.user_id in self._admins
         )
 
+    def _compose_input(self, inbound: InboundMessage) -> tuple[str, list[str] | None]:
+        """把入站消息规整为喂给 Agent 的 (文本, 图片路径列表)。
+
+        图片经 `agent.run(images=...)` 走视觉物化；只发图片无配文时补一句默认指令，
+        否则 `agent.run("")` 没有可回应的文本。
+        """
+        text = inbound.text or ""
+        images = inbound.images or None
+        if images and not text.strip():
+            text = DEFAULT_IMAGE_PROMPT
+        return text, images
+
     async def __call__(self, inbound: InboundMessage) -> OutboundMessage | None:
         """跑一轮 Agent，返回回复（异常/空回复回退兜底语，绝不向渠道抛异常）。"""
         user_id, session_id = self._keys(inbound)
@@ -143,12 +158,11 @@ class AgentRunner:
         if self._commands and text.startswith("/"):
             return await self._run_command(inbound, user_id, session_id, text)
 
+        text_in, images = self._compose_input(inbound)
         reply = ""
         try:
             async with self._pool.acquire(user_id=user_id, session_id=session_id) as h:
-                async for evt in h.agent.run(
-                    inbound.text, images=inbound.images or None
-                ):
+                async for evt in h.agent.run(text_in, images=images):
                     if isinstance(evt, AgentDone):
                         reply = evt.final_text
         except Exception:

@@ -123,7 +123,8 @@ class FeishuWsChannel(Channel):
         try:
             event = data.event
             message = event.message
-            if getattr(message, "message_type", None) != "text":
+            mtype = getattr(message, "message_type", None)
+            if mtype not in ("text", "image"):  # 暂处理文本/图片
                 return
             event_id = getattr(data.header, "event_id", "") or ""
             if event_id and await self._state.seen(self.name, event_id):
@@ -132,16 +133,30 @@ class FeishuWsChannel(Channel):
             if not open_id:
                 return
             try:
-                text = json.loads(message.content or "{}").get("text", "")
+                content = json.loads(message.content or "{}")
             except (ValueError, TypeError):
-                text = ""
-            text = (text or "").strip()
-            if not text:
-                return
+                content = {}
+            text, images = "", []
+            if mtype == "text":
+                text = (content.get("text") or "").strip()
+                if not text:
+                    return
+            else:  # image：复用 webhook 版的资源下载落盘，走视觉
+                from .feishu import save_image_resource
+
+                path = await save_image_resource(
+                    self._client, self.name, open_id,
+                    getattr(message, "message_id", "") or "",
+                    content.get("image_key", ""),
+                )
+                if not path:
+                    return
+                images = [path]
             inbound = InboundMessage(
                 channel=self.name,
                 user_id=open_id,
                 text=text,
+                images=images,
                 reply_to={
                     "receive_id": open_id,
                     "chat_id": getattr(message, "chat_id", None),

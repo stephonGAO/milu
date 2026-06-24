@@ -157,9 +157,51 @@ class FeishuClient:
         )
         return r.json()
 
+    async def download_resource(
+        self, message_id: str, file_key: str, resource_type: str
+    ) -> tuple[bytes, str]:
+        """下载消息资源（图片 resource_type=image / 文件 resource_type=file）。
+
+        返回 (二进制内容, content_type)；失败（返回 JSON 错误）时抛异常。
+        """
+        token = await self.tenant_token()
+        r = await self._http.get(
+            f"{self.config.api_base}/open-apis/im/v1/messages/{message_id}"
+            f"/resources/{file_key}",
+            params={"type": resource_type},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        ct = r.headers.get("Content-Type", "")
+        if "application/json" in ct.lower():
+            raise RuntimeError(f"飞书资源下载失败：{r.text}")
+        return r.content, ct
+
     async def aclose(self) -> None:
         if self._owns_http:
             await self._http.aclose()
+
+
+async def save_image_resource(
+    client: "FeishuClient",
+    channel: str,
+    user_id: str,
+    message_id: str,
+    image_key: str,
+) -> str | None:
+    """下载飞书图片资源并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。
+
+    webhook（FeishuChannel）与长连接（FeishuWsChannel）共用，避免重复实现。
+    """
+    if not (message_id and image_key):
+        return None
+    try:
+        data, ct = await client.download_resource(message_id, image_key, "image")
+    except Exception:
+        logger.exception("飞书图片下载失败 image_key=%s", image_key)
+        return None
+    from .media import save_image
+
+    return save_image(channel, user_id, data, content_type=ct, media_id=image_key)
 
 
 # ── Channel 适配器 ────────────────────────────────────────────────────
@@ -242,24 +284,36 @@ class FeishuChannel(Channel):
             return
         event = payload.get("event") or {}
         message = event.get("message") or {}
-        if message.get("message_type") != "text":
+        mtype = message.get("message_type")
+        if mtype not in ("text", "image"):  # 暂处理文本/图片
             return
         sender_id = (event.get("sender") or {}).get("sender_id") or {}
         open_id = sender_id.get("open_id")
         if not open_id:
             return
         try:
-            text = json.loads(message.get("content") or "{}").get("text", "")
+            content = json.loads(message.get("content") or "{}")
         except ValueError:
-            text = ""
-        text = (text or "").strip()
-        if not text:
-            return
+            content = {}
+        text, images = "", []
+        if mtype == "text":
+            text = (content.get("text") or "").strip()
+            if not text:
+                return
+        else:  # image：下载资源落工作区，走视觉
+            path = await save_image_resource(
+                self._client, self.name, open_id,
+                message.get("message_id", ""), content.get("image_key", ""),
+            )
+            if not path:
+                return
+            images = [path]
 
         inbound = InboundMessage(
             channel=self.name,
             user_id=open_id,
             text=text,
+            images=images,
             reply_to={"receive_id": open_id, "chat_id": message.get("chat_id")},
             msg_id=message.get("message_id", ""),
             raw=payload,

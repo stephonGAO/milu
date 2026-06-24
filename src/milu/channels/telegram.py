@@ -98,15 +98,24 @@ class TelegramChannel(Channel):
                 if update_id is not None:
                     offset = update_id + 1  # 下次从此处续拉（同时向服务端确认已处理）
                 msg = upd.get("message") or upd.get("edited_message")
-                if not msg:
-                    await self._state.set_cursor(self.name, "offset", str(offset))
-                    continue
-                text = msg.get("text")
-                chat_id = (msg.get("chat") or {}).get("id")
-                if text is None or chat_id is None:
+                chat_id = (msg.get("chat") or {}).get("id") if msg else None
+                if not msg or chat_id is None:
                     await self._state.set_cursor(self.name, "offset", str(offset))
                     continue
                 if await self._state.seen(self.name, str(update_id)):
+                    await self._state.set_cursor(self.name, "offset", str(offset))
+                    continue
+
+                # 文本 / 图片配文（caption）；photo 是多尺寸数组，取最大那张走视觉
+                text = msg.get("text") or msg.get("caption") or ""
+                images: list[str] = []
+                photo = msg.get("photo")
+                if photo:
+                    file_id = (photo[-1] or {}).get("file_id", "")
+                    path = await self._save_image(str(chat_id), file_id)
+                    if path:
+                        images.append(path)
+                if not text and not images:  # 不支持的消息类型（贴纸/位置等）跳过
                     await self._state.set_cursor(self.name, "offset", str(offset))
                     continue
 
@@ -114,6 +123,7 @@ class TelegramChannel(Channel):
                     channel=self.name,
                     user_id=str(chat_id),
                     text=text,
+                    images=images,
                     reply_to={"chat_id": chat_id},
                     msg_id=str(update_id),
                     raw=upd,
@@ -151,6 +161,37 @@ class TelegramChannel(Channel):
             json={"chat_id": chat_id, "text": text},
         )
         return r.json()
+
+    # ── 媒体下载（图片）────────────────────────────────────────────────
+    async def _file_path(self, file_id: str) -> str | None:
+        """getFile：把 file_id 换成服务端相对路径 file_path（再凭它下载）。"""
+        r = await self._http.get(self._url("getFile"), params={"file_id": file_id})
+        data = r.json()
+        if not data.get("ok"):
+            return None
+        return (data.get("result") or {}).get("file_path")
+
+    async def _download(self, file_path: str) -> bytes:
+        """下载文件：注意走 /file/bot<token>/<file_path>，与 API 方法路径不同。"""
+        url = f"{self._config.api_base}/file/bot{self._config.bot_token}/{file_path}"
+        r = await self._http.get(url)
+        return r.content
+
+    async def _save_image(self, user_id: str, file_id: str) -> str | None:
+        """下载图片并落盘，返回绝对路径（失败/超限返回 None，不抛异常）。"""
+        if not file_id:
+            return None
+        try:
+            fp = await self._file_path(file_id)
+            if not fp:
+                return None
+            data = await self._download(fp)
+        except Exception:
+            logger.exception("Telegram 图片下载失败 file_id=%s", file_id)
+            return None
+        from .media import save_image
+
+        return save_image(self.name, user_id, data, filename=fp)
 
     async def close(self) -> None:
         if self._owns_http:
