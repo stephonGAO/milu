@@ -23,20 +23,35 @@ logger = logging.getLogger("milu.channels.runner")
 # Agent 没产出有效回复时的兜底语（空回复会被渠道丢弃，体验不佳）
 DEFAULT_FALLBACK = "（抱歉，我暂时没想到怎么回答，换个说法再试试？）"
 
-# 只发图片、无配文时的默认指令（否则 agent.run("") 没有可回应的文本）
-DEFAULT_IMAGE_PROMPT = "请查看用户发来的图片并回应。"
+# 只发媒体、无配文时的默认指令（否则 agent.run("") 没有可回应的文本）
+DEFAULT_MEDIA_PROMPT = "请查看用户随本条消息发来的附件并回应。"
 
 # 自定义 (channel,user)->（user_id, session_id) 的映射钩子
 SessionOf = Callable[[InboundMessage], "tuple[str, str]"]
 
 
-def _format_files(paths: list[str]) -> str:
-    """组装附件说明块（附在用户消息末尾，引导模型选对读取工具，对齐 Web 上传）。"""
-    lines = ["[附件] 用户随本条消息发来以下文件，请按需读取分析："]
-    for p in paths:
+def _format_attachments(images: list[str], files: list[str]) -> str:
+    """组装「本条附件清单」说明块（附在用户消息末尾）。
+
+    实践教训：只给「请查看图片」这类干瘪指令时，模型在 file-agent 人设下会主动
+    跟用户解释「这图片/文件不在我工作区」之类的内部细节——既误导（图片其实已存进
+    工作区、文件也能读）又吓人。故这里**显式告知**：附件已下载到本地、可直接处理、
+    **回应里别提保存位置**，并锚定到「本条消息」防止跨条串到上一条附件。
+    """
+    if not images and not files:
+        return ""
+    lines = [
+        "[附件] 用户随本条消息发来以下内容，均已下载到本地工作区、可直接处理。"
+        "请基于这些附件作答；回复里不要提及文件是否保存、存放在哪等内部细节。",
+    ]
+    for p in images:
+        lines.append(
+            f"- 图片：{p}（已随本条消息提供给你视觉，可直接看图作答；如需进一步处理可用 image_read）"
+        )
+    for p in files:
         ext = os.path.splitext(p)[1].lower()
-        hint = "文档，用 doc_read 工具读取" if ext in DOC_EXTENSIONS else "文本/数据文件，用 file_read 工具读取"
-        lines.append(f"- {p}（{hint}）")
+        hint = "请先用 doc_read 读取" if ext in DOC_EXTENSIONS else "请先用 file_read 读取"
+        lines.append(f"- 文件：{p}（{hint}其内容，再据此回应）")
     return "\n".join(lines)
 
 
@@ -153,17 +168,20 @@ class AgentRunner:
         """把入站消息规整为喂给 Agent 的 (文本, 图片路径列表)。
 
         - 图片 → 经 `agent.run(images=...)` 走视觉物化；
-        - 文件 → 在消息尾追加附件说明块，引导模型用 doc_read/file_read 读取分析；
+        - 图片/文件 → 在消息尾追加统一「本条附件清单」，告知已下载到本地、可直接
+          处理、别提保存细节（防模型输出「文件不在我工作区」之类的误导废话）；
         - 只发媒体无配文时补一句默认指令，否则 `agent.run("")` 没有可回应的文本。
         """
         text = inbound.text or ""
         images = inbound.images or None
         files = inbound.files or []
+        if not (images or files):
+            return text, images
         if not text.strip():
-            text = "请分析用户发来的文件。" if files else (DEFAULT_IMAGE_PROMPT if images else text)
-        if files:
-            attach = _format_files(files)
-            text = f"{text}\n\n{attach}" if text else attach
+            text = DEFAULT_MEDIA_PROMPT
+        manifest = _format_attachments(inbound.images or [], files)
+        if manifest:
+            text = f"{text}\n\n{manifest}"
         return text, images
 
     async def __call__(self, inbound: InboundMessage) -> OutboundMessage | None:

@@ -24,7 +24,7 @@ from fastapi import FastAPI
 from milu.channels import media
 from milu.channels.base import InboundMessage, OutboundMessage
 from milu.channels.feishu import FeishuChannel, FeishuClient, FeishuConfig
-from milu.channels.runner import DEFAULT_IMAGE_PROMPT, AgentRunner
+from milu.channels.runner import DEFAULT_MEDIA_PROMPT, AgentRunner
 from milu.channels.state import InMemoryStateStore
 from milu.channels.telegram import TelegramChannel, TelegramConfig
 from milu.channels.wechat_kf import WeChatKfChannel, WeChatKfClient, WeChatKfConfig
@@ -312,14 +312,19 @@ async def test_runner_image_only_uses_default_prompt():
     runner = AgentRunner(_Pool(agent))
     await runner(InboundMessage(channel="c", user_id="u", text="", images=["/a.png"]))
     assert agent.images == ["/a.png"]
-    assert agent.text == DEFAULT_IMAGE_PROMPT
+    assert agent.text.startswith(DEFAULT_MEDIA_PROMPT)
+    assert "图片：/a.png" in agent.text
+    # 明确告诉模型别提保存细节（防「图片没保存到我工作区」之类的误导废话）
+    assert "不要提及文件是否保存" in agent.text
 
 
 async def test_runner_image_with_caption_keeps_text():
     agent = _RecAgent()
     runner = AgentRunner(_Pool(agent))
     await runner(InboundMessage(channel="c", user_id="u", text="这是啥", images=["/a.png"]))
-    assert agent.text == "这是啥" and agent.images == ["/a.png"]
+    assert agent.text.startswith("这是啥")
+    assert "图片：/a.png" in agent.text
+    assert agent.images == ["/a.png"]
 
 
 # ── 6. media.save_file ────────────────────────────────────────────────
@@ -504,5 +509,18 @@ async def test_runner_file_only_uses_default_prompt():
     runner = AgentRunner(_Pool(agent))
     await runner(InboundMessage(channel="c", user_id="u", text="",
                                 files=["/w/_incoming/x.pdf"]))
-    assert agent.text.startswith("请分析用户发来的文件。")
+    assert agent.text.startswith(DEFAULT_MEDIA_PROMPT)
     assert "[附件]" in agent.text
+
+
+async def test_runner_image_and_file_both_listed():
+    """图片+文件同条：清单两者都列，图片标注可直接看、文件标注先读取。"""
+    agent = _RecAgent()
+    runner = AgentRunner(_Pool(agent))
+    await runner(InboundMessage(
+        channel="c", user_id="u", text="一起看下",
+        images=["/w/_incoming/p.jpg"], files=["/w/_incoming/d.docx"],
+    ))
+    assert agent.images == ["/w/_incoming/p.jpg"]
+    assert "图片：/w/_incoming/p.jpg" in agent.text
+    assert "文件：/w/_incoming/d.docx" in agent.text and "doc_read" in agent.text
