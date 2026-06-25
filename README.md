@@ -38,8 +38,8 @@ Most agent frameworks stop at single-user demos, and treat Chinese LLM providers
   20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
 - 📡 **Reach users on the platforms they already use**<br>
   One `milu gateway` connects your agent to **WeChat Work customer service, Feishu/Lark, and Telegram** — Ports & Adapters under the hood, so adding a platform is just one Channel. Per-user isolation, image & file attachments, persistent dedup/cursor across restarts, `/` commands with admin tiers, and strict sandbox isolation for public deployments. WeChat/Feishu webhook & Telegram work with a plain `pip install milu` — no extra deps.
-- 🛡️ **A real safety model**<br>
-  Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
+- 🛡️ **A real safety model — soft gate *and* hard isolation**<br>
+  Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval. Beyond *deciding whether* a call runs, milu controls *where* it runs: `python_repl` / `shell_command` execute in a hardened subprocess by default (scrubs `*_API_KEY`, real timeout-kill, crash isolation), or a fully isolated **Docker** sandbox (no host FS / network / secrets, mounts only the per-user workspace) — and `multiuser=strict` bundles Docker isolation with a file-tool workspace jail into one switch for public, multi-user deployments.
 - 🔭 **Observability built in**<br>
   Every `Agent.run()` is a span tree (attribute names aligned with the OpenTelemetry GenAI semantic conventions): per-run tokens / cost / latency, TTFT, time split across LLM vs tools vs safety-judge vs approval-wait, sub-agent nesting, and fail-open audit. Inspect runs from the CLI (`milu trace list/show/compare/stats`), the per-run waterfall in the web "Observability" panel, or the **cross-user dashboard** at `/dashboard` (shown above) — pool & concurrency gauges, run / token trends, a safety-audit ring, per-model cost, per-user profiles and a live event stream across all users, admin-gated by `MILU_ADMIN_TOKEN`.
 - 🪶 **Thin by design**<br>
@@ -64,10 +64,11 @@ milu is both a ready-to-run agent and a framework to build on — start instantl
 **With pip** — if you already have Python 3.10+:
 
 ```bash
-pip install -U milu           # everything included: CLI, web service, RAG, MCP
+pip install -U milu           # everything included: CLI, web service, RAG, MCP, IM gateway
                               # -U installs fresh, and upgrades an existing install to the latest
 pip install -U "milu[ddg]"    # optional: adds the key-free DuckDuckGo backend for web_search
                               # (Rust-based dep; kept optional so milu installs on Termux/Alpine)
+pip install -U "milu[feishu-ws]"  # optional: Feishu/Lark long-connection mode (tunnel-free local dev)
 ```
 
 > [!TIP]
@@ -93,9 +94,10 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
 uv tool install milu
 ```
 
-**Docker** — no Python on the host at all:
+**Docker** — no Python on the host at all (clone the repo first for the compose file; details in [docs/Docker部署.md](docs/Docker部署.md)):
 
 ```bash
+git clone https://github.com/stephonGAO/milu && cd milu
 cp .env.example .env          # fill in at least one provider API key
 docker compose up -d
 ```
@@ -148,7 +150,7 @@ async for event in agent.run("What time is it? Use a tool to check."):
 
 > ✅ = built-in; "—" = not built-in (often available via an external platform or a few lines of your own code). Reflects each library as of June 2026 — these move fast, so corrections are welcome via issue/PR.
 >
-> **When milu is the right fit:** you're building on Chinese LLMs, you need a production multi-user / multi-tenant service (not just a single-user demo), and you want batteries included — runnable as-is or embeddable as a library, Or as a strong, bold and flexible development core and intelligent base.
+> **When milu is the right fit:** you're building on Chinese LLMs, you need a production multi-user / multi-tenant service (not just a single-user demo), and you want batteries included — runnable as-is, embeddable as a library, or used as a powerful yet flexible core and intelligent base to build your own product on.
 >
 > **When to choose something else:** for the largest integration ecosystem, [LangChain](https://github.com/langchain-ai/langchain); for pure multi-agent orchestration, [CrewAI](https://github.com/crewAIInc/crewAI) or [AutoGen](https://github.com/microsoft/autogen); for a tiny, barebones core with almost nothing built in, [smolagents](https://github.com/huggingface/smolagents).
 
@@ -364,10 +366,12 @@ milu run "..." -q    one-shot execution, pipe-friendly
 milu serve           multi-user web service + demo UI
 milu gateway         IM gateway (WeChat / Feishu / Telegram), auto-detects channels
 milu providers       list 9 providers and key status
-milu trace ...        inspect agent runs (list / show / compare / stats)
+milu trace ...       inspect agent runs (list / show / compare / stats)
 milu config ...      layered config (CLI > user > project > defaults)
 milu sessions list   browse saved sessions
 milu schedule ...    manage scheduled tasks
+milu scheduler start  run the scheduler as a standalone daemon
+milu version          print the installed version
 milu --lang en ...   switch UI language for one run (zh / en)
 ```
 

@@ -38,8 +38,8 @@
   20+ 内置工具（文件、Shell、Python、网页抓取/搜索、Office/PDF 文档读取、图片视觉输入）、MCP 协议（stdio/HTTP/SSE）、子代理、技能、会话持久化、上下文自动压缩、长期记忆、RAG 知识库、定时任务，外加一个内置的多用户 Web 服务。
 - 📡 **接到用户已经在用的平台**<br>
   一条 `milu gateway` 把 Agent 接到**微信客服、飞书、Telegram**——底层 Ports & Adapters（六边形）架构，新增一个平台只需写一个 Channel。per-用户隔离、图片与文件附件、游标/去重重启不丢（不重复回复、不漏拉），`/` 命令带管理员权限分层，公网部署可一键 strict 沙箱隔离。微信/飞书 webhook 与 Telegram 一条 `pip install milu` 即可用、零额外依赖。
-- 🛡️ **真正的安全模型**<br>
-  四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
+- 🛡️ **真正的安全模型——软门控 *与* 硬隔离**<br>
+  四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。在「**要不要跑**」的软门控之上，milu 还管「**跑在哪、能碰什么**」：`python_repl` / `shell_command` 默认在加固子进程中执行（清洗 `*_API_KEY`、超时真杀、崩溃隔离），或切换到完全隔离的 **Docker** 沙箱（宿主文件 / 网络 / 密钥均不可见，只挂该用户工作区）——`multiuser=strict` 更把 docker 隔离与文件工具工作区围栏打包成一个开关，面向公网多用户部署一键启用。
 - 🔭 **内置可观测性**<br>
   每次 `Agent.run()` 即一棵 span 树（属性命名对齐 OpenTelemetry GenAI 语义约定）：单次运行的 token / 成本 / 延迟、TTFT、LLM vs 工具 vs 安全判定 vs 审批等待的时间分解、子代理嵌套、fail-open 审计。可经 CLI（`milu trace list/show/compare/stats`）、Web「观测」面板看单次运行的链路瀑布，或经 `/dashboard` 的**跨用户观测大屏**（见上图）——资源池与并发仪表、运行 / Token 走势、安全审计环形、模型成本、用户画像与跨所有用户的实时事件流，经 `MILU_ADMIN_TOKEN` 鉴权。
 - 🪶 **薄封装，不造概念**<br>
@@ -64,10 +64,11 @@ milu 既是开箱即用的完整 Agent，也是可二次开发的框架——即
 **用 pip** —— 如果你已经有 Python 3.10+：
 
 ```bash
-pip install -U milu           # 全功能：CLI、Web 服务、RAG 知识库、MCP 全含
+pip install -U milu           # 全功能：CLI、Web 服务、RAG 知识库、MCP、IM 网关全含
                               # -U 首次安装也行，已装则升级到最新
 pip install -U "milu[ddg]"    # 可选：web_search 的 DuckDuckGo 免 Key 后端（国内网络用不到；
                               # 含 Rust 扩展依赖，保持可选以便 Termux/Alpine 等平台正常安装）
+pip install -U "milu[feishu-ws]"  # 可选：飞书长连接模式（本地开发免公网回调/隧道）
 ```
 
 > [!TIP]
@@ -97,9 +98,10 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex" # Windows
 uv tool install milu
 ```
 
-**Docker** —— 宿主机完全不用装 Python：
+**Docker** —— 宿主机完全不用装 Python（需先 clone 仓库拿到 compose 文件；细节见 [docs/Docker部署.md](docs/Docker部署.md)）：
 
 ```bash
+git clone https://github.com/stephonGAO/milu && cd milu
 cp .env.example .env          # 填入至少一家厂商的 API Key
 docker compose up -d
 ```
@@ -367,10 +369,12 @@ milu run "..." -q    一次性执行，可管道
 milu serve           多用户 Web 服务 + 演示前端
 milu gateway         IM 渠道接入网关（微信 / 飞书 / Telegram），自动探测启用渠道
 milu providers       列出 9 家厂商与 Key 配置状态
-milu trace ...        查看 Agent 运行追踪（list / show / compare / stats）
+milu trace ...       查看 Agent 运行追踪（list / show / compare / stats）
 milu config ...      分层配置（CLI 参数 > 用户级 > 项目级 > 内置默认）
 milu sessions list   查看历史会话
 milu schedule ...    定时任务管理
+milu scheduler start  以独立守护进程运行调度器
+milu version          打印已安装版本
 milu --lang en ...   临时切换界面语言（zh / en）
 ```
 
