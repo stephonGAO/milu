@@ -208,7 +208,8 @@ def _make_tg_http(batches: list[list[dict]], sent: list):
     def handler(request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         if "getUpdates" in url:
-            i = state["i"]; state["i"] += 1
+            i = state["i"]
+            state["i"] += 1
             batch = batches[i] if i < len(batches) else []
             return httpx.Response(200, json={"ok": True, "result": batch})
         if "getFile" in url:

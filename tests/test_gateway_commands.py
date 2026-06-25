@@ -5,8 +5,6 @@
 """
 from __future__ import annotations
 
-import pytest
-
 from milu.channels import AgentRunner, InboundMessage, OutboundMessage
 from milu.channels.commands import is_command, run_command
 from milu.channels.runner import _normalize_admins
