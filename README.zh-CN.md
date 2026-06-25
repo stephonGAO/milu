@@ -4,13 +4,13 @@
 
 **生产级多用户 Agent 框架 —— 国产大模型一等公民。**
 
-多用户并发池 · 一套接口接入 9 家大模型（国产一等公民） · 内置工具与 MCP · 子代理 · 技能 · RAG 知识库 · 定时任务 · 观测大屏
+多用户并发池 · 一套接口接入 9 家大模型（国产一等公民） · 内置工具与 MCP · 子代理 · 技能 · RAG 知识库 · 定时任务 · 多渠道接入网关 · 观测大屏
 
 [![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
 [![CI](https://github.com/stephonGAO/milu/actions/workflows/ci.yml/badge.svg)](https://github.com/stephonGAO/milu/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-1300%2B%20passed-brightgreen)](tests/)
 
 [English](README.md) | **简体中文**
 
@@ -31,11 +31,13 @@
 多数 agent 框架止步于单用户 demo，又把国产模型当二等公民。milu 从它们止步的地方开始：
 
 - 🏭 **一个库走完 demo 到生产**<br>
-  `AgentPool` 提供 per-user 实例隔离、LRU/TTL 淘汰、全局并发限流、共享 MCP 进程。每个框架都留给你自己解决的问题——*「demo 跑通了，怎么让 100 个用户同时用且会话互不串扰？」*——这里有现成答案，1100+ 测试兜底。同一个池还能把租户映射到各自的 API Key（`KeyedLLMProvider`），从个人项目平滑长到多租户 SaaS。
+  `AgentPool` 提供 per-user 实例隔离、LRU/TTL 淘汰、全局并发限流、共享 MCP 进程。每个框架都留给你自己解决的问题——*「demo 跑通了，怎么让 100 个用户同时用且会话互不串扰？」*——这里有现成答案，1300+ 测试兜底。同一个池还能把租户映射到各自的 API Key（`KeyedLLMProvider`），从个人项目平滑长到多租户 SaaS。
 - 🇨🇳 **国产模型一等公民**<br>
   通义千问、DeepSeek、Kimi、GLM、MiniMax、豆包原生支持，与 OpenAI、Gemini、Claude 同级。不用自己维护 base_url 路由表，各家的思考模式、自带联网搜索、参数差异已经适配好，搜索工具自带国内可直连的后端（博查）。
 - 🔋 **真·开箱即用**<br>
   20+ 内置工具（文件、Shell、Python、网页抓取/搜索、Office/PDF 文档读取、图片视觉输入）、MCP 协议（stdio/HTTP/SSE）、子代理、技能、会话持久化、上下文自动压缩、长期记忆、RAG 知识库、定时任务，外加一个内置的多用户 Web 服务。
+- 📡 **接到用户已经在用的平台**<br>
+  一条 `milu gateway` 把 Agent 接到**微信客服、飞书、Telegram**——底层 Ports & Adapters（六边形）架构，新增一个平台只需写一个 Channel。per-用户隔离、图片与文件附件、游标/去重重启不丢（不重复回复、不漏拉），`/` 命令带管理员权限分层，公网部署可一键 strict 沙箱隔离。微信/飞书 webhook 与 Telegram 一条 `pip install milu` 即可用、零额外依赖。
 - 🛡️ **真正的安全模型**<br>
   四种操作模式（`talk` / `manual` / `auto` / `superwork`）、不安全工具调用的 AI 安全判定器（对齐 Claude Code）、人工确认流，且子代理委派永不旁路审批。
 - 🔭 **内置可观测性**<br>
@@ -144,6 +146,7 @@ async for event in agent.run("现在几点了？用工具查一下"):
 | 工具安全模式 + AI 判定 | ✅ | — | — | 仅沙箱 | — |
 | RAG 知识库（库内置） | ✅ | 自行组装 | 部分 | — | ✅ |
 | 定时任务（多用户） | ✅ | — | — | — | — |
+| IM 渠道接入网关（微信/飞书/Telegram） | ✅ `milu gateway` | — | — | — | — |
 | 可观测性：链路追踪 + 大屏 | ✅ span 树 + `/dashboard` | LangSmith（收费） | 平台（收费） | OTel 接入 | — |
 | CLI + Web 服务开箱即用 | ✅ | — | 部分 | — | 演示 UI |
 
@@ -159,8 +162,8 @@ async for event in agent.run("现在几点了？用工具查一下"):
   `milu` 一条命令进入对话；长期记忆记住你的偏好与习惯、定时任务帮你提醒与发每日简报、内置联网搜索 / 文件 / 文档 / 视觉等工具随手可用——全程本地运行，数据归你自己。
 - **企业知识库助手**<br>
   把手册 / FAQ / 规章制度灌入 RAG 知识库，每轮自动检索、回答区分「内部资料 vs 网络来源」，杜绝大模型张口就来的幻觉；每个员工独立会话与记忆，互不干扰。
-- **智能客服 / 工单机器人**<br>
-  高频重复咨询、工单分类与初步处理，AgentPool 扛高并发多用户，安全模式管住可执行动作。
+- **IM 平台上的智能客服 / 工单机器人**<br>
+  `milu gateway` 一条命令把 Agent 接到微信客服、飞书或 Telegram；AgentPool 扛高并发多用户，安全模式 + strict 沙箱隔离管住可执行动作，图片/文件附件开箱即读。
 - **行业垂直助手（工业 / 医疗 / 法务等）**<br>
   子代理分工 + 文档 / 图片视觉读取 + MCP 接入行业系统与数据库，把行业知识和真实数据接进来。
 - **团队「AI 同事」**<br>
@@ -324,6 +327,33 @@ milu serve                 # 多用户对话 + 全功能演示前端，http://12
 </div>
 </details>
 
+<details>
+<summary><b>10 · 多渠道接入网关（微信客服 / 飞书 / Telegram）</b></summary>
+
+```bash
+# 在 .env 配好任一渠道的凭证，然后一条命令：
+milu gateway                      # 按已配置凭证自动启用对应渠道
+milu gateway --channel telegram   # 或指定渠道（逗号分隔）
+milu config set multiuser strict  # 公网部署：docker + 工作区围栏一键严格隔离
+```
+
+也可在代码里接线（Ports & Adapters——新增一个平台只需写一个 `Channel`）：
+
+```python
+from milu.channels import AgentRunner, Gateway, FileStateStore
+from milu.channels.telegram import TelegramChannel, TelegramConfig
+from milu import ModelRegistry
+
+runner = AgentRunner.from_llm(ModelRegistry.create("qwen", model="qwen3.6-plus"))
+channels = [TelegramChannel(TelegramConfig.from_env(), state=FileStateStore())]
+Gateway.from_runner(runner, channels).run(port=8800)
+```
+
+每个平台一个适配器、接 milu 的核心与平台无关。per-用户隔离、游标/去重重启不丢（不
+重复回复、不重放积压）、入站图片走视觉、文件走 doc_read/file_read，可选 `/` 命令带
+管理员权限分层。详见 [docs/Gateway 多渠道接入.md](docs/Gateway%20%E5%A4%9A%E6%B8%A0%E9%81%93%E6%8E%A5%E5%85%A5.md)。
+</details>
+
 ## 命令行
 
 <!-- demo-cli.gif（可选）占位：录制后（脚本见 assets/RECORDING.md）取消下一行注释，并删除本说明行。 -->
@@ -335,6 +365,7 @@ milu setup           厂商 / API Key / 搜索后端引导
 milu chat -p glm     指定厂商对话
 milu run "..." -q    一次性执行，可管道
 milu serve           多用户 Web 服务 + 演示前端
+milu gateway         IM 渠道接入网关（微信 / 飞书 / Telegram），自动探测启用渠道
 milu providers       列出 9 家厂商与 Key 配置状态
 milu trace ...        查看 Agent 运行追踪（list / show / compare / stats）
 milu config ...      分层配置（CLI 参数 > 用户级 > 项目级 > 内置默认）
@@ -394,6 +425,8 @@ Python 3.10+ · 全链路 async · 所有厂商统一走 `openai.AsyncOpenAI` �
 - [ ] 追踪层 OTLP 导出器
 - [x] `python_repl` / `shell_command` 的可插拔沙箱后端（**默认子进程隔离**：清洗 `*_API_KEY`、超时真杀、崩溃隔离、guarded-open 拦 `.env`/源码；`local` 零开销可选；**`docker` 真隔离**——容器化、宿主文件/网络/密钥不可见、只挂该用户工作区，多用户首选，可插拔零 pip 依赖）
 - [x] 严格多用户部署策略（`multiuser=strict` 一键打包：docker 隔离 + 文件工具工作区围栏 + 断网，单项可覆盖、降级告警）
+- [x] 多渠道接入网关（微信客服 / 飞书 / Telegram，Ports & Adapters；`milu gateway`，入站图片与文件、`/` 命令带管理员权限分层）
+- [ ] 网关语音/音频消息接入（ASR 转写）
 - [ ] 知识库可插拔 ANN 后端（sqlite-vec），超越暴力余弦
 - [ ] 英文文档集（架构与指南，当前为中文）
 - [ ] 容器镜像发布到镜像仓库

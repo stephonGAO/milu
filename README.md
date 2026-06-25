@@ -4,13 +4,13 @@
 
 **Production-ready multi-user AI agents — with Chinese LLMs as first-class citizens.**
 
-Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler · Observability dashboard
+Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Built-in tools & MCP · Sub-agents · Skills · RAG · Scheduler · Multi-channel IM gateway · Observability dashboard
 
 [![PyPI](https://img.shields.io/pypi/v/milu)](https://pypi.org/project/milu/)
 [![CI](https://github.com/stephonGAO/milu/actions/workflows/ci.yml/badge.svg)](https://github.com/stephonGAO/milu/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/milu/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1100%2B%20passed-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-1300%2B%20passed-brightgreen)](tests/)
 
 **English** | [简体中文](README.zh-CN.md)
 
@@ -31,11 +31,13 @@ Multi-user agent pool · One interface for 9 LLM providers (Chinese-first) · Bu
 Most agent frameworks stop at single-user demos, and treat Chinese LLM providers as an afterthought. milu starts where they stop:
 
 - 🏭 **From demo to production in one library**<br>
-  `AgentPool` gives you per-user agent isolation, LRU/TTL eviction, global concurrency limits and shared MCP processes. The question every framework leaves as "an exercise for the reader" — *"my demo works, how do I serve 100 concurrent users without sessions bleeding into each other?"* — is answered here, backed by 1100+ tests. The same pool maps tenants to their own API keys (`KeyedLLMProvider`), so it scales from a side project to multi-tenant SaaS.
+  `AgentPool` gives you per-user agent isolation, LRU/TTL eviction, global concurrency limits and shared MCP processes. The question every framework leaves as "an exercise for the reader" — *"my demo works, how do I serve 100 concurrent users without sessions bleeding into each other?"* — is answered here, backed by 1300+ tests. The same pool maps tenants to their own API keys (`KeyedLLMProvider`), so it scales from a side project to multi-tenant SaaS.
 - 🇨🇳 **Chinese LLMs as first-class citizens**<br>
   Qwen, DeepSeek, Kimi, GLM, MiniMax, Doubao natively supported alongside OpenAI, Gemini and Claude. No `base_url` juggling, provider quirks (thinking mode, built-in web search, parameter differences) pre-adapted, plus a China-reachable search backend out of the box.
 - 🔋 **Batteries actually included**<br>
   20+ built-in tools (files, shell, Python, web fetch/search, Office/PDF reading, vision input), MCP protocol (stdio/HTTP/SSE), sub-agents, skills, session persistence, automatic context compaction, long-term memory, RAG knowledge base, scheduled tasks, and a built-in multi-user web service.
+- 📡 **Reach users on the platforms they already use**<br>
+  One `milu gateway` connects your agent to **WeChat Work customer service, Feishu/Lark, and Telegram** — Ports & Adapters under the hood, so adding a platform is just one Channel. Per-user isolation, image & file attachments, persistent dedup/cursor across restarts, `/` commands with admin tiers, and strict sandbox isolation for public deployments. WeChat/Feishu webhook & Telegram work with a plain `pip install milu` — no extra deps.
 - 🛡️ **A real safety model**<br>
   Four operation modes (`talk` / `manual` / `auto` / `superwork`), an AI safety judge for unsafe tool calls (Claude-Code-style), human confirmation flows, and delegation that never bypasses approval.
 - 🔭 **Observability built in**<br>
@@ -140,6 +142,7 @@ async for event in agent.run("What time is it? Use a tool to check."):
 | Tool-safety modes + AI judge | ✅ | — | — | sandbox only | — |
 | RAG knowledge base, in-library | ✅ | assemble yourself | partial | — | ✅ |
 | Scheduled tasks (multi-user) | ✅ | — | — | — | — |
+| IM channel gateway (WeChat/Feishu/Telegram) | ✅ `milu gateway` | — | — | — | — |
 | Observability: tracing + dashboard | ✅ span-tree + `/dashboard` | LangSmith (paid) | platform (paid) | OTel hooks | — |
 | CLI + web service out of the box | ✅ | — | partial | — | demo UI |
 
@@ -155,8 +158,8 @@ async for event in agent.run("What time is it? Use a tool to check."):
   `milu` drops you into a chat in one command; long-term memory remembers your preferences, scheduled tasks handle reminders and daily digests, and built-in tools (web search, files, docs, vision) are ready to use — all running locally, your data stays yours.
 - **Enterprise knowledge assistant**<br>
   Load manuals / FAQs / policies into the RAG knowledge base; auto-retrieval each turn, source-aware answers that separate "internal docs vs web", no hallucinated guesses. Per-user isolated sessions and memory.
-- **Customer-support / ticket bot**<br>
-  High-volume repetitive queries and ticket triage; AgentPool handles many concurrent users, safety modes gate what actions run.
+- **Customer-support / ticket bot on IM platforms**<br>
+  `milu gateway` puts your agent in WeChat Work customer service, Feishu or Telegram in one command; AgentPool handles many concurrent users, safety modes + strict sandbox isolation gate what actions run, and image/file attachments are read out of the box.
 - **Vertical / industry assistant**<br>
   Sub-agents + document & vision reading + MCP to plug into your own systems and databases, bringing domain knowledge and real data in.
 - **An "AI coworker" for your team**<br>
@@ -320,6 +323,34 @@ milu serve                 # multi-user chat + full-featured demo UI at http://1
 </div>
 </details>
 
+<details>
+<summary><b>10 · Multi-channel gateway (WeChat / Feishu / Telegram)</b></summary>
+
+```bash
+# configure any channel's credentials in .env, then one command:
+milu gateway                      # auto-enables channels whose credentials are set
+milu gateway --channel telegram   # or pick specific channels
+milu config set multiuser strict  # docker + workspace jail for public deployments
+```
+
+Or wire it in code (Ports & Adapters — adding a platform is one `Channel`):
+
+```python
+from milu.channels import AgentRunner, Gateway, FileStateStore
+from milu.channels.telegram import TelegramChannel, TelegramConfig
+from milu import ModelRegistry
+
+runner = AgentRunner.from_llm(ModelRegistry.create("qwen", model="qwen3.6-plus"))
+channels = [TelegramChannel(TelegramConfig.from_env(), state=FileStateStore())]
+Gateway.from_runner(runner, channels).run(port=8800)
+```
+
+Each platform is one adapter; the milu-facing core is platform-agnostic. Per-user
+isolation, persistent dedup/cursor (no double replies or replays across restarts),
+inbound images (vision) and file attachments (doc_read/file_read), and optional `/`
+commands with admin tiers. See [docs/Gateway 多渠道接入.md](docs/Gateway%20%E5%A4%9A%E6%B8%A0%E9%81%93%E6%8E%A5%E5%85%A5.md).
+</details>
+
 ## CLI
 
 <!-- demo-cli.gif (optional) goes here. After recording (see assets/RECORDING.md), uncomment the line below and delete this note. -->
@@ -331,6 +362,7 @@ milu setup           provider / API key / search backend wizard
 milu chat -p glm     chat with a specific provider
 milu run "..." -q    one-shot execution, pipe-friendly
 milu serve           multi-user web service + demo UI
+milu gateway         IM gateway (WeChat / Feishu / Telegram), auto-detects channels
 milu providers       list 9 providers and key status
 milu trace ...        inspect agent runs (list / show / compare / stats)
 milu config ...      layered config (CLI > user > project > defaults)
@@ -390,6 +422,8 @@ Python 3.10+ · fully async · every provider speaks through one `openai.AsyncOp
 - [ ] OTLP exporter for the tracing layer
 - [x] Pluggable sandbox backends for `python_repl` / `shell_command` (subprocess isolation **by default** — scrubs `*_API_KEY`, real timeout-kill, crash isolation, guarded-open; `local` for zero overhead; **`docker` for true isolation** — containerized, no host FS/network/secrets, mounts only the per-user workspace; opt-in, zero pip deps)
 - [x] Strict multi-user deployment profile (`multiuser=strict` bundles docker isolation + file-tool workspace jail + no-network in one switch; per-key overridable with startup warnings)
+- [x] Multi-channel IM gateway (WeChat Work / Feishu / Telegram over Ports & Adapters; `milu gateway`, inbound images & files, `/` commands with admin tiers)
+- [ ] Voice / audio message ingestion for the gateway (ASR transcription)
 - [ ] Pluggable ANN backends for the knowledge store (sqlite-vec) beyond brute-force cosine
 - [ ] English documentation set (architecture & guides — currently Chinese)
 - [ ] Prebuilt images on a container registry

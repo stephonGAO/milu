@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-25
+
+本版本以**多渠道接入网关（Gateway）**为主线：把 milu Agent 一行接到各 IM 平台（微信客服 / 飞书 / Telegram），采用 **Ports & Adapters（六边形）** 架构——平台无关的「接入核心」与每个平台的「适配器 Channel」解耦，新增平台 = 只写一个 Channel，共用同一个 AgentPool + 全配默认 + strict 隔离（兼容 0.4.x，无破坏性变更）。
+
+### 新增
+
+- **多渠道接入网关（`src/milu/channels/`，CLI `milu gateway`）**：见 `docs/Gateway 多渠道接入.md`。
+  - **核心契约**：`InboundMessage`/`OutboundMessage` + `Channel` ABC（webhook 型挂 `register` 路由 / polling 型跑 `run` 长轮询，两形态收敛到同一条 `dispatch` 契约）+ `AgentRunner`（接 milu 的唯一处：持 `AgentPool`，按 `渠道:用户` 派生隔离实例跑一轮取回复，替代早期手写 run.py 的 `on_text`）+ `Gateway` 编排（建 FastAPI、挂 webhook 路由、起 polling 后台任务、`/healthz`、生命周期）。
+  - **三渠道**：`WeChatKfChannel`（微信客服 webhook，含冷启动历史积压保护防刷屏限频）、`FeishuChannel`（飞书事件订阅 v2，内置 `FeishuCrypto` AES-256-CBC + `url_verification` 握手 + event_id 去重）、`FeishuWsChannel`（飞书**长连接**模式 `FEISHU_MODE=ws`，本地开发免公网回调/隧道，复用官方 lark-oapi ws 客户端，可选依赖 `milu[feishu-ws]`）、`TelegramChannel`（长轮询 getUpdates/sendMessage，`TELEGRAM_API_BASE` 可指代理/自建 Bot API）。
+  - **状态持久化 `StateStore`**：`FileStateStore` 落 `~/.milu/gateway/{channel}.json`（游标 + 去重 LRU，原子写 + 去抖刷盘），**重启不丢**（不重复回复、不漏拉/重放）；`InMemoryStateStore` 用于单测/默认回退。
+  - **图片 / 文件接入（`channels/media.py`）**：各渠道收到图片/文件类消息时用平台 API 下载（微信 `media/get` / 飞书 `messages/:id/resources` / Telegram `getFile`+`/file/bot…`），落到「该用户工作区下 `_incoming` 子目录」（与 agent_factory 同款 `channel:user_id` 派生工作区，使 strict 部署 `workspace_jail` 下文件工具仍可读）。图片走视觉物化（`agent.run(images=...)`），文件在消息尾追加统一「本条附件清单」引导模型用 doc_read/file_read 读取——并显式叮嘱模型别提保存位置等内部细节（避免「文件不在我工作区」之类的误导回复）。图片 10MB / 文件 30MB 上限、按 content-type/文件名推断扩展名、7 天自动清理；下载失败/超限整段不抛、只跳过该条。
+  - **`/` 命令（`channels/commands.py`）**：IM 消息以 `/` 开头时拦截为命令（不喂 LLM），命令集对齐 CLI/Web 但收敛为一问一答。**默认关闭**（CLI `--commands` 或 config `gateway.commands=true` 开启）。开启后**权限分层（面向公网陌生人）**：信息类（`/help /whoami /history /tools /skills /plan /memory /mode查看 /reset /compact /new /sessions`）对所有人；敏感类（`/mode 切换`含 superwork、`/prompt /load /save`）仅管理员——**防陌生人经 `/mode superwork` 提权关掉安全检查**；`/sessions` 只列调用者自己名下会话（防跨用户泄露）。管理员经环境变量 `GATEWAY_ADMINS` ∪ config `gateway.admins`。
+  - **CLI `milu gateway`**：按已配置凭证**自动探测启用**渠道（或 `--channel a,b`）。用自定义 agent_factory：每用户 Agent **工作区按 user_id 隔离** + sandbox/workspace_jail/knowledge/trace 从分层配置派生；`multiuser=strict` 自动套 docker + 工作区围栏（把「from_llm 默认工厂不自动套 strict」的生产坑堵进产品默认）。启动横幅打印渠道/回调路径/隔离状态/命令开关。
+
+- **配置 / 文档 / 示例**：config.json 新增 `gateway` 分节（`commands`/`admins`）；`.env.example` 补 3.5~3.8 节（微信客服 / 飞书 / Telegram / 网关管理员）与观测大屏 `MILU_ADMIN_TOKEN` 远程令牌说明；新增 `docs/Gateway 多渠道接入.md`、`docs/微信客服接入教程.md`；示例 `examples/gateway_multi_channel.py`。
+
+### 变更
+
+- **`cryptography` 提升为核心依赖**：webhook 渠道（微信客服 / 飞书）的回调加解密走 cryptography（体积约 12MB、各平台均有预编译 wheel），故进核心——`pip install milu` 即可用微信客服 / 飞书 webhook / Telegram，**无需任何额外 extra**。移除冗余的 `milu[wechat]`/`milu[feishu]`/`milu[gateway]` extra；唯一新增可选 extra 是 `milu[feishu-ws]`（飞书长连接本地开发模式所需的 lark-oapi，约 57MB）。
+
+### 修复
+
+- **飞书 webhook 对非消息回调误回 403**：飞书除消息事件外还会发其它回调（重复 URL 校验、非消息事件、v1.0 schema 等），对这些回非 2xx 会被飞书判为端点失败并反复重投。改为 token 不符 / 非目标事件一律 ack 200 后忽略。
+
 ## [0.4.0] - 2026-06-21
 
 本版本以**代码执行沙箱与多用户安全隔离**为主线（兼容 0.3.x，仅默认值变更见「变更」）：`python_repl` / `shell_command` 引入可插拔执行后端、默认升级为子进程隔离；新增 agent 工作区让产物落 `~/.milu/workspace`；新增文件工具工作区围栏；并以一键 `multiuser=strict` 部署策略打包 Docker 真隔离（容器化、断网、只挂各用户工作区），把"多人同时用也安全"做成一个开关。

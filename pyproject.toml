@@ -1,7 +1,7 @@
 [project]
 name = "milu"
-version = "0.4.0"
-description = "Unified AI agent framework: one interface for 9 LLM providers (Qwen, Kimi, GLM, DeepSeek, MiniMax, Doubao, ChatGPT, Gemini, Claude) with tools, MCP, sub-agents, skills, RAG knowledge base, scheduler and multi-user serving"
+version = "0.5.0"
+description = "Unified AI agent framework: one interface for 9 LLM providers (Qwen, Kimi, GLM, DeepSeek, MiniMax, Doubao, ChatGPT, Gemini, Claude) with tools, MCP, sub-agents, skills, RAG knowledge base, scheduler, multi-channel IM gateway (WeChat/Feishu/Telegram) and multi-user serving"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
