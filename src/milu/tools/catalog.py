@@ -115,3 +115,48 @@ def create_catalog_tools(registry: ToolRegistry) -> list:
         t._tool_wrapper.meta = True
 
     return tools
+
+
+def render_catalog_prompt(registry: ToolRegistry, per_group_limit: int = 12) -> str:
+    """渲染休眠（未激活）工具的能力清单，供注入 system prompt。
+
+    休眠池里的工具（主要是 MCP 工具）默认不进 LLM 工具列表，模型若不知道
+    它们的存在就不会去激活——本函数把"有哪些可激活的能力"按服务/分类分组、
+    紧凑列出工具**全名**，让模型知道有什么、需要时主动用 activate_tools 激活。
+    与技能"元数据常驻 prompt、正文按需 load_skill"同思路：这里只放工具全名
+    （省 token，全名保证可直接传给 activate_tools 命中），完整描述留给
+    list_catalog/search_tools 按需查询。
+
+    Args:
+        registry: 工具注册表
+        per_group_limit: 每个分组最多列出的工具名数量，超出显示 "…(+N)"
+                         （详情可经 list_catalog 查看），防止 prompt 膨胀
+
+    Returns:
+        Markdown 文本；无休眠工具时返回空串（如 mcp_tools_active_by_default
+        =True、或未配置 MCP），调用方据此决定是否注入。
+    """
+    tools = registry.list_dormant_tools()
+    if not tools:
+        return ""
+
+    # 按 category 分组（MCP 工具的 category 即服务器名，如 playwright/fetch）
+    grouped: dict[str, list[str]] = {}
+    for t in tools:
+        cat = t["category"] or "未分类"
+        grouped.setdefault(cat, []).append(t["name"])
+
+    lines = [
+        "\n\n## 可激活的外部工具（已连接但未激活）",
+        "以下能力已就绪但默认未加载，**需要时先用 `activate_tools` 激活对应工具"
+        "再调用**（也可用 `list_catalog`/`search_tools` 查看完整描述）：",
+    ]
+    for cat in sorted(grouped):
+        names = grouped[cat]
+        shown = names[:per_group_limit]
+        suffix = (
+            f" …(+{len(names) - per_group_limit})"
+            if len(names) > per_group_limit else ""
+        )
+        lines.append(f"- **{cat}**（{len(names)} 个）：{', '.join(shown)}{suffix}")
+    return "\n".join(lines)

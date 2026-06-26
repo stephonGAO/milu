@@ -1,7 +1,7 @@
 """测试工具目录元工具 (catalog.py)"""
 import pytest
 from milu.tools import ToolRegistry, ToolWrapper
-from milu.tools.catalog import create_catalog_tools
+from milu.tools.catalog import create_catalog_tools, render_catalog_prompt
 
 
 def _make_wrapper(name: str, description: str = "") -> ToolWrapper:
@@ -250,6 +250,49 @@ class TestMetaToolsSchema:
 
         assert "fetch__html" in names
         assert "figma__create_file" not in names  # 未激活的仍不在
+
+
+class TestRenderCatalogPrompt:
+    """render_catalog_prompt：把休眠工具清单渲染进 system prompt"""
+
+    def test_renders_grouped_with_full_names(self, registry):
+        """按分类分组、列出工具全名（保证可直接 activate_tools 激活）"""
+        text = render_catalog_prompt(registry)
+        # 分组标题
+        assert "fetch" in text
+        assert "figma" in text
+        # 工具全名（带 server__ 前缀，模型据此激活才能命中休眠池）
+        assert "fetch__html" in text
+        assert "figma__create_file" in text
+        # 数量与激活引导
+        assert "（3 个）" in text  # fetch 3 个
+        assert "（2 个）" in text  # figma 2 个
+        assert "activate_tools" in text
+
+    def test_empty_when_no_dormant(self):
+        """无休眠工具时返回空串（如 mcp_tools_active_by_default=True / 无 MCP）"""
+        reg = ToolRegistry()
+        reg.register_many(create_catalog_tools(reg))  # 元工具在活跃池，不算休眠
+        assert render_catalog_prompt(reg) == ""
+
+    def test_empty_after_all_activated(self, registry):
+        """全部激活后不再渲染（清单只反映尚未激活的）"""
+        for name in list(registry.list_dormant_names()):
+            registry.activate(name)
+        assert render_catalog_prompt(registry) == ""
+
+    def test_per_group_limit_truncates(self):
+        """单组工具过多时截断显示 …(+N)，防 prompt 膨胀"""
+        reg = ToolRegistry()
+        for i in range(20):
+            reg.register_dormant(
+                _make_wrapper(f"big__tool_{i}", f"工具 {i}"), category="big"
+            )
+        text = render_catalog_prompt(reg, per_group_limit=12)
+        assert "（20 个）" in text
+        assert "…(+8)" in text          # 20 - 12 = 8 个未列出
+        assert "big__tool_0" in text     # 前 12 个里有
+        assert "big__tool_19" not in text  # 被截断的不出现
 
 
 class TestEndToEndFlow:

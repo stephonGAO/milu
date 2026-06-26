@@ -697,6 +697,7 @@ class Agent:
         1. PromptBuilder 输出（prompt_dir 指定的文件目录）
         2. system_prompt 字符串（向后兼容的内联提示词）
         3. 技能目录元数据
+        3.5 可激活的休眠工具清单（主要是未激活的 MCP 工具）
         4. 知识库来源目录 + 检索路由规则（启用 knowledge 时）
         5. 长期记忆条目（启用 memory 时，固定在最后）
         """
@@ -720,6 +721,15 @@ class Agent:
         skill_catalog = self._skill_registry.describe_available()
         if skill_catalog:
             parts.append(f"\n\n## 可用技能\n{skill_catalog}")
+
+        # 3.5 可激活的休眠工具清单（主要是未激活的 MCP 工具）。休眠工具默认
+        #     不进 LLM 工具列表，模型不知道它们存在就不会激活——这里把"有哪些
+        #     能力可激活"按服务分组紧凑列出（只放工具名省 token），需要时模型
+        #     主动 activate_tools 激活。无休眠工具时返回空串，零侵入。
+        from milu.tools.catalog import render_catalog_prompt
+        catalog_hint = render_catalog_prompt(self._registry)
+        if catalog_hint:
+            parts.append(catalog_hint)
 
         # 4. 知识库来源目录 + 检索路由规则（启用时每轮渲染；模型知道库里
         #    有什么才会主动 kb_search——经 mtime 缓存，文件未变不读盘）；
