@@ -5,9 +5,11 @@ Docker 后端本版本未实现（build_backend 对 "docker" 抛错），相关�
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import sys
+import time
 
 import pytest
 
@@ -363,3 +365,74 @@ class TestBackendContract:
     def test_exec_result_defaults(self):
         r = ExecResult()
         assert r.stdout == "" and r.stderr == "" and r.exit_code == 0 and r.timed_out is False
+
+
+# ── 超时连根杀进程树（回归：修复「只杀直接子进程、孙进程成孤儿继续跑」的 bug）──
+class TestTimeoutKillsProcessTree:
+    """复现并守护真实 bug：`npx playwright install` 这类 shell→npx→node 多层进程，
+    原实现超时只 proc.kill() 直接子进程，留下孙进程继续下载、且不关管道导致父侧读管道
+    永不 EOF，工具级 timeout 形同虚设、只能靠 Agent 总超时(3600s)兜底。现验证：超时会
+    连根杀整棵进程树、孙进程确实死亡、且 run_shell 远在总超时前返回。"""
+
+    @pytest.mark.parametrize(
+        "make_backend",
+        [
+            lambda: LocalBackend(SandboxConfig(backend="local")),
+            lambda: SubprocessBackend(SandboxConfig(backend="subprocess")),
+        ],
+        ids=["local", "subprocess"],
+    )
+    async def test_shell_timeout_kills_grandchild(self, make_backend, tmp_path):
+        from milu.scheduler.lock import pid_alive
+
+        pidfile = tmp_path / "gc.pid"
+        pidpath = str(pidfile).replace("\\", "/")
+        # 孙进程：一启动就写下自己的 PID，然后长睡 30s（模拟一直在跑的 node 下载）。
+        script = tmp_path / "gc.py"
+        script.write_text(
+            "import os, time\n"
+            f"open(r'{pidpath}', 'w').write(str(os.getpid()))\n"
+            "time.sleep(30)\n",
+            encoding="utf-8",
+        )
+        py = sys.executable
+        if sys.platform == "win32":
+            # cmd /c 下 python 是 cmd.exe 的子进程 = milu 的孙进程
+            cmd = f'"{py}" "{script}"'
+        else:
+            # 尾随 ; true 阻止 sh 把单命令 exec 优化掉 → python 确为孙进程
+            cmd = f'"{py}" "{script}" ; true'
+
+        b = make_backend()
+        started = time.monotonic()
+        res = await b.run_shell(cmd, timeout=2)
+        elapsed = time.monotonic() - started
+
+        # ① 正确判定为超时；② 远在「总超时」前返回（不再卡到天荒地老）
+        assert res.timed_out is True
+        assert elapsed < 20, f"超时未及时返回，耗时 {elapsed:.1f}s（旧 bug 会一直卡住）"
+
+        # 孙进程启动即写 PID；超时被杀前应已写出
+        assert pidfile.exists(), "孙进程未写出 PID，测试前提不成立"
+        gc_pid = int(pidfile.read_text().strip())
+
+        # 给 OS 回收进程一点点时间，再断言孙进程已死（核心：进程树被连根杀掉）
+        for _ in range(20):
+            if not pid_alive(gc_pid):
+                break
+            await asyncio.sleep(0.1)
+        try:
+            assert not pid_alive(gc_pid), (
+                f"孙进程 PID {gc_pid} 超时后仍存活：进程树未被连根杀掉（孤儿泄漏）"
+            )
+        finally:
+            # 防御：万一断言失败（孤儿存活），别把这个 sleep(30) 进程留给后续测试
+            if pid_alive(gc_pid):
+                import signal
+                try:
+                    if sys.platform == "win32":
+                        os.kill(gc_pid, signal.SIGTERM)
+                    else:
+                        os.kill(gc_pid, signal.SIGKILL)
+                except Exception:
+                    pass

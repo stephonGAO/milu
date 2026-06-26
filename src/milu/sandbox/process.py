@@ -27,6 +27,7 @@ import sys
 import tempfile
 
 from milu.sandbox.base import ExecResult, SandboxBackend
+from milu.sandbox._proc import communicate_or_kill
 from milu.tools._selfguard import get_protected_paths
 from milu.resources import current_workspace
 
@@ -156,24 +157,17 @@ class SubprocessBackend(SandboxBackend):
 
         return _set_limits
 
-    # ── 通用收发：喂 stdin、超时真杀、解码 ──────────────────────
+    # ── 通用收发：喂 stdin、超时连根杀进程树、解码 ──────────────
     async def _communicate(self, proc, stdin_data: str | None, timeout: int) -> ExecResult:
+        # 超时不再只 proc.kill()（仅杀直接子进程，会留下 npx/node 等孤儿孙进程且不关管道），
+        # 改用 communicate_or_kill：到点连根杀整棵进程树再回收残余输出（见 _proc.py）。
         data = stdin_data.encode("utf-8") if stdin_data is not None else None
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=data), timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            try:
-                await proc.wait()
-            except Exception:
-                pass
-            return ExecResult(exit_code=None, timed_out=True)
+        stdout, stderr, timed_out = await communicate_or_kill(proc, data, timeout)
         return ExecResult(
             stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
             stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
-            exit_code=proc.returncode,
+            exit_code=None if timed_out else proc.returncode,
+            timed_out=timed_out,
         )
 
     def _spawn_kwargs(self, cwd: str) -> dict:
@@ -183,6 +177,10 @@ class SubprocessBackend(SandboxBackend):
             "cwd": cwd,
             "env": self._make_env(),
         }
+        # POSIX：子进程自成新会话/进程组，超时时可整组 killpg 连根清理孙进程。
+        # Windows 无此语义，靠 taskkill /T 按 PID 树清理（见 _proc.terminate_process_tree）。
+        if sys.platform != "win32":
+            kwargs["start_new_session"] = True
         preexec = self._make_preexec()
         if preexec is not None:
             kwargs["preexec_fn"] = preexec

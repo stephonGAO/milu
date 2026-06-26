@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import sys
 import traceback
 from contextlib import redirect_stdout
 
 from milu.sandbox.base import ExecResult, SandboxBackend
+from milu.sandbox._proc import communicate_or_kill
 from milu.tools._selfguard import is_protected_path
 from milu.resources import current_workspace
 
@@ -94,25 +96,24 @@ class LocalBackend(SandboxBackend):
         cwd = self.config.workdir or current_workspace()
         if cwd:
             os.makedirs(cwd, exist_ok=True)
+        # POSIX：子进程自成进程组，超时时整组 killpg 连根杀孙进程；Windows 走 taskkill /T。
+        spawn_kwargs: dict = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": cwd,
+        }
+        if sys.platform != "win32":
+            spawn_kwargs["start_new_session"] = True
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-            )
+            proc = await asyncio.create_subprocess_shell(command, **spawn_kwargs)
         except Exception as e:
             return ExecResult(stderr=f"命令启动失败: {e}", exit_code=None)
 
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=t)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            return ExecResult(exit_code=None, timed_out=True)
-
+        # 超时连根杀进程树再回收残余输出（替代原 proc.kill() 只杀直接子进程，见 _proc.py）。
+        stdout, stderr, timed_out = await communicate_or_kill(proc, None, t)
         return ExecResult(
             stdout=stdout.decode("utf-8", errors="replace") if stdout else "",
             stderr=stderr.decode("utf-8", errors="replace") if stderr else "",
-            exit_code=proc.returncode,
+            exit_code=None if timed_out else proc.returncode,
+            timed_out=timed_out,
         )
