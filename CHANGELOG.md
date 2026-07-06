@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-06
+
+本版本为**维护性补丁**（兼容 0.5.x，无破坏性变更）：让已连接但未激活的 MCP 工具在系统提示词中可见，并修复代码执行超时时残留孤儿进程树的 bug。
+
+### 新增
+
+- **休眠 MCP 工具在系统提示词中可见**（`render_catalog_prompt`，`tools/catalog.py`）：休眠池里的 MCP 工具默认不注入 LLM 工具列表，模型不知道它们存在就不会用 `activate_tools` 激活——等于「有能力却隐形」。现每轮重建 system prompt 时（「可用技能」之后）按服务/分类分组、紧凑列出休眠工具**全名**（只放工具名省 token，全名保证可直接传给 `activate_tools` 命中；完整描述仍留给 `list_catalog`/`search_tools` 按需查询）；每组超 12 个截断显示 `…(+N)` 防 prompt 膨胀。无休眠工具（`mcp_tools_active_by_default=True` / 未配 MCP）返回空串，对裸 Agent 与单测 hermetic 零侵入。
+
+### 修复
+
+- **代码执行超时残留孤儿进程树**（`sandbox/_proc.py`，`local`/`subprocess` 双后端）：`shell_command` / `python_repl` 的实际进程链常是 `shell → npx → node → …` 多层，原超时只 `proc.kill()` **仅杀直接子进程**，留下一串孤儿孙进程继续运行（如 `playwright install` 一直在下载）；更糟的是孤儿继承的 stdout/stderr 管道写端不关闭，使父侧 `communicate()` 永远等不到 EOF，而 `asyncio.wait_for` 到点取消 `communicate()` 在 Windows Proactor 事件循环下会**卡死**、连超时分支都进不去——工具级 timeout 形同虚设，只能靠 Agent 总超时（默认 3600s）兜底。两条修复缺一不可：① 杀**进程树**而非单个进程（Windows `taskkill /F /T`、POSIX 子进程 `start_new_session=True` 自成进程组后 `killpg` 整组清理）；② 超时**不靠取消** `communicate()`，改用 `asyncio.wait`（到点只返回、不取消任务）先杀树关管道、再回收残余输出。新增 local/subprocess 双后端回归测试（孙进程超时后确被杀、且远在总超时前返回）。
+
+### 工程
+
+- `.gitignore` 忽略 Playwright MCP 运行时输出目录，避免其临时产物混入工作树。
+
 ## [0.5.0] - 2026-06-25
 
 本版本以**多渠道接入网关（Gateway）**为主线：把 milu Agent 一行接到各 IM 平台（微信客服 / 飞书 / Telegram），采用 **Ports & Adapters（六边形）** 架构——平台无关的「接入核心」与每个平台的「适配器 Channel」解耦，新增平台 = 只写一个 Channel，共用同一个 AgentPool + 全配默认 + strict 隔离（兼容 0.4.x，无破坏性变更）。
