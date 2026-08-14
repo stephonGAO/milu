@@ -1103,6 +1103,8 @@ class Agent:
                     _CONNECTION_ERROR_KEYWORDS = [
                         "incomplete chunked", "peer closed", "connection reset",
                         "broken pipe", "remote end closed", "connection aborted",
+                        "request timed out", "read timeout", "readtimeout",
+                        "connect timeout", "connecttimeout", "connection timeout",
                     ]
                     is_conn_error = any(kw in error_str for kw in _CONNECTION_ERROR_KEYWORDS)
                     if is_conn_error:

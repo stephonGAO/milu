@@ -245,6 +245,40 @@ async def test_rate_limit_retry(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_provider_stream_timeout_retry(monkeypatch):
+    """Provider 包装后的网络读取超时应重试当前轮，不应直接终止 Agent。"""
+    from milu.llm.base.exceptions import StreamError
+
+    call_count = 0
+
+    async def mock_chat(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise StreamError("Qwen 流式调用异常: Request timed out.")
+        yield StreamChunk(content="超时后恢复", finish_reason="stop")
+
+    slept = []
+
+    async def fake_sleep(delay):
+        slept.append(delay)
+
+    monkeypatch.setattr("milu.agent.agent.asyncio.sleep", fake_sleep)
+
+    llm = AsyncMock()
+    llm.chat = mock_chat
+    agent = Agent(llm=llm, system_prompt="你是助手")
+
+    events = [event async for event in agent.run("继续")]
+
+    assert call_count == 2
+    assert slept == [2]
+    assert not any(isinstance(event, AgentError) for event in events)
+    done = next(event for event in events if isinstance(event, AgentDone))
+    assert done.final_text == "超时后恢复"
+
+
+@pytest.mark.asyncio
 async def test_tool_call_preparing_event(simple_tool):
     """参数流式生成期发出 ToolCallPreparing：每个调用仅一次、先于 ToolCallStart。
 

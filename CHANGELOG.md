@@ -12,6 +12,8 @@
   系统代理和 TLS 初始化。依赖范围同步收紧为 `mcp>=1.8.0,<2`。
 - **MCP 结构化结果重复**：FastMCP 同时返回等价 JSON 文本与 `structuredContent` 时只保留
   一份，避免产生无法直接解析的相邻 JSON，并减少 Agent 上下文占用。
+- **Provider 流式读取超时**：将 request/read/connect timeout 视为瞬时连接故障，沿用
+  现有指数退避逻辑重试当前 LLM 调用，而不是立即终止 Agent。
 
 ### 性能
 
