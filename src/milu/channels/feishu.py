@@ -117,11 +117,21 @@ class FeishuClient:
         self, config: FeishuConfig, http: httpx.AsyncClient | None = None
     ) -> None:
         self.config = config
-        self._http = http or httpx.AsyncClient(timeout=15)
+        self._http = http
         self._owns_http = http is None
+        self._http_lock = asyncio.Lock()
         self._token = ""
         self._token_expire = 0.0
         self._token_lock = asyncio.Lock()
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        """按需在线程中创建客户端，避免 TLS 初始化阻塞事件循环。"""
+        if self._http is not None:
+            return self._http
+        async with self._http_lock:
+            if self._http is None:
+                self._http = await asyncio.to_thread(httpx.AsyncClient, timeout=15)
+            return self._http
 
     async def tenant_token(self) -> str:
         if self._token and time.time() < self._token_expire - 60:
@@ -129,7 +139,8 @@ class FeishuClient:
         async with self._token_lock:
             if self._token and time.time() < self._token_expire - 60:
                 return self._token
-            r = await self._http.post(
+            http = await self._get_http()
+            r = await http.post(
                 f"{self.config.api_base}/open-apis/auth/v3/tenant_access_token/internal",
                 json={
                     "app_id": self.config.app_id,
@@ -145,7 +156,8 @@ class FeishuClient:
 
     async def send_text(self, open_id: str, text: str) -> dict:
         token = await self.tenant_token()
-        r = await self._http.post(
+        http = await self._get_http()
+        r = await http.post(
             f"{self.config.api_base}/open-apis/im/v1/messages",
             params={"receive_id_type": "open_id"},
             headers={"Authorization": f"Bearer {token}"},
@@ -165,7 +177,8 @@ class FeishuClient:
         返回 (二进制内容, content_type)；失败（返回 JSON 错误）时抛异常。
         """
         token = await self.tenant_token()
-        r = await self._http.get(
+        http = await self._get_http()
+        r = await http.get(
             f"{self.config.api_base}/open-apis/im/v1/messages/{message_id}"
             f"/resources/{file_key}",
             params={"type": resource_type},
@@ -177,7 +190,7 @@ class FeishuClient:
         return r.content, ct
 
     async def aclose(self) -> None:
-        if self._owns_http:
+        if self._owns_http and self._http is not None:
             await self._http.aclose()
 
 

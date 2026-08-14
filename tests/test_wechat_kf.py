@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -47,6 +47,21 @@ def _config() -> WeChatKfConfig:
         encoding_aes_key=_AESKEY,
         callback_path="/wechat/kf/callback",
     )
+
+
+async def test_client_defers_http_initialization():
+    http = AsyncMock(spec=httpx.AsyncClient)
+    with patch("milu.channels.wechat_kf.httpx.AsyncClient", return_value=http) as factory:
+        client = WeChatKfClient(_config())
+        factory.assert_not_called()
+
+        first, second = await asyncio.gather(client._get_http(), client._get_http())
+        assert first is http
+        assert second is http
+        factory.assert_called_once_with(timeout=15)
+
+        await client.aclose()
+        http.aclose.assert_awaited_once()
 
 
 # ── 1. 加解密 ──────────────────────────────────────────────────────────

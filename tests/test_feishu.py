@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -30,6 +31,21 @@ def _config(encrypt: bool = True) -> FeishuConfig:
         encrypt_key=_ENCRYPT_KEY if encrypt else "",
         callback_path="/feishu/event",
     )
+
+
+async def test_client_defers_http_initialization():
+    http = AsyncMock(spec=httpx.AsyncClient)
+    with patch("milu.channels.feishu.httpx.AsyncClient", return_value=http) as factory:
+        client = FeishuClient(_config())
+        factory.assert_not_called()
+
+        first, second = await asyncio.gather(client._get_http(), client._get_http())
+        assert first is http
+        assert second is http
+        factory.assert_called_once_with(timeout=15)
+
+        await client.aclose()
+        http.aclose.assert_awaited_once()
 
 
 def _text_event(event_id: str, open_id: str, text: str) -> dict:

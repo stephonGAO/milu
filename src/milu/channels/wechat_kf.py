@@ -105,8 +105,9 @@ class WeChatKfClient:
         http: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
-        self._http = http or httpx.AsyncClient(timeout=15)
+        self._http = http
         self._owns_http = http is None
+        self._http_lock = asyncio.Lock()
         self._token = ""
         self._token_expire = 0.0
         self._token_lock = asyncio.Lock()
@@ -115,6 +116,15 @@ class WeChatKfClient:
         # msgid 去重：用 OrderedDict 当有界 LRU，防内存无限增长
         self._seen_msgids: "OrderedDict[str, None]" = OrderedDict()
 
+    async def _get_http(self) -> httpx.AsyncClient:
+        """按需在线程中创建客户端，避免 TLS 初始化阻塞事件循环。"""
+        if self._http is not None:
+            return self._http
+        async with self._http_lock:
+            if self._http is None:
+                self._http = await asyncio.to_thread(httpx.AsyncClient, timeout=15)
+            return self._http
+
     # access_token：7200s 有效，带双重检查锁缓存复用
     async def access_token(self) -> str:
         if self._token and time.time() < self._token_expire - 60:
@@ -122,7 +132,8 @@ class WeChatKfClient:
         async with self._token_lock:
             if self._token and time.time() < self._token_expire - 60:
                 return self._token
-            r = await self._http.get(
+            http = await self._get_http()
+            r = await http.get(
                 f"{_QYAPI}/gettoken",
                 params={"corpid": self.config.corp_id, "corpsecret": self.config.secret},
             )
@@ -146,7 +157,8 @@ class WeChatKfClient:
         cur = cursor
         while has_more:
             at = await self.access_token()
-            r = await self._http.post(
+            http = await self._get_http()
+            r = await http.post(
                 f"{_QYAPI}/kf/sync_msg",
                 params={"access_token": at},
                 json={
@@ -186,7 +198,8 @@ class WeChatKfClient:
         from .media import filename_from_disposition
 
         at = await self.access_token()
-        r = await self._http.get(
+        http = await self._get_http()
+        r = await http.get(
             f"{_QYAPI}/media/get",
             params={"access_token": at, "media_id": media_id},
         )
@@ -199,7 +212,8 @@ class WeChatKfClient:
     async def send_text(self, touser: str, open_kfid: str, content: str) -> dict:
         """发送文本消息给指定用户（48 小时会话窗口内有效）。"""
         at = await self.access_token()
-        r = await self._http.post(
+        http = await self._get_http()
+        r = await http.post(
             f"{_QYAPI}/kf/send_msg",
             params={"access_token": at},
             json={
@@ -225,7 +239,7 @@ class WeChatKfClient:
         return False
 
     async def aclose(self) -> None:
-        if self._owns_http:
+        if self._owns_http and self._http is not None:
             await self._http.aclose()
 
 

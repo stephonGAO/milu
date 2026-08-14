@@ -63,9 +63,21 @@ class TelegramChannel(Channel):
     ) -> None:
         self._config = config
         # 读超时须大于长轮询挂起时间，否则每轮都被客户端超时打断
-        self._http = http or httpx.AsyncClient(timeout=config.poll_timeout + 15)
+        self._http = http
         self._owns_http = http is None
+        self._http_lock = asyncio.Lock()
         self._state = state or InMemoryStateStore(dedup_capacity=config.dedup_capacity)
+
+    async def _get_http(self) -> httpx.AsyncClient:
+        """按需在线程中创建客户端，避免 TLS 初始化阻塞事件循环。"""
+        if self._http is not None:
+            return self._http
+        async with self._http_lock:
+            if self._http is None:
+                self._http = await asyncio.to_thread(
+                    httpx.AsyncClient, timeout=self._config.poll_timeout + 15
+                )
+            return self._http
 
     @property
     def name(self) -> str:
@@ -163,7 +175,8 @@ class TelegramChannel(Channel):
                 await self._state.set_cursor(self.name, "offset", str(offset))
 
     async def _get_updates(self, offset: int) -> list[dict]:
-        r = await self._http.get(
+        http = await self._get_http()
+        r = await http.get(
             self._url("getUpdates"),
             params={"offset": offset, "timeout": self._config.poll_timeout},
         )
@@ -173,7 +186,8 @@ class TelegramChannel(Channel):
         return data.get("result", [])
 
     async def _send(self, chat_id, text: str) -> dict:
-        r = await self._http.post(
+        http = await self._get_http()
+        r = await http.post(
             self._url("sendMessage"),
             json={"chat_id": chat_id, "text": text},
         )
@@ -182,7 +196,8 @@ class TelegramChannel(Channel):
     # ── 媒体下载（图片）────────────────────────────────────────────────
     async def _file_path(self, file_id: str) -> str | None:
         """getFile：把 file_id 换成服务端相对路径 file_path（再凭它下载）。"""
-        r = await self._http.get(self._url("getFile"), params={"file_id": file_id})
+        http = await self._get_http()
+        r = await http.get(self._url("getFile"), params={"file_id": file_id})
         data = r.json()
         if not data.get("ok"):
             return None
@@ -191,7 +206,8 @@ class TelegramChannel(Channel):
     async def _download(self, file_path: str) -> bytes:
         """下载文件：注意走 /file/bot<token>/<file_path>，与 API 方法路径不同。"""
         url = f"{self._config.api_base}/file/bot{self._config.bot_token}/{file_path}"
-        r = await self._http.get(url)
+        http = await self._get_http()
+        r = await http.get(url)
         return r.content
 
     async def _save_image(
@@ -232,6 +248,6 @@ class TelegramChannel(Channel):
         return save_file(self.name, user_id, data, filename=filename or fp)
 
     async def close(self) -> None:
-        if self._owns_http:
+        if self._owns_http and self._http is not None:
             await self._http.aclose()
         await self._state.close()

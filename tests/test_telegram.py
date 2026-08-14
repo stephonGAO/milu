@@ -9,12 +9,29 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock, patch
 
 import httpx
 
 from milu.channels.base import InboundMessage, OutboundMessage
 from milu.channels.state import FileStateStore, InMemoryStateStore
 from milu.channels.telegram import TelegramChannel, TelegramConfig
+
+
+async def test_channel_defers_http_initialization():
+    http = AsyncMock(spec=httpx.AsyncClient)
+    config = TelegramConfig(bot_token="t", poll_timeout=10)
+    with patch("milu.channels.telegram.httpx.AsyncClient", return_value=http) as factory:
+        channel = TelegramChannel(config)
+        factory.assert_not_called()
+
+        first, second = await asyncio.gather(channel._get_http(), channel._get_http())
+        assert first is http
+        assert second is http
+        factory.assert_called_once_with(timeout=25)
+
+        await channel.close()
+        http.aclose.assert_awaited_once()
 
 
 def _update(uid: int, chat_id: int, text: str) -> dict:
