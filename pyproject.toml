@@ -1,6 +1,6 @@
 [project]
 name = "milu"
-version = "0.5.1"
+version = "0.5.2"
 description = "Unified AI agent framework: one interface for 9 LLM providers (Qwen, Kimi, GLM, DeepSeek, MiniMax, Doubao, ChatGPT, Gemini, Claude) with tools, MCP, sub-agents, skills, RAG knowledge base, scheduler, multi-channel IM gateway (WeChat/Feishu/Telegram) and multi-user serving"
 readme = "README.md"
 license = "MIT"
@@ -92,7 +92,7 @@ Changelog = "https://github.com/stephonGAO/milu/blob/main/CHANGELOG.md"
 milu = "milu.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<1.30"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

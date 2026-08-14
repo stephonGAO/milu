@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-08-14
+
+本版本为 0.5.x 兼容的维护性补丁，重点修复 MCP Streamable HTTP 的连接与清理，
+并改善网络初始化和 Provider 瞬时超时下的稳定性。
+
 ### 修复
 
 - **MCP Streamable HTTP 连接与清理**：按 mcp 1.x 的实际签名分别调用新旧 HTTP API，
@@ -19,6 +24,13 @@
 
 - **异步网络工具初始化**：`http_request`、`web_fetch` 及 HTTP 搜索后端在线程中构造
   `httpx.AsyncClient`，避免读取系统代理和证书配置时阻塞事件循环。
+- **消息渠道网络初始化**：企业微信、飞书和 Telegram 客户端改为按需在线程中创建
+  `httpx.AsyncClient`，避免渠道构造阶段阻塞事件循环，并确保并发首次使用只创建一个实例。
+
+### 工程
+
+- 新增 `AGENTS.md`，统一仓库结构、测试、编码、提交与安全约定。
+- 将 Hatchling 限制在兼容版本线，保持发布包使用当前 Twine 可校验的 Core Metadata 2.4。
 
 ## [0.5.1] - 2026-07-06
 
