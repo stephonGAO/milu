@@ -10,6 +10,8 @@
   正确传递 headers 并关闭外部 HTTP client；连接上下文改由长期 owner task 在同一 task
   内进入和退出，工具发现失败或取消时也会释放已建立的连接。本机明文 HTTP 连接跳过
   系统代理和 TLS 初始化。依赖范围同步收紧为 `mcp>=1.8.0,<2`。
+- **MCP 结构化结果重复**：FastMCP 同时返回等价 JSON 文本与 `structuredContent` 时只保留
+  一份，避免产生无法直接解析的相邻 JSON，并减少 Agent 上下文占用。
 
 ## [0.5.1] - 2026-07-06
 

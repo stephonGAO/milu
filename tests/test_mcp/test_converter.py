@@ -135,6 +135,22 @@ class TestConvertResult:
         parsed = json.loads(output)
         assert parsed == {"key": "value", "count": 42}
 
+    def test_duplicate_json_text_and_structured_content_is_emitted_once(self):
+        """FastMCP 同时返回文本 JSON 与 structuredContent 时不得重复拼接。"""
+        payload = {"key": "value", "items": [1, 2]}
+        text = MagicMock()
+        text.__class__.__name__ = "TextContent"
+        text.text = json.dumps(payload, ensure_ascii=False, indent=2)
+
+        result = MagicMock()
+        result.content = [text]
+        result.isError = False
+        result.structuredContent = payload
+
+        output = _convert_result(result)
+        assert json.loads(output) == payload
+        assert output.count('"key"') == 1
+
     def test_error_result(self):
         text = MagicMock()
         text.__class__.__name__ = "TextContent"

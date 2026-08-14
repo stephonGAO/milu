@@ -94,10 +94,21 @@ def _convert_result(result: Any) -> str:
             # 未知类型，尝试转字符串
             parts.append(str(block))
 
-    # 处理 structuredContent
+    # 新版 FastMCP 常同时返回一个 JSON TextContent 和语义完全相同的
+    # structuredContent。直接拼接会得到两个相邻 JSON（无法再 json.loads），
+    # 也会把 Agent 上下文无谓放大一倍；只在文本内容尚未包含同一对象时追加。
     structured = getattr(result, "structuredContent", None)
     if structured is not None:
-        parts.append(json.dumps(structured, ensure_ascii=False, indent=2))
+        duplicated = False
+        for part in parts:
+            try:
+                if json.loads(part) == structured:
+                    duplicated = True
+                    break
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if not duplicated:
+            parts.append(json.dumps(structured, ensure_ascii=False, indent=2))
 
     # 组合结果
     output = "\n".join(parts) if parts else ""
