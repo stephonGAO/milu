@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 
@@ -64,9 +65,13 @@ async def web_fetch(url: str, max_chars: int = 20000) -> str:
         return "错误：仅支持 http/https URL"
 
     try:
-        async with httpx.AsyncClient(
-            follow_redirects=True, timeout=30.0, headers={"User-Agent": _UA},
-        ) as client:
+        client = await asyncio.to_thread(
+            httpx.AsyncClient,
+            follow_redirects=True,
+            timeout=30.0,
+            headers={"User-Agent": _UA},
+        )
+        async with client:
             resp = await client.get(url)
     except httpx.HTTPError as e:
         return f"抓取失败: {e}"

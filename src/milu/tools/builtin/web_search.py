@@ -80,7 +80,10 @@ async def web_search(query: str, num_results: int = 5) -> str:
     try:
         # 1. 自定义通用搜索 API（向后兼容，优先级最高）
         if custom_api_url and custom_api_key:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            client = await asyncio.to_thread(
+                httpx.AsyncClient, timeout=15, follow_redirects=True
+            )
+            async with client:
                 return await _custom_search(client, custom_api_url, custom_api_key, query, num_results)
 
         # 2. 命名 provider（配置了 provider 却缺 Key 视为配置错误，明确报错不静默回退）
@@ -88,14 +91,16 @@ async def web_search(query: str, num_results: int = 5) -> str:
             key = os.environ.get("TAVILY_API_KEY")
             if not key:
                 return "错误: WEB_SEARCH_PROVIDER=tavily 但未配置 TAVILY_API_KEY"
-            async with httpx.AsyncClient(timeout=15) as client:
+            client = await asyncio.to_thread(httpx.AsyncClient, timeout=15)
+            async with client:
                 return await _search_tavily(client, key, query, num_results)
 
         if provider == "bocha":
             key = os.environ.get("BOCHA_API_KEY")
             if not key:
                 return "错误: WEB_SEARCH_PROVIDER=bocha 但未配置 BOCHA_API_KEY"
-            async with httpx.AsyncClient(timeout=15) as client:
+            client = await asyncio.to_thread(httpx.AsyncClient, timeout=15)
+            async with client:
                 return await _search_bocha(client, key, query, num_results)
 
         # 3. 默认 DuckDuckGo

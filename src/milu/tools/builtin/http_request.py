@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Literal, Optional
 
@@ -41,7 +42,10 @@ async def http_request(
             except json.JSONDecodeError:
                 return f"错误: headers 参数不是有效的 JSON: {headers}"
 
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        client = await asyncio.to_thread(
+            httpx.AsyncClient, timeout=timeout, follow_redirects=True
+        )
+        async with client:
             response = await client.request(
                 method=method,
                 url=url,
