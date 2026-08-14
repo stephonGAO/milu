@@ -47,7 +47,7 @@ dependencies = [
     "uvicorn>=0.27.0",
     "sse-starlette>=2.0.0",
     # MCP 协议（连接外部 MCP 服务器）：与 serve 依赖大量重叠，净增很小，故进核心
-    "mcp>=1.0.0",
+    "mcp>=1.8.0,<2",
     # 多渠道网关 webhook 渠道（微信客服 / 飞书）回调消息 AES-256-CBC 加解密。
     # 体积小（约 12MB 含 cffi/pycparser）、各平台均有预编译 wheel，且撑起两个生产渠道，
     # 故进核心——webhook 渠道开箱即用（milu gateway 零额外安装）。

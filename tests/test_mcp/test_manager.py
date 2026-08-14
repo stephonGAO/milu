@@ -1,4 +1,5 @@
 """测试 MCPManager 多服务器编排"""
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -109,6 +110,55 @@ class TestMCPManager:
             manager = MCPManager(configs)
             with pytest.raises(ConnectionError, match="所有 MCP 服务器连接失败"):
                 await manager.connect_all()
+
+    @pytest.mark.asyncio
+    async def test_discovery_failure_disconnects_established_connection(self):
+        """工具发现失败时也必须关闭已建立的连接。"""
+        config = MCPServerConfig.stdio(name="broken", command="echo")
+
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
+            conn = AsyncMock()
+            conn.name = "broken"
+            conn.connect = AsyncMock()
+            conn.discover_tools = AsyncMock(side_effect=RuntimeError("bad tool list"))
+            conn.disconnect = AsyncMock()
+            MockConn.return_value = conn
+
+            manager = MCPManager([config])
+            with pytest.raises(ConnectionError, match="所有 MCP 服务器连接失败"):
+                await manager.connect_all()
+
+            conn.disconnect.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_connection_propagates_and_closes_successes(self):
+        """单个连接被取消时应传播取消，并关闭同期已建立的连接。"""
+        configs = [
+            MCPServerConfig.stdio(name="cancelled", command="echo"),
+            MCPServerConfig.stdio(name="ready", command="echo"),
+        ]
+        tool = _make_mock_tool("ready__tool")
+
+        with patch("milu.tools.mcp.manager.MCPServerConnection") as MockConn:
+            cancelled = AsyncMock()
+            cancelled.name = "cancelled"
+            cancelled.connect = AsyncMock(side_effect=asyncio.CancelledError())
+            cancelled.disconnect = AsyncMock()
+
+            ready = AsyncMock()
+            ready.name = "ready"
+            ready.connect = AsyncMock()
+            ready.discover_tools = AsyncMock(return_value=[tool])
+            ready.disconnect = AsyncMock()
+
+            MockConn.side_effect = [cancelled, ready]
+
+            manager = MCPManager(configs)
+            with pytest.raises(asyncio.CancelledError):
+                await manager.connect_all()
+
+            cancelled.disconnect.assert_awaited_once()
+            ready.disconnect.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_disconnect_all(self):

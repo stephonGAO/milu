@@ -301,7 +301,7 @@ await pool.stop()
 }
 ```
 
-支持 stdio / streamable HTTP / SSE 三种传输，并行连接、错误隔离。双池设计：MCP 工具 schema 不挤占上下文——Agent 按需发现并激活休眠工具。高并发部署可整池共享一组 MCP 进程。
+支持 stdio / streamable HTTP / SSE 三种传输，并行连接、错误隔离。双池设计：MCP 工具 schema 不挤占上下文——Agent 按需发现并激活休眠工具。高并发部署可整池共享一组 MCP 进程。当前支持 MCP Python SDK `>=1.8,<2`。
 </details>
 
 <details>

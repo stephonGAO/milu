@@ -67,6 +67,8 @@ class MCPServerConnection:
         self._session = None
         self._tools: list[ToolWrapper] = []
         self._exit_stack: AsyncExitStack | None = None
+        self._lifecycle_task: asyncio.Task[None] | None = None
+        self._stop_event: asyncio.Event | None = None
 
     @property
     def name(self) -> str:
@@ -78,6 +80,45 @@ class MCPServerConnection:
 
     async def connect(self) -> None:
         """建立传输连接 + 创建会话 + 初始化。"""
+        existing_task = self._lifecycle_task
+        if existing_task is not None:
+            if not existing_task.done():
+                raise RuntimeError(f"MCP 服务器 [{self._config.name}] 已连接或正在连接")
+            self._clear_lifecycle(existing_task)
+
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[None] = loop.create_future()
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            self._run_lifecycle(ready, stop_event),
+            name=f"mcp-{self._config.name}-lifecycle",
+        )
+        self._lifecycle_task = task
+        self._stop_event = stop_event
+
+        try:
+            # shield 防止调用方取消时连带取消 ready；取消分支会显式停止 owner task，
+            # 让已经进入的 AnyIO 上下文仍在原 task 中退出。
+            await asyncio.shield(ready)
+        except asyncio.CancelledError:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            self._clear_lifecycle(task)
+            raise
+        except Exception:
+            await task
+            self._clear_lifecycle(task)
+            raise
+
+    async def _run_lifecycle(
+        self,
+        ready: asyncio.Future[None],
+        stop_event: asyncio.Event,
+    ) -> None:
+        """在单一 owner task 中进入并退出 MCP/AnyIO 异步上下文。"""
         self._exit_stack = AsyncExitStack()
         await self._exit_stack.__aenter__()
 
@@ -91,15 +132,27 @@ class MCPServerConnection:
             )
             await self._session.initialize()
             logger.info("MCP 服务器 [%s] 已连接", self._config.name)
+            ready.set_result(None)
+            await stop_event.wait()
         except ImportError:
-            await self._cleanup()
-            raise ImportError(
-                "未安装 mcp 包（核心依赖，通常已随 milu 安装）。"
-                "请修复: pip install 'mcp>=1.0.0'"
-            )
-        except Exception:
-            await self._cleanup()
+            if not ready.done():
+                ready.set_exception(
+                    ImportError(
+                        "未安装 mcp 包（核心依赖，通常已随 milu 安装）。"
+                        "请修复: pip install 'mcp>=1.8.0,<2'"
+                    )
+                )
+        except asyncio.CancelledError:
+            if not ready.done():
+                ready.cancel()
             raise
+        except Exception as exc:
+            if not ready.done():
+                ready.set_exception(exc)
+            else:
+                logger.warning("MCP [%s] 连接生命周期异常: %s", self._config.name, exc)
+        finally:
+            await self._cleanup()
 
     async def discover_tools(self) -> list[ToolWrapper]:
         """发现并转换 MCP 服务器上的工具。"""
@@ -139,8 +192,29 @@ class MCPServerConnection:
 
     async def disconnect(self) -> None:
         """断开连接并清理资源。"""
-        await self._cleanup()
+        task = self._lifecycle_task
+        stop_event = self._stop_event
+
+        if task is not None:
+            if stop_event is not None:
+                stop_event.set()
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                # owner task 仍会继续清理；保留引用以阻止清理完成前重新连接。
+                raise
+            else:
+                self._clear_lifecycle(task)
+        else:
+            # 兼容尚未通过 owner task 创建的测试/旧状态；正常连接不会走此分支。
+            await self._cleanup()
         logger.info("MCP 服务器 [%s] 已断开", self._config.name)
+
+    def _clear_lifecycle(self, task: asyncio.Task[None]) -> None:
+        """仅清除仍指向指定 owner task 的生命周期状态。"""
+        if self._lifecycle_task is task:
+            self._lifecycle_task = None
+            self._stop_event = None
 
     async def _create_transport(self):
         """根据配置创建对应的传输层（read, write）流。"""
@@ -170,15 +244,62 @@ class MCPServerConnection:
         return read, write
 
     async def _create_http_transport(self):
-        """创建 streamable_http 传输。"""
-        from mcp.client.streamable_http import streamable_http_client
+        """创建 streamable_http 传输。
 
-        transport_cm = streamable_http_client(
-            self._config.url,
-            headers=self._config.headers,
-        )
-        read, write, _ = await self._exit_stack.enter_async_context(transport_cm)
-        return read, write
+        mcp SDK 在此处有一次签名变更，同模块两个函数不可混用：
+          - 新 API `streamable_http_client(url, *, http_client=...)`：不收 headers，
+            headers 由调用方构造的 AsyncClient 携带；
+          - 旧 API `streamablehttp_client(url, headers=...)`：收 headers，1.2x 起已标
+            @deprecated（实现即转调新 API），将来会被移除。
+        优先走新 API（未废弃、且是唯一长期存在的路径），仅在老 SDK 上回退旧 API；
+        用能力探测兼容 mcp 1.x 内的签名变化（pyproject 要求 mcp>=1.8.0,<2）。
+        """
+        from mcp.client import streamable_http as _sh
+
+        new_api = getattr(_sh, "streamable_http_client", None)
+        if new_api is not None:
+            # 远程地址使用 SDK 自己的工厂，保持与当前 SDK 的 HTTP 客户端实现一致。
+            # 该工厂的默认值与旧 API 一致（follow_redirects + Timeout(30, read=300)），
+            # 故切换新 API 不改变超时行为。
+            factory = getattr(_sh, "create_mcp_http_client", None)
+            if factory is None:  # 极老/极新 SDK 未再导出时的兜底
+                from mcp.shared._httpx_utils import create_mcp_http_client as factory
+
+            # 外部传入的 client 由调用方负责关闭（SDK 只管理自己创建的那个），
+            # 因此挂进 exit_stack，随连接一起释放，避免每次连接泄漏一个 AsyncClient。
+            # 本机 HTTP MCP 不需要代理和 TLS。Windows 上 httpx 构造默认客户端时
+            # 读取系统代理与证书链可能耗时几十秒，即使目标只是 127.0.0.1；本机明文
+            # 地址显式关闭二者，将每个 Agent 的 MCP 建连从约 30 秒降到毫秒级。
+            from urllib.parse import urlparse
+
+            parsed = urlparse(self._config.url or "")
+            is_local_http = (
+                parsed.scheme == "http"
+                and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            )
+            if is_local_http:
+                import httpx
+
+                http_client = httpx.AsyncClient(
+                    headers=self._config.headers,
+                    timeout=httpx.Timeout(30.0, read=300.0),
+                    follow_redirects=True,
+                    trust_env=False,
+                    verify=False,
+                )
+            else:
+                http_client = factory(headers=self._config.headers)
+            await self._exit_stack.enter_async_context(http_client)
+            transport_cm = new_api(self._config.url, http_client=http_client)
+        else:
+            transport_cm = _sh.streamablehttp_client(
+                self._config.url,
+                headers=self._config.headers,
+            )
+
+        # 返回值元数可能变化（当前为 (read, write, get_session_id)），按下标取前两项。
+        streams = await self._exit_stack.enter_async_context(transport_cm)
+        return streams[0], streams[1]
 
     async def _create_sse_transport(self):
         """创建 SSE 传输。"""

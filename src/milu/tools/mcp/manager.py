@@ -38,13 +38,43 @@ class MCPManager:
 
         # 并行连接
         async def _connect_and_discover(conn: MCPServerConnection):
-            await conn.connect()
-            return await conn.discover_tools()
+            try:
+                await conn.connect()
+                return await conn.discover_tools()
+            except BaseException:
+                # discover_tools 失败时连接已经建立，必须通知 owner task 清理；
+                # connect 自身失败/取消时 disconnect 也是幂等的。
+                try:
+                    await conn.disconnect()
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "MCP 服务器 [%s] 失败后清理连接时出错: %s",
+                        conn.name,
+                        cleanup_error,
+                    )
+                raise
 
         results = await asyncio.gather(
             *[_connect_and_discover(c) for c in connections],
             return_exceptions=True,
         )
+
+        # gather(return_exceptions=True) 会把单个子任务的取消包装成返回值。
+        # 取消不能被当作普通连接失败吞掉；先关闭同期已成功建立的连接，再向上传播。
+        cancelled = next(
+            (result for result in results if isinstance(result, asyncio.CancelledError)),
+            None,
+        )
+        if cancelled is not None:
+            await asyncio.gather(
+                *[
+                    conn.disconnect()
+                    for conn, result in zip(connections, results)
+                    if not isinstance(result, BaseException)
+                ],
+                return_exceptions=True,
+            )
+            raise cancelled
 
         # 收集成功的连接和工具
         self._connections = []
@@ -52,7 +82,7 @@ class MCPManager:
         failures = []
 
         for conn, result in zip(connections, results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error(
                     "MCP 服务器 [%s] 连接失败: %s",
                     conn.name,

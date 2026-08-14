@@ -297,7 +297,7 @@ Four hard invariants: ≤1 agent per `(user, session)` · bounded instance count
 }
 ```
 
-stdio / streamable HTTP / SSE transports, parallel connection with error isolation, and a dormant-pool design: MCP tool schemas don't bloat the context — the agent discovers and activates them on demand. For high-concurrency deployments, one shared set of MCP processes can serve the entire pool.
+stdio / streamable HTTP / SSE transports, parallel connection with error isolation, and a dormant-pool design: MCP tool schemas don't bloat the context — the agent discovers and activates them on demand. For high-concurrency deployments, one shared set of MCP processes can serve the entire pool. Milu currently supports MCP Python SDK `>=1.8,<2`.
 </details>
 
 <details>
