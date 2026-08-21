@@ -266,11 +266,7 @@ class ChatGPTLLM(BaseLLM):
                     if usage_obj:
                         yield StreamChunk(
                             finish_reason="stop",
-                            usage=TokenUsage(
-                                prompt_tokens=getattr(usage_obj, "input_tokens", 0) or 0,
-                                completion_tokens=getattr(usage_obj, "output_tokens", 0) or 0,
-                                total_tokens=getattr(usage_obj, "total_tokens", 0) or 0,
-                            ),
+                            usage=TokenUsage.from_api_usage(usage_obj),
                         )
                     else:
                         yield StreamChunk(finish_reason="stop")
@@ -318,11 +314,7 @@ class ChatGPTLLM(BaseLLM):
             if usage_obj:
                 return StreamChunk(
                     finish_reason="stop",
-                    usage=TokenUsage(
-                        prompt_tokens=getattr(usage_obj, "input_tokens", 0) or 0,
-                        completion_tokens=getattr(usage_obj, "output_tokens", 0) or 0,
-                        total_tokens=getattr(usage_obj, "total_tokens", 0) or 0,
-                    ),
+                    usage=TokenUsage.from_api_usage(usage_obj),
                 )
             return StreamChunk(finish_reason="stop")
 

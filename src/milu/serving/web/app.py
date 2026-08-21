@@ -898,6 +898,7 @@ def create_app(
             "runs": len(rows),
             "ok": sum(1 for r in rows if r.get("status") == "ok"),
             "input_tokens": sum(r.get("input_tokens", 0) for r in rows),
+            "cached_input_tokens": sum(r.get("cached_input_tokens", 0) for r in rows),
             "output_tokens": sum(r.get("output_tokens", 0) for r in rows),
             "cost": costs,
             "p50_ms": durs[len(durs) // 2] if durs else 0,

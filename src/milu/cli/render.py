@@ -205,6 +205,8 @@ async def render_turn(
                     f"tokens={u.total_tokens}"
                     f" (prompt={u.prompt_tokens}, completion={u.completion_tokens})"
                 )
+                if u.cached_tokens:
+                    meta += f", cache_hit={u.cached_tokens}"
                 print(f"\n  {c('dim', '[' + meta + ']')}")
 
         # ── 错误 ──

@@ -37,6 +37,7 @@ def summarize_runs(rows: list[dict]) -> dict:
         "error": sum(1 for r in rows if r.get("status") == "error"),
         "interrupted": sum(1 for r in rows if r.get("status") == "interrupted"),
         "input_tokens": sum(r.get("input_tokens", 0) for r in rows),
+        "cached_input_tokens": sum(r.get("cached_input_tokens", 0) for r in rows),
         "output_tokens": sum(r.get("output_tokens", 0) for r in rows),
         "reasoning_tokens": sum(r.get("reasoning_tokens", 0) for r in rows),
         "cost": costs,
@@ -107,7 +108,8 @@ def timeseries(rows: list[dict], bucket: str = "hour",
         fmt = "%H:%M"
     starts = [cur - step * i for i in range(buckets - 1, -1, -1)]
     out = [{"ts": s.timestamp(), "label": s.strftime(fmt), "runs": 0, "ok": 0,
-            "error": 0, "input_tokens": 0, "output_tokens": 0} for s in starts]
+            "error": 0, "input_tokens": 0, "cached_input_tokens": 0,
+            "output_tokens": 0} for s in starts]
     if not starts:
         return out
     start0 = starts[0].timestamp()
@@ -126,5 +128,6 @@ def timeseries(rows: list[dict], bucket: str = "hour",
             elif status == "error":
                 b["error"] += 1
             b["input_tokens"] += r.get("input_tokens", 0)
+            b["cached_input_tokens"] += r.get("cached_input_tokens", 0)
             b["output_tokens"] += r.get("output_tokens", 0)
     return out

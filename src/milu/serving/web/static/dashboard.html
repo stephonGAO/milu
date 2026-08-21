@@ -649,7 +649,7 @@ function renderTrace(run, spans){
     const leftPct=Math.min(98,Math.max(0,off/total*100));
     const color=KIND_COLOR[s.kind]||"#8a93a6";
     let meta="";
-    if(s.kind==="generation") meta=`${fmtNum(a["gen_ai.usage.input_tokens"])}→${fmtNum(a["gen_ai.usage.output_tokens"])} tok`;
+    if(s.kind==="generation") meta=`${fmtNum(a["gen_ai.usage.input_tokens"])}→${fmtNum(a["gen_ai.usage.output_tokens"])} tok${a["milu.cached_input_tokens"]?` · cache ${fmtNum(a["milu.cached_input_tokens"])}`:""}`;
     else if(s.kind==="tool") meta=(s.status==="error"?"err":"ok")+(a["milu.output_len"]!=null?` · ${a["milu.output_len"]}B`:"");
     else if(s.kind==="guardrail") meta=a["milu.judge.fail_open"]?"fail-open":((a["milu.judge.verdicts"]||[]).map(v=>v.tool+"→"+v.decision).join(", "));
     else if(s.kind==="confirmation") meta=a["milu.decision"]||"";

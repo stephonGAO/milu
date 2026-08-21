@@ -220,6 +220,7 @@ def _merge_usage(total: TokenUsage, new: TokenUsage | None) -> TokenUsage:
     total.completion_tokens += new.completion_tokens
     total.total_tokens += new.total_tokens
     total.reasoning_tokens += new.reasoning_tokens
+    total.cached_tokens += new.cached_tokens
     return total
 
 
@@ -1029,8 +1030,12 @@ class Agent:
                     "milu.round": turn_count,
                     "milu.message_count": len(messages),
                 })
-                pre_usage = (total_usage.prompt_tokens, total_usage.completion_tokens,
-                             total_usage.reasoning_tokens)
+                pre_usage = (
+                    total_usage.prompt_tokens,
+                    total_usage.completion_tokens,
+                    total_usage.reasoning_tokens,
+                    total_usage.cached_tokens,
+                )
                 ttfc_recorded = False
                 finish_reason_seen: str | None = None
 
@@ -1201,6 +1206,9 @@ class Agent:
                 _reason_delta = total_usage.reasoning_tokens - pre_usage[2]
                 if _reason_delta:
                     llm_span.set_attr("milu.reasoning_tokens", _reason_delta)
+                _cached_delta = total_usage.cached_tokens - pre_usage[3]
+                if _cached_delta:
+                    llm_span.set_attr("milu.cached_input_tokens", _cached_delta)
                 if finish_reason_seen:
                     llm_span.set_attr("gen_ai.response.finish_reasons", [finish_reason_seen])
                 tracer.finish(llm_span)
@@ -1692,6 +1700,10 @@ class Agent:
                     if total_usage.reasoning_tokens:
                         run_span.set_attr(
                             "milu.reasoning_tokens", total_usage.reasoning_tokens
+                        )
+                    if total_usage.cached_tokens:
+                        run_span.set_attr(
+                            "milu.cached_input_tokens", total_usage.cached_tokens
                         )
                     tracer.finish(run_span, status=_status, error_type=_err_type)
                     if is_trace_owner and tracer.config.runs_index:

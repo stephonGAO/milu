@@ -100,11 +100,49 @@ class TestTokenUsage:
         assert usage.completion_tokens == 0
         assert usage.total_tokens == 0
         assert usage.reasoning_tokens == 0
+        assert usage.cached_tokens == 0
 
     def test_custom_values(self):
         usage = TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150, reasoning_tokens=30)
         assert usage.total_tokens == 150
         assert usage.reasoning_tokens == 30
+
+    def test_from_chat_completions_usage_with_cache_details(self):
+        from types import SimpleNamespace
+
+        usage = SimpleNamespace(
+            prompt_tokens=4096,
+            completion_tokens=128,
+            total_tokens=4224,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=3072),
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=64),
+        )
+        parsed = TokenUsage.from_api_usage(usage)
+        assert parsed.prompt_tokens == 4096
+        assert parsed.cached_tokens == 3072
+        assert parsed.reasoning_tokens == 64
+
+    def test_from_responses_usage_dict_with_cache_details(self):
+        parsed = TokenUsage.from_api_usage({
+            "input_tokens": 2048,
+            "output_tokens": 32,
+            "total_tokens": 2080,
+            "input_tokens_details": {"cached_tokens": 1024},
+            "output_tokens_details": {"reasoning_tokens": 16},
+        })
+        assert parsed.prompt_tokens == 2048
+        assert parsed.completion_tokens == 32
+        assert parsed.cached_tokens == 1024
+        assert parsed.reasoning_tokens == 16
+
+    def test_from_deepseek_usage_with_top_level_cache_hit(self):
+        parsed = TokenUsage.from_api_usage({
+            "prompt_tokens": 1000,
+            "completion_tokens": 20,
+            "total_tokens": 1020,
+            "prompt_cache_hit_tokens": 800,
+        })
+        assert parsed.cached_tokens == 800
 
 
 class TestStreamChunk:

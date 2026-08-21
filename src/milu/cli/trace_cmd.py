@@ -38,6 +38,11 @@ def _fmt_tokens(i, o) -> str:
     return f"{int(i or 0):,}→{int(o or 0):,}"
 
 
+def _fmt_cache(tokens) -> str:
+    count = int(tokens or 0)
+    return f" {c('dim', f'(cache {count:,})')}" if count else ""
+
+
 def _fmt_cost(amount, currency) -> str:
     if amount is None:
         return "—"
@@ -96,7 +101,8 @@ def _trace_list(args) -> int:
             f"{r.get('provider', '?')}/{r.get('model') or '?'}  {c('dim', r.get('mode', ''))}  "
             f"{_status_str(r.get('status'), r.get('error_type'))}  "
             f"{_fmt_dur(r.get('duration_ms'))}  "
-            f"{_fmt_tokens(r.get('input_tokens'), r.get('output_tokens'))} tok  "
+            f"{_fmt_tokens(r.get('input_tokens'), r.get('output_tokens'))} tok"
+            f"{_fmt_cache(r.get('cached_input_tokens'))}  "
             f"{_fmt_cost(r.get('cost_estimate'), r.get('cost_currency'))}  "
             + t("{t} 轮 / {k} 工具", t=r.get('turn_count', 0), k=r.get('tool_calls', 0))
         )
@@ -121,7 +127,8 @@ def _span_line(s: dict, total_ms) -> str:
         fin = a.get("gen_ai.response.finish_reasons")
         fin_str = c("dim", f"  →{fin[0]}") if fin else ""
         return (f"{name}  {rnd_str}{bar} {dur}{ttfc_str}  "
-                f"{_fmt_tokens(a.get('gen_ai.usage.input_tokens'), a.get('gen_ai.usage.output_tokens'))} tok{fin_str}")
+                f"{_fmt_tokens(a.get('gen_ai.usage.input_tokens'), a.get('gen_ai.usage.output_tokens'))} tok"
+                f"{_fmt_cache(a.get('milu.cached_input_tokens'))}{fin_str}")
     if kind == "tool":
         status = c("red", "err") if s.get("status") == "error" else c("green", "ok")
         size = a.get("milu.output_len")
@@ -149,7 +156,8 @@ def _span_line(s: dict, total_ms) -> str:
     if kind == "agent":
         return (f"{name}  {a.get('gen_ai.provider.name', '?')}/{a.get('gen_ai.request.model') or '?'}  "
                 f"{c('dim', a.get('milu.mode', ''))}  {dur}  "
-                f"{_fmt_tokens(a.get('gen_ai.usage.input_tokens'), a.get('gen_ai.usage.output_tokens'))} tok  "
+                f"{_fmt_tokens(a.get('gen_ai.usage.input_tokens'), a.get('gen_ai.usage.output_tokens'))} tok"
+                f"{_fmt_cache(a.get('milu.cached_input_tokens'))}  "
                 + t("{n} 轮", n=a.get('milu.turn_count', '?')))
     return f"{name}  {bar} {dur}"
 
@@ -218,6 +226,7 @@ _COMPARE_ROWS = [
     ("TTFT", lambda r: _fmt_dur(r.get("ttft_ms"))),
     (t("轮数"), lambda r: str(r.get("turn_count", 0))),
     ("input tok", lambda r: f"{r.get('input_tokens', 0):,}"),
+    ("cached tok", lambda r: f"{r.get('cached_input_tokens', 0):,}"),
     ("output tok", lambda r: f"{r.get('output_tokens', 0):,}"),
     (t("成本"), lambda r: _fmt_cost(r.get("cost_estimate"), r.get("cost_currency"))),
     (t("工具调用"), lambda r: f"{r.get('tool_calls', 0)} ({r.get('tool_errors', 0)} err)"),

@@ -106,7 +106,12 @@ class TestQwenChat:
             # chunk 3: 结束，带usage
             MockChunk(
                 choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
-                usage=MockUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                usage=MockUsage(
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                    prompt_tokens_details={"cached_tokens": 6},
+                ),
             ),
         ]
 
@@ -143,6 +148,7 @@ class TestQwenChat:
         assert results[2].usage.prompt_tokens == 10
         assert results[2].usage.completion_tokens == 5
         assert results[2].usage.total_tokens == 15
+        assert results[2].usage.cached_tokens == 6
 
     @pytest.mark.asyncio
     async def test_thinking_mode_mapping(self):

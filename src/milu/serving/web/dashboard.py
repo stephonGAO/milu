@@ -114,6 +114,7 @@ def span_to_event(span: dict, user_id: str | None) -> dict:
     if kind == "generation":
         ev["model"] = attrs.get("gen_ai.request.model")
         ev["input_tokens"] = attrs.get("gen_ai.usage.input_tokens")
+        ev["cached_input_tokens"] = attrs.get("milu.cached_input_tokens")
         ev["output_tokens"] = attrs.get("gen_ai.usage.output_tokens")
     elif kind == "tool":
         ev["tool"] = attrs.get("gen_ai.tool.name")

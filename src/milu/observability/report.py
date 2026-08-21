@@ -73,6 +73,7 @@ class RunReport:
     compactions: int
     subagent_runs: int
     trace_path: str | None = None   # trace.jsonl 所在路径（show/下钻定位用）
+    cached_input_tokens: int = 0    # input_tokens 的缓存命中子集
 
     def to_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -185,6 +186,7 @@ def build_run_report(
     input_tokens = _sum_tokens("gen_ai.usage.input_tokens")
     output_tokens = _sum_tokens("gen_ai.usage.output_tokens")
     reasoning_tokens = _sum_tokens("milu.reasoning_tokens")
+    cached_input_tokens = _sum_tokens("milu.cached_input_tokens")
 
     # TTFT：最早开始的 generation span 的首 chunk 延迟（秒 → 毫秒）
     ttft_ms = None
@@ -212,8 +214,13 @@ def build_run_report(
     cost = attrs.get("milu.cost_estimate")
     currency = attrs.get("milu.cost_currency")
     if cost is None:
-        est = estimate_cost(model, input_tokens, output_tokens,
-                            getattr(tracer.config, "price_table", None))
+        est = estimate_cost(
+            model,
+            input_tokens,
+            output_tokens,
+            getattr(tracer.config, "price_table", None),
+            cached_input_tokens=cached_input_tokens,
+        )
         if est is not None:
             cost, currency = est
 
@@ -247,6 +254,7 @@ def build_run_report(
         compactions=sum(1 for s in spans if s.kind == "compaction"),
         subagent_runs=max(len(agents) - 1, 0),
         trace_path=str(trace_path) if trace_path else None,
+        cached_input_tokens=cached_input_tokens,
     )
 
 

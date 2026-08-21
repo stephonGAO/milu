@@ -2,7 +2,12 @@
 usage，单价查表估算；查不到价格返回 None（绝不静默给错数，展示层标"未配置价格"）。
 
 价格表结构（每百万 token 单价）：
-    {"deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY"}, ...}
+    {"deepseek-chat": {
+        "input": 2.0, "cached_input": 0.2, "output": 8.0, "currency": "CNY"
+    }, ...}
+
+``cached_input`` 是缓存命中输入 token 的单价。若本次确有缓存命中而价格表未配置
+该档价格，返回 None，避免仍按普通输入单价静默高估成本。
 
 匹配规则：模型名小写后先精确命中，再按「最长前缀」匹配
 （如 qwen-plus-latest → qwen-plus）。用户表（config.json
@@ -17,13 +22,25 @@ from __future__ import annotations
 # 仅作开箱即有数的示例；生产使用请在 config.json observability.price_table 覆盖。
 BUILTIN_PRICE_TABLE: dict[str, dict] = {
     # 国内厂商
-    "deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY"},
-    "qwen-turbo": {"input": 0.3, "output": 0.6, "currency": "CNY"},
-    "qwen-plus": {"input": 0.8, "output": 2.0, "currency": "CNY"},
-    "qwen-max": {"input": 2.4, "output": 9.6, "currency": "CNY"},
+    "deepseek-chat": {
+        "input": 2.0, "cached_input": 0.2, "output": 8.0, "currency": "CNY",
+    },
+    "qwen-turbo": {
+        "input": 0.3, "cached_input": 0.06, "output": 0.6, "currency": "CNY",
+    },
+    "qwen-plus": {
+        "input": 0.8, "cached_input": 0.16, "output": 2.0, "currency": "CNY",
+    },
+    "qwen-max": {
+        "input": 2.4, "cached_input": 0.48, "output": 9.6, "currency": "CNY",
+    },
     # 海外厂商
-    "gpt-4o-mini": {"input": 0.15, "output": 0.6, "currency": "USD"},
-    "gpt-4o": {"input": 2.5, "output": 10.0, "currency": "USD"},
+    "gpt-4o-mini": {
+        "input": 0.15, "cached_input": 0.075, "output": 0.6, "currency": "USD",
+    },
+    "gpt-4o": {
+        "input": 2.5, "cached_input": 1.25, "output": 10.0, "currency": "USD",
+    },
     "claude-sonnet": {"input": 3.0, "output": 15.0, "currency": "USD"},
 }
 
@@ -57,14 +74,22 @@ def estimate_cost(
     input_tokens: int,
     output_tokens: int,
     override: dict | None = None,
+    *,
+    cached_input_tokens: int = 0,
 ) -> tuple[float, str] | None:
     """估算一次运行的成本。返回 (金额, 币种)；价格缺失/数据异常返回 None。"""
     entry = resolve_price(model, override)
     if entry is None:
         return None
     try:
+        input_count = max(int(input_tokens or 0), 0)
+        cached_count = min(max(int(cached_input_tokens or 0), 0), input_count)
+        cached_price = entry.get("cached_input")
+        if cached_count and cached_price is None:
+            return None
         cost = (
-            (input_tokens or 0) / 1_000_000 * float(entry["input"])
+            (input_count - cached_count) / 1_000_000 * float(entry["input"])
+            + cached_count / 1_000_000 * float(cached_price or 0)
             + (output_tokens or 0) / 1_000_000 * float(entry["output"])
         )
         return round(cost, 6), str(entry.get("currency", "CNY"))

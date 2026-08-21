@@ -34,12 +34,13 @@ def _function_call_done(call_id: str, name: str, arguments: str, output_index: i
     )
 
 
-def _completed(input_tokens=10, output_tokens=5, total_tokens=15):
+def _completed(input_tokens=10, output_tokens=5, total_tokens=15, cached_tokens=0):
     """模拟 response.completed 事件"""
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,
+        input_tokens_details=SimpleNamespace(cached_tokens=cached_tokens),
     )
     response = SimpleNamespace(usage=usage)
     return SimpleNamespace(type="response.completed", response=response)
@@ -316,6 +317,13 @@ class TestParseEvent:
         assert chunk.usage.prompt_tokens == 100
         assert chunk.usage.completion_tokens == 50
         assert chunk.usage.total_tokens == 150
+
+    def test_completed_with_cached_input_usage(self):
+        llm = ChatGPTLLM(api_key="test", model="gpt-4o")
+        chunk = llm._parse_event(_completed(4096, 50, 4146, cached_tokens=3072))
+        assert chunk is not None
+        assert chunk.usage is not None
+        assert chunk.usage.cached_tokens == 3072
 
     def test_noop_events_return_none(self):
         llm = ChatGPTLLM(api_key="test", model="gpt-4o")

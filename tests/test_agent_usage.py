@@ -62,11 +62,11 @@ async def test_usage_summed_across_tool_turns():
                                "function": type("f", (), {"name": "noop", "arguments": "{}"})()})()
             ])
             yield StreamChunk(finish_reason="tool_calls")
-            yield StreamChunk(usage=TokenUsage(8, 2, 10))
+            yield StreamChunk(usage=TokenUsage(8, 2, 10, cached_tokens=4))
         else:
             # 第二轮：基于工具结果回复 + 收尾 usage
             yield StreamChunk(content="done", finish_reason="stop")
-            yield StreamChunk(usage=TokenUsage(20, 5, 25))
+            yield StreamChunk(usage=TokenUsage(20, 5, 25, cached_tokens=12))
 
     llm = AsyncMock()
     llm.chat = chat
@@ -88,3 +88,4 @@ async def test_usage_summed_across_tool_turns():
     assert done is not None
     assert done.turn_count == 2
     assert done.total_usage.total_tokens == 35  # 10 + 25
+    assert done.total_usage.cached_tokens == 16

@@ -24,7 +24,8 @@ def _run(**kw):
         started_at=1_700_000_000.0,
         provider="qwen", model="qwen-plus", mode="auto",
         session_id=None, user_id="default", status="ok", error_type=None,
-        duration_ms=1000.0, turn_count=1, input_tokens=100, output_tokens=50,
+        duration_ms=1000.0, turn_count=1, input_tokens=100, cached_input_tokens=0,
+        output_tokens=50,
         reasoning_tokens=0, cost_estimate=0.001, cost_currency="CNY",
         ttft_ms=200.0, llm_time_ms=800.0, tool_time_ms=100.0, judge_time_ms=0.0,
         wait_time_ms=0.0, tool_calls=2, tool_errors=0, judge_denies=0,
@@ -47,8 +48,10 @@ def test_percentile():
 
 def test_summarize_runs_basic():
     rows = [
-        _run(status="ok", input_tokens=100, output_tokens=50, cost_estimate=0.002),
-        _run(status="error", input_tokens=200, output_tokens=80, cost_estimate=0.003,
+        _run(status="ok", input_tokens=100, cached_input_tokens=40, output_tokens=50,
+             cost_estimate=0.002),
+        _run(status="error", input_tokens=200, cached_input_tokens=60, output_tokens=80,
+             cost_estimate=0.003,
              fail_opens=1, judge_denies=1, tool_errors=1),
     ]
     s = summarize_runs(rows)
@@ -56,6 +59,7 @@ def test_summarize_runs_basic():
     assert s["ok"] == 1
     assert s["error"] == 1
     assert s["input_tokens"] == 300
+    assert s["cached_input_tokens"] == 100
     assert s["output_tokens"] == 130
     assert s["cost"]["CNY"] == pytest.approx(0.005)
     assert s["fail_opens"] == 1
@@ -96,7 +100,7 @@ def test_group_stats_by_model_and_provider():
 def test_timeseries_buckets_deterministic():
     now = 1_700_003_600.0  # 固定基准便于断言
     rows = [
-        _run(started_at=now - 30),       # 当前小时桶
+        _run(started_at=now - 30, cached_input_tokens=25),  # 当前小时桶
         _run(started_at=now - 3600 - 30),  # 上一个小时桶
         _run(started_at=now - 999999),   # 超出窗口，应被忽略
     ]
@@ -105,6 +109,7 @@ def test_timeseries_buckets_deterministic():
     assert sum(b["runs"] for b in series) == 2
     # 最新桶（最后一个）应含 now-30 那条
     assert series[-1]["runs"] == 1
+    assert series[-1]["cached_input_tokens"] == 25
 
 
 # ── 池活跃快照 ────────────────────────────────────────────
@@ -211,6 +216,7 @@ def test_span_to_event_generation():
         "attributes": {
             "gen_ai.request.model": "qwen-plus",
             "gen_ai.usage.input_tokens": 100,
+            "milu.cached_input_tokens": 80,
             "gen_ai.usage.output_tokens": 40,
         },
     }
@@ -219,6 +225,7 @@ def test_span_to_event_generation():
     assert ev["user_id"] == "alice"
     assert ev["model"] == "qwen-plus"
     assert ev["input_tokens"] == 100
+    assert ev["cached_input_tokens"] == 80
     assert ev["output_tokens"] == 40
 
 

@@ -131,11 +131,7 @@ class MiniMaxLLM(BaseLLM):
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 result.tool_calls = delta.tool_calls
         if chunk.usage:
-            result.usage = TokenUsage(
-                prompt_tokens=chunk.usage.prompt_tokens or 0,
-                completion_tokens=chunk.usage.completion_tokens or 0,
-                total_tokens=chunk.usage.total_tokens or 0,
-            )
+            result.usage = TokenUsage.from_api_usage(chunk.usage)
         return result
 
 

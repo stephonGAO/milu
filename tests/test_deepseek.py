@@ -103,7 +103,12 @@ class TestDeepSeekChat:
             ),
             MockChunk(
                 choices=[MockChoice(delta=MockDelta(), finish_reason="stop")],
-                usage=MockUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+                usage=MockUsage(
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                    prompt_cache_hit_tokens=8,
+                ),
             ),
         ]
 
@@ -132,6 +137,7 @@ class TestDeepSeekChat:
         assert results[2].usage.prompt_tokens == 10
         assert results[2].usage.completion_tokens == 5
         assert results[2].usage.total_tokens == 15
+        assert results[2].usage.cached_tokens == 8
 
     @pytest.mark.asyncio
     async def test_thinking_enabled_uses_thinking_type_and_reasoning_effort(self):

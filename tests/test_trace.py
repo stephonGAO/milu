@@ -151,6 +151,36 @@ async def test_trace_basic_structure():
     assert t["status"] == "ok" and t["duration_ms"] is not None
 
 
+async def test_trace_captures_cached_input_tokens():
+    async def chat(*args, **kwargs):
+        yield StreamChunk(content="完成", finish_reason="stop")
+        yield StreamChunk(usage=TokenUsage(
+            prompt_tokens=1000,
+            completion_tokens=50,
+            total_tokens=1050,
+            cached_tokens=800,
+        ))
+
+    llm = AsyncMock()
+    llm.chat = chat
+    llm.model = "test-model"
+    cfg = TraceConfig(price_table={
+        "test-model": {
+            "input": 2.0,
+            "cached_input": 0.2,
+            "output": 8.0,
+            "currency": "CNY",
+        },
+    })
+    await _consume(_make_agent(llm, trace=cfg))
+
+    report = load_run_index()[0]
+    assert report["cached_input_tokens"] == 800
+    spans = load_trace(report["trace_path"], report["trace_id"])
+    generation = next(s for s in spans if s["kind"] == "generation")
+    assert generation["attributes"]["milu.cached_input_tokens"] == 800
+
+
 async def test_trace_with_session_writes_into_session_dir():
     agent = _make_agent(make_llm_with_tool(), session_enabled=True)
     await _consume(agent)
@@ -401,6 +431,41 @@ def test_estimate_cost():
     assert estimate_cost("unknown-model-xyz", 100, 100) is None
 
 
+def test_estimate_cost_uses_cached_input_price():
+    prices = {
+        "test-model": {
+            "input": 2.0,
+            "cached_input": 0.2,
+            "output": 8.0,
+            "currency": "CNY",
+        },
+    }
+    cost = estimate_cost(
+        "test-model",
+        1_000_000,
+        100_000,
+        prices,
+        cached_input_tokens=800_000,
+    )
+    assert cost is not None
+    amount, currency = cost
+    assert amount == pytest.approx(0.4 + 0.16 + 0.8)
+    assert currency == "CNY"
+
+
+def test_estimate_cost_requires_cached_price_when_cache_hit():
+    prices = {
+        "test-model": {"input": 2.0, "output": 8.0, "currency": "CNY"},
+    }
+    assert estimate_cost(
+        "test-model",
+        1000,
+        100,
+        prices,
+        cached_input_tokens=800,
+    ) is None
+
+
 def test_run_report_cost_none_for_unknown_model(tmp_path):
     tracer = Tracer(TraceConfig(), [JsonlSink(tmp_path / "t.jsonl")])
     root = tracer.start("invoke_agent", "agent")
@@ -413,6 +478,36 @@ def test_run_report_cost_none_for_unknown_model(tmp_path):
     report = build_run_report(tracer, root)
     assert report.cost_estimate is None and report.cost_currency is None
     assert report.input_tokens == 50 and report.output_tokens == 5
+
+
+def test_run_report_aggregates_cached_tokens_and_cost(tmp_path):
+    cfg = TraceConfig(price_table={
+        "test-model": {
+            "input": 2.0,
+            "cached_input": 0.2,
+            "output": 8.0,
+            "currency": "CNY",
+        },
+    })
+    tracer = Tracer(cfg, [JsonlSink(tmp_path / "t.jsonl")])
+    root = tracer.start("invoke_agent", "agent")
+    root.set_attrs({
+        "gen_ai.request.model": "test-model",
+        "gen_ai.provider.name": "test",
+        "milu.mode": "auto",
+    })
+    gen = tracer.start("chat test-model", "generation")
+    gen.set_attrs({
+        "gen_ai.usage.input_tokens": 1000,
+        "gen_ai.usage.output_tokens": 100,
+        "milu.cached_input_tokens": 800,
+    })
+    tracer.finish(gen)
+    tracer.finish(root)
+
+    report = build_run_report(tracer, root)
+    assert report.cached_input_tokens == 800
+    assert report.cost_estimate == pytest.approx((200 * 2.0 + 800 * 0.2 + 100 * 8.0) / 1e6)
 
 
 async def test_run_report_cost_with_price_table():

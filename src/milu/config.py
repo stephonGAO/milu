@@ -142,7 +142,9 @@ def _builtin_defaults() -> dict:
             "enabled": True,
             **{k: getattr(trace_defaults, k) for k in _OBSERVABILITY_KEYS},
             # 模型价格表覆盖（每百万 token 单价；用户表优先于内置示例表），如
-            # {"deepseek-chat": {"input": 2.0, "output": 8.0, "currency": "CNY"}}
+            # {"deepseek-chat": {
+            #     "input": 2.0, "cached_input": 0.2, "output": 8.0, "currency": "CNY"
+            # }}
             "price_table": {},
         },
         "security": {
