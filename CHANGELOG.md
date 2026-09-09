@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-09-09
+
+本版本为 0.5.x 兼容的维护性补丁，新增缓存命中输入 token 的完整统计与成本核算，
+覆盖 Provider、Agent、运行追踪、CLI 和 Web 可观测界面。
+
+### 新增
+
+- **缓存输入 token 统一统计**：`TokenUsage` 新增 `cached_tokens`，统一解析 OpenAI
+  Responses、Chat Completions、DeepSeek 及兼容网关返回的缓存明细；九个 Provider
+  共用同一解析路径，并在多轮 Agent 运行中正确累加。
+- **全链路可观测展示**：CLI 对话元信息、trace 列表/详情/对比、Web 对话页和监控大屏
+  均展示缓存命中量；运行索引、时序聚合与实时事件同步记录 `cached_input_tokens`。
+- **缓存价格成本核算**：价格表支持每百万 token 的 `cached_input` 单价，成本按普通输入、
+  缓存输入和输出分别计算；存在缓存命中但未配置缓存价时返回“未配置价格”，避免误估。
+
+### 工程
+
+- 补充缓存 usage 解析、跨轮累加、trace 聚合、成本计算与监控接口的回归测试，并更新
+  配置模板及可观测性设计文档。
+
 ## [0.5.2] - 2026-08-14
 
 本版本为 0.5.x 兼容的维护性补丁，重点修复 MCP Streamable HTTP 的连接与清理，
