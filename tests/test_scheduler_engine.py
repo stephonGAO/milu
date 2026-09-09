@@ -411,13 +411,15 @@ def test_engine_thread_runs_while_main_thread_blocked(tmp_path: Path):
         target=lambda: asyncio.run(engine.start()), daemon=True
     ).start()
 
+    records = []
     deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline and not engine.ran:
+    while time.monotonic() < deadline and not records:
         time.sleep(0.05)  # 主线程纯同步阻塞，不跑任何事件循环
+        records = _read_outbox(tmp_path, "alice")
     engine.stop()
 
     assert engine.ran == ["t"], "主线程阻塞期间引擎线程未执行到期任务"
-    assert _read_outbox(tmp_path, "alice")[0]["ok"] is True
+    assert records and records[0]["ok"] is True, "引擎线程执行结果未写入 outbox"
 
 
 @pytest.mark.asyncio
